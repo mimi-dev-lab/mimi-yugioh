@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ygo-dark: #1a1a2e;
+  --ygo-darker: #0f0f1a;
+  --ygo-accent: #eab308;
+}
+
+body {
+  background-color: var(--ygo-darker);
+  color: #f5f5f5;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* 卡牌悬停效果 */
+.card-hover {
+  @apply transition-all duration-200 ease-out;
+}
+
+.card-hover:hover {
+  @apply -translate-y-1 shadow-xl shadow-yellow-500/20;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--ygo-darker);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}

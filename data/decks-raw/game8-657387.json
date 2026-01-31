@@ -1,0 +1,45 @@
+{
+  "id": "game8-657387",
+  "name_jp": "白き森センチュリオンデッキ",
+  "source_url": "https://game8.jp/yugioh-masterduel/657387",
+  "evaluation": {
+    "tier": "ランク外",
+    "deck_type": "展開型",
+    "difficulty": "普通",
+    "cost": "",
+    "features": [
+      "光属性魔法使いサポートを共有できる",
+      "白き森展開からセンチュリオンに繋げられる",
+      "相手ターンにシンクロ召喚する手段を多く持つ",
+      "白き森デッキの"
+    ]
+  },
+  "recipe": {
+    "main_deck": [],
+    "extra_deck": []
+  },
+  "sections": [
+    {
+      "title": "対策と手札誘発",
+      "blocks": [
+        {
+          "type": "text",
+          "content": "【遊戯王】｜ゲームエイト"
+        },
+        {
+          "type": "text",
+          "content": "マスターデュエル攻略wiki｜遊戯王"
+        },
+        {
+          "type": "text",
+          "content": "{:name=&gt;nil, :class=&gt;&quot;c-search__submitHidden&quot;, :type=&gt;&quot;submit&quot;, :tabindex=&gt;&quot;-1&quot;}"
+        },
+        {
+          "type": "text",
+          "content": "最終更新日：:date"
+        }
+      ]
+    }
+  ],
+  "scraped_at": "2026-01-31T16:31:19.275Z"
+}

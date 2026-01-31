@@ -1,0 +1,46 @@
+{
+  "id": "game8-424027",
+  "name_jp": "電脳堺デッキ",
+  "source_url": "https://game8.jp/yugioh-masterduel/424027",
+  "evaluation": {
+    "tier": "ランク外",
+    "deck_type": "展開型",
+    "difficulty": "難しい",
+    "cost": "",
+    "features": [
+      "手札からの展開に優れたデッキ",
+      "墓地を増やす手段が多く利用しやすい",
+      "手札誘発で動きが止められにくい",
+      "監修者からの一言",
+      "監修者からの一言"
+    ]
+  },
+  "recipe": {
+    "main_deck": [],
+    "extra_deck": []
+  },
+  "sections": [
+    {
+      "title": "対策と手札誘発",
+      "blocks": [
+        {
+          "type": "text",
+          "content": "｜展開【遊戯王】｜ゲームエイト"
+        },
+        {
+          "type": "text",
+          "content": "マスターデュエル攻略wiki｜遊戯王"
+        },
+        {
+          "type": "text",
+          "content": "{:name=&gt;nil, :class=&gt;&quot;c-search__submitHidden&quot;, :type=&gt;&quot;submit&quot;, :tabindex=&gt;&quot;-1&quot;}"
+        },
+        {
+          "type": "text",
+          "content": "最終更新日：:date"
+        }
+      ]
+    }
+  ],
+  "scraped_at": "2026-01-31T16:31:20.271Z"
+}
