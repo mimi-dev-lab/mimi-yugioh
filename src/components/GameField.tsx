@@ -15,11 +15,12 @@ interface GameFieldProps {
   cards: FieldCard[]
   title?: string
   description?: string
+  onCardClick?: (card: any) => void
 }
 
 const R2_BASE = 'https://pub-1aabbe3759be4cbb807f84c6b342a168.r2.dev'
 
-export default function GameField({ cards, title, description }: GameFieldProps) {
+export default function GameField({ cards, title, description, onCardClick }: GameFieldProps) {
   // 按区域分组
   const monsterZone = Array(5).fill(null)
   const spellZone = Array(5).fill(null)
@@ -41,24 +42,24 @@ export default function GameField({ cards, title, description }: GameFieldProps)
   const renderSlot = (card: FieldCard | null, type: string, index: number) => {
     if (card && card.id) {
       return (
-        <div 
+        <button 
           key={`${type}-${index}`}
-          className="relative group"
+          className="relative group cursor-pointer"
           title={card.name_cn || card.name}
+          onClick={() => onCardClick?.((card as any).card || card)}
         >
           <img
             src={`${R2_BASE}/cn/${card.id}.webp`}
             alt={card.name_cn || card.name}
-            className="w-12 h-16 md:w-14 md:h-20 object-cover rounded border-2 border-purple-500/50 shadow-lg shadow-purple-500/20"
+            className="w-12 h-16 md:w-14 md:h-20 object-cover rounded border-2 border-purple-500/50 shadow-lg shadow-purple-500/20 hover:border-purple-400 transition-colors"
             onError={(e) => {
               (e.target as HTMLImageElement).src = `https://images.ygoprodeck.com/images/cards_small/${card.id}.jpg`
             }}
           />
-          {/* Tooltip */}
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+          <p className="text-[8px] text-gray-400 text-center mt-0.5 truncate w-12 md:w-14">
             {card.name_cn || card.name}
-          </div>
-        </div>
+          </p>
+        </button>
       )
     }
     return (

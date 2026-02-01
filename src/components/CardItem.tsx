@@ -38,9 +38,9 @@ export default function CardItem({ card }: CardItemProps) {
     return colors[attr] || 'text-gray-400'
   }
 
-  // R2 存储的中文卡图
+  // 使用 API 返回的图片 URL，或构造默认 URL
   const R2_BASE = 'https://pub-1aabbe3759be4cbb807f84c6b342a168.r2.dev'
-  const imageUrl = `${R2_BASE}/cn/${card.id}.webp`
+  const imageUrl = card.image_url || `${R2_BASE}/cn/${card.id}.webp`
 
   const frame = getCardFrame(card.type)
   const attributeCN = getAttributeCN(card.attribute)

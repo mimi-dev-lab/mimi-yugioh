@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Layers, Zap, ExternalLink, Loader2, Target, Lightbulb, Swords, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, Layers, Zap, ExternalLink, Loader2, Target, Lightbulb, Swords, ChevronDown, ChevronUp, BarChart3, ThumbsUp, ThumbsDown, Coins, Gauge, Sparkles } from 'lucide-react'
 import CardModal from '../components/CardModal'
 
 interface DeckCard {
@@ -19,6 +19,15 @@ interface Combo {
   result: string
 }
 
+interface Evaluation {
+  tier: string
+  type: string
+  difficulty: string
+  cost: string
+  pros: string[]
+  cons: string[]
+}
+
 interface Deck {
   id: string
   name: string
@@ -29,6 +38,7 @@ interface Deck {
   author: string
   source_url: string
   version: string
+  evaluation?: Evaluation
   philosophy: {
     core_concept: string
     win_condition: string
@@ -59,7 +69,7 @@ export default function DeckDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [expandedCombo, setExpandedCombo] = useState<number | null>(0)
   const [activeTab, setActiveTab] = useState<'basic' | 'advanced' | 'deckbuilding'>('basic')
-  const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
+  const [selectedCard, setSelectedCard] = useState<any>(null)
 
   useEffect(() => {
     async function loadDeck() {
@@ -149,6 +159,99 @@ export default function DeckDetailPage() {
         )}
       </div>
 
+      {/* Evaluation - 卡组评测 */}
+      {deck.evaluation && (
+        <div className="p-4 bg-gradient-to-r from-purple-900/30 to-ygo-dark rounded-xl border border-purple-500/30 mb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 className="text-purple-400" size={20} />
+            <h2 className="text-lg font-bold text-white">卡组评测</h2>
+          </div>
+          
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="p-3 bg-gray-800/50 rounded-lg">
+              <div className="flex items-center gap-2 text-gray-400 text-sm mb-1">
+                <Gauge size={14} />
+                环境定位
+              </div>
+              <div className={`text-lg font-bold ${
+                deck.evaluation.tier.includes('T1') ? 'text-red-400' :
+                deck.evaluation.tier.includes('T2') ? 'text-orange-400' :
+                deck.evaluation.tier.includes('T3') ? 'text-yellow-400' :
+                'text-gray-400'
+              }`}>
+                {deck.evaluation.tier}
+              </div>
+            </div>
+            <div className="p-3 bg-gray-800/50 rounded-lg">
+              <div className="flex items-center gap-2 text-gray-400 text-sm mb-1">
+                <Sparkles size={14} />
+                卡组类型
+              </div>
+              <div className="text-lg font-bold text-blue-400">{deck.evaluation.type}</div>
+            </div>
+            <div className="p-3 bg-gray-800/50 rounded-lg">
+              <div className="flex items-center gap-2 text-gray-400 text-sm mb-1">
+                <Target size={14} />
+                操作难度
+              </div>
+              <div className={`text-lg font-bold ${
+                deck.evaluation.difficulty === '简单' ? 'text-green-400' :
+                deck.evaluation.difficulty === '普通' ? 'text-blue-400' :
+                'text-red-400'
+              }`}>
+                {deck.evaluation.difficulty}
+              </div>
+            </div>
+            <div className="p-3 bg-gray-800/50 rounded-lg">
+              <div className="flex items-center gap-2 text-gray-400 text-sm mb-1">
+                <Coins size={14} />
+                构筑成本
+              </div>
+              <div className={`text-lg font-bold ${
+                deck.evaluation.cost === '低' ? 'text-green-400' :
+                deck.evaluation.cost === '中' ? 'text-yellow-400' :
+                'text-red-400'
+              }`}>
+                {deck.evaluation.cost}
+              </div>
+            </div>
+          </div>
+
+          {/* Pros & Cons */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="p-3 bg-green-500/10 rounded-lg border border-green-500/20">
+              <div className="flex items-center gap-2 mb-2">
+                <ThumbsUp className="text-green-400" size={16} />
+                <span className="text-green-400 font-medium">优点</span>
+              </div>
+              <ul className="space-y-1.5">
+                {deck.evaluation.pros.map((pro, i) => (
+                  <li key={i} className="flex gap-2 text-gray-300 text-sm">
+                    <span className="text-green-400 flex-shrink-0">✓</span>
+                    <span>{pro}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="p-3 bg-red-500/10 rounded-lg border border-red-500/20">
+              <div className="flex items-center gap-2 mb-2">
+                <ThumbsDown className="text-red-400" size={16} />
+                <span className="text-red-400 font-medium">缺点</span>
+              </div>
+              <ul className="space-y-1.5">
+                {deck.evaluation.cons.map((con, i) => (
+                  <li key={i} className="flex gap-2 text-gray-300 text-sm">
+                    <span className="text-red-400 flex-shrink-0">✗</span>
+                    <span>{con}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Philosophy */}
       <div className="p-4 bg-gradient-to-r from-ygo-dark to-gray-900 rounded-xl border border-gray-700 mb-6">
         <div className="flex items-center gap-2 mb-3">
@@ -184,7 +287,7 @@ export default function DeckDetailPage() {
             {deck.main_deck.map((card, i) => (
               <button 
                 key={i}
-                onClick={() => setSelectedCardId(card.id)}
+                onClick={() => setSelectedCard(card)}
                 className="w-full flex items-center gap-3 p-2 bg-gray-800/50 rounded-lg hover:bg-gray-800 transition-colors text-left"
               >
                 <img 
@@ -216,7 +319,7 @@ export default function DeckDetailPage() {
             {deck.extra_deck.map((card, i) => (
               <button 
                 key={i}
-                onClick={() => setSelectedCardId(card.id)}
+                onClick={() => setSelectedCard(card)}
                 className="w-full flex items-center gap-3 p-2 bg-gray-800/50 rounded-lg hover:bg-gray-800 transition-colors text-left"
               >
                 <img 
@@ -357,7 +460,7 @@ export default function DeckDetailPage() {
       </div>
 
       {/* Card Modal */}
-      <CardModal cardId={selectedCardId} onClose={() => setSelectedCardId(null)} />
+      <CardModal card={selectedCard} onClose={() => setSelectedCard(null)} />
     </div>
   )
 }

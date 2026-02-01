@@ -12,37 +12,13 @@ const categories = [
 // 卡组数据
 const sampleDecks = [
   {
-    id: 'sky-striker',
-    name: '闪刀姬',
-    category: 'T1',
-    description: '以「人」为核心，变换装备应对不同情况的控制型卡组。Zero支援后大幅强化！',
+    id: 'white-forest-centurion',
+    name: '白森林百夫长',
+    category: 'T3',
+    description: '结合「白森林」资源循环与「百夫长」加速同调的混合型卡组，先攻压制力极强。',
     cardCount: 40,
     extraCount: 15,
-    cover: 'https://images.ygoprodeck.com/images/cards_small/26077387.jpg',
-  },
-  {
-    id: 'branded-despia',
-    name: '烙印深渊',
-    category: '硬核',
-    description: '强力的融合卡组，以烙印系列为核心',
-    cardCount: 40,
-    extraCount: 15,
-  },
-  {
-    id: 'snake-eye',
-    name: '蛇眼',
-    category: '硬核',
-    description: '当前环境的Tier1卡组，具有极强的展开能力',
-    cardCount: 40,
-    extraCount: 15,
-  },
-  {
-    id: 'labrynth',
-    name: '迷宫城',
-    category: '娱乐',
-    description: '以陷阱为核心的控制卡组，适合喜欢慢节奏的玩家',
-    cardCount: 40,
-    extraCount: 15,
+    cover: 'https://images.ygoprodeck.com/images/cards_small/10178001.jpg',
   },
 ]
 
@@ -80,7 +56,7 @@ export default function DecksPage() {
         {sampleDecks.map((deck) => (
           <Link
             key={deck.id}
-            to={`/decks/${deck.id}`}
+            to={`/v2/${deck.id}`}
             className="group p-4 bg-ygo-dark rounded-xl border border-gray-700 hover:border-ygo-accent/50 transition-all duration-300"
           >
             {/* Deck Cover */}

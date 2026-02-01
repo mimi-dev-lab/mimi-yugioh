@@ -1,0 +1,265 @@
+.container {
+  background: linear-gradient(180deg, #0a0a12 0%, #12121f 100%);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  transition: all 0.3s ease;
+}
+
+.container.fullscreen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 99999 !important;
+  border-radius: 0 !important;
+  border: none !important;
+  background: #0a0a12 !important;
+  overflow: hidden !important;
+}
+
+.flowWrapper {
+  height: 500px;
+  background: linear-gradient(180deg, #08080e 0%, #0d0d15 100%);
+}
+
+.container.fullscreen .flowWrapper {
+  height: 100vh !important;
+  width: 100vw !important;
+}
+
+/* Panel */
+.panel {
+  display: flex;
+  gap: 8px;
+}
+
+.fullscreenBtn {
+  background: rgba(139, 92, 246, 0.8);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.fullscreenBtn:hover {
+  background: rgba(139, 92, 246, 1);
+  transform: scale(1.05);
+}
+
+/* 图例 */
+.legend {
+  display: flex;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 8px 12px;
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.legendItem span {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* Handle 样式 */
+.handle {
+  width: 8px !important;
+  height: 8px !important;
+  background: #6b7280 !important;
+  border: none !important;
+  opacity: 0;
+}
+
+.handleSmall {
+  width: 6px !important;
+  height: 6px !important;
+  background: #6b7280 !important;
+  border: none !important;
+  opacity: 0;
+}
+
+/* 怪兽卡节点 */
+.monsterNode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px;
+  background: linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%);
+  border-radius: 12px;
+  border: 2px solid #4b5563;
+  transition: all 0.2s;
+  min-width: 100px;
+}
+
+.monsterNode:hover {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+  transform: scale(1.02);
+}
+
+.monsterImage {
+  width: 80px;
+  height: 117px;
+  object-fit: cover;
+  border-radius: 6px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.monsterInfo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 6px;
+  gap: 2px;
+}
+
+.monsterName {
+  font-size: 11px;
+  color: white;
+  font-weight: 600;
+  text-align: center;
+}
+
+.monsterLevel {
+  font-size: 10px;
+  color: #fbbf24;
+}
+
+.actionTag {
+  font-size: 9px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.actionTag.synchro {
+  background: rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+}
+
+.actionTag.link {
+  background: rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+}
+
+.actionTag.normal {
+  background: rgba(34, 197, 94, 0.3);
+  color: #4ade80;
+}
+
+.actionTag.special {
+  background: rgba(234, 179, 8, 0.3);
+  color: #facc15;
+}
+
+.actionTag.revive {
+  background: rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+/* 魔陷卡节点 */
+.spellNode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px;
+  background: linear-gradient(180deg, #1e1e30 0%, #12121f 100%);
+  border-radius: 8px;
+  border: 1px solid #4b5563;
+  transition: all 0.2s;
+}
+
+.spellNode:hover {
+  border-color: #06b6d4;
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.3);
+}
+
+.spellNode.cost {
+  border-color: #ef4444;
+}
+
+.spellNode.cost:hover {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+}
+
+.spellNode.search {
+  border-color: #06b6d4;
+}
+
+.spellImage {
+  width: 50px;
+  height: 73px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.spellName {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-top: 4px;
+  text-align: center;
+}
+
+.roleTag {
+  font-size: 8px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  margin-top: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* 合并节点 */
+.mergeNode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #2d1f4e 0%, #1a1035 100%);
+  border-radius: 20px;
+  border: 2px solid #8b5cf6;
+  font-size: 12px;
+  color: #c4b5fd;
+  font-weight: 600;
+  min-width: 60px;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .flowWrapper {
+    height: 400px;
+  }
+  
+  .monsterImage {
+    width: 60px;
+    height: 88px;
+  }
+  
+  .spellImage {
+    width: 40px;
+    height: 58px;
+  }
+  
+  .legend {
+    flex-wrap: wrap;
+    max-width: 200px;
+  }
+}

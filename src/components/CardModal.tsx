@@ -1,42 +1,31 @@
-import { useEffect, useState } from 'react'
-import { X, Loader2 } from 'lucide-react'
-import type { Card } from '../types'
-import { getAttributeCN, getRaceCN, getCardFrame } from '../utils/cardMappings'
+/**
+ * 卡片详情弹窗
+ */
+import { X } from 'lucide-react'
+import { useEffect } from 'react'
+
+interface CardInfo {
+  id: number
+  name: string
+  name_cn: string
+  desc_cn?: string
+  type?: string
+  atk?: number
+  def?: number
+  level?: number
+  attribute?: string
+  race?: string
+}
 
 interface CardModalProps {
-  cardId: number | null
+  card: CardInfo | null
   onClose: () => void
 }
 
-export default function CardModal({ cardId, onClose }: CardModalProps) {
-  const [card, setCard] = useState<Card | null>(null)
-  const [loading, setLoading] = useState(false)
+const R2_BASE = 'https://pub-1aabbe3759be4cbb807f84c6b342a168.r2.dev'
 
-  const R2_BASE = 'https://pub-1aabbe3759be4cbb807f84c6b342a168.r2.dev'
-
-  useEffect(() => {
-    if (!cardId) {
-      setCard(null)
-      return
-    }
-
-    async function loadCard() {
-      setLoading(true)
-      try {
-        const res = await fetch('/data/cards.json')
-        const data: Card[] = await res.json()
-        const found = data.find(c => c.id === cardId)
-        setCard(found || null)
-      } catch {
-        setCard(null)
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadCard()
-  }, [cardId])
-
-  // ESC 键关闭
+export default function CardModal({ card, onClose }: CardModalProps) {
+  // ESC 关闭
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -45,135 +34,124 @@ export default function CardModal({ cardId, onClose }: CardModalProps) {
     return () => window.removeEventListener('keydown', handleEsc)
   }, [onClose])
 
-  if (!cardId) return null
+  if (!card) return null
 
-  const frame = card ? getCardFrame(card.type) : ''
-  const attributeCN = card ? getAttributeCN(card.attribute) : ''
-  const raceCN = card ? getRaceCN(card.race) : ''
+  // 解析卡片类型
+  const getTypeLabel = (type?: string) => {
+    if (!type) return '未知'
+    if (type.includes('Synchro')) return '同调怪兽'
+    if (type.includes('Link')) return '链接怪兽'
+    if (type.includes('Xyz')) return '超量怪兽'
+    if (type.includes('Fusion')) return '融合怪兽'
+    if (type.includes('Ritual')) return '仪式怪兽'
+    if (type.includes('Tuner')) return '调整怪兽'
+    if (type.includes('Effect')) return '效果怪兽'
+    if (type.includes('Normal')) return '通常怪兽'
+    if (type.includes('Spell')) return '魔法卡'
+    if (type.includes('Trap')) return '陷阱卡'
+    return type
+  }
 
-  // 边框颜色
-  const getFrameColor = (f: string) => {
-    const colors: Record<string, string> = {
-      '魔法': 'border-emerald-500',
-      '陷阱': 'border-pink-500',
-      '融合': 'border-purple-500',
-      '同步': 'border-gray-300',
-      '超量': 'border-gray-600',
-      '连接': 'border-blue-500',
-      '仪式': 'border-sky-500',
-      '灵摆': 'border-orange-500',
-      '通常': 'border-amber-500',
-      '效果': 'border-orange-500',
+  const getAttributeLabel = (attr?: string) => {
+    const map: Record<string, string> = {
+      'LIGHT': '光', 'DARK': '暗', 'FIRE': '炎',
+      'WATER': '水', 'EARTH': '地', 'WIND': '风', 'DIVINE': '神'
     }
-    return colors[f] || 'border-gray-500'
+    return map[attr || ''] || attr || ''
+  }
+
+  const getRaceLabel = (race?: string) => {
+    const map: Record<string, string> = {
+      'Spellcaster': '魔法师', 'Dragon': '龙', 'Zombie': '不死',
+      'Warrior': '战士', 'Beast-Warrior': '兽战士', 'Beast': '兽',
+      'Winged Beast': '鸟兽', 'Machine': '机械', 'Fiend': '恶魔',
+      'Fairy': '天使', 'Insect': '昆虫', 'Dinosaur': '恐龙',
+      'Reptile': '爬虫', 'Fish': '鱼', 'Sea Serpent': '海龙',
+      'Aqua': '水', 'Pyro': '炎', 'Thunder': '雷',
+      'Rock': '岩石', 'Plant': '植物', 'Psychic': '超能力',
+      'Wyrm': '幻龙', 'Cyberse': '电子界', 'Illusion': '幻想魔'
+    }
+    return map[race || ''] || race || ''
   }
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div 
-        className={`relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-ygo-dark rounded-2xl border-2 ${card ? getFrameColor(frame) : 'border-gray-700'} shadow-2xl`}
-        onClick={(e) => e.stopPropagation()}
+        className="bg-gray-900 rounded-2xl shadow-2xl border border-gray-700 max-w-lg w-full max-h-[90vh] overflow-hidden"
+        onClick={e => e.stopPropagation()}
       >
-        {/* 关闭按钮 */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 z-10 p-2 bg-gray-800/80 rounded-full hover:bg-gray-700 transition-colors"
-        >
-          <X size={20} className="text-gray-400" />
-        </button>
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-700">
+          <h3 className="text-xl font-bold text-white">{card.name_cn}</h3>
+          <button 
+            onClick={onClose}
+            className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            <X className="text-gray-400" size={20} />
+          </button>
+        </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="animate-spin text-ygo-accent" size={40} />
-          </div>
-        ) : card ? (
-          <div className="flex flex-col md:flex-row gap-6 p-6">
+        {/* Content */}
+        <div className="p-4 overflow-y-auto max-h-[calc(90vh-80px)]">
+          <div className="flex gap-4">
             {/* 卡图 */}
-            <div className="flex-shrink-0 mx-auto md:mx-0">
+            <div className="flex-shrink-0">
               <img
                 src={`${R2_BASE}/cn/${card.id}.webp`}
-                alt={card.name_cn || card.name}
-                className="w-48 md:w-56 rounded-lg shadow-lg"
+                alt={card.name_cn}
+                className="w-32 h-44 object-cover rounded-lg border border-gray-600"
                 onError={(e) => {
                   (e.target as HTMLImageElement).src = `https://images.ygoprodeck.com/images/cards/${card.id}.jpg`
                 }}
               />
             </div>
 
-            {/* 卡片信息 */}
-            <div className="flex-1 space-y-4">
-              {/* 名称 */}
-              <div>
-                <h2 className="text-2xl font-bold text-white">{card.name_cn || card.name}</h2>
-                {card.name_cn && (
-                  <p className="text-gray-400 text-sm">{card.name}</p>
-                )}
-                {card.name_jp && (
-                  <p className="text-gray-500 text-xs">{card.name_jp}</p>
-                )}
-              </div>
-
-              {/* 属性标签 */}
-              <div className="flex flex-wrap gap-2">
-                <span className={`px-3 py-1 rounded-lg text-sm ${
-                  frame === '魔法' ? 'bg-emerald-500/20 text-emerald-400' :
-                  frame === '陷阱' ? 'bg-pink-500/20 text-pink-400' :
-                  frame === '融合' ? 'bg-purple-500/20 text-purple-400' :
-                  frame === '同步' ? 'bg-gray-300/20 text-gray-200' :
-                  frame === '超量' ? 'bg-gray-800 text-gray-200' :
-                  frame === '连接' ? 'bg-blue-500/20 text-blue-400' :
-                  frame === '仪式' ? 'bg-sky-500/20 text-sky-400' :
-                  'bg-orange-500/20 text-orange-400'
-                }`}>
-                  {frame}
+            {/* 信息 */}
+            <div className="flex-1 space-y-2">
+              <div className="text-sm text-gray-400">{card.name}</div>
+              
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="px-2 py-1 bg-purple-600/30 text-purple-300 rounded">
+                  {getTypeLabel(card.type)}
                 </span>
-                {attributeCN && (
-                  <span className="px-3 py-1 rounded-lg text-sm bg-gray-700 text-gray-300">
-                    {attributeCN}
+                {card.attribute && (
+                  <span className="px-2 py-1 bg-blue-600/30 text-blue-300 rounded">
+                    {getAttributeLabel(card.attribute)}
                   </span>
                 )}
-                {raceCN && !['魔法', '陷阱'].includes(frame) && (
-                  <span className="px-3 py-1 rounded-lg text-sm bg-gray-700 text-gray-300">
-                    {raceCN}
-                  </span>
-                )}
-                {card.level && (
-                  <span className="px-3 py-1 rounded-lg text-sm bg-ygo-gold/20 text-ygo-gold">
-                    ★ {card.level}
+                {card.race && (
+                  <span className="px-2 py-1 bg-green-600/30 text-green-300 rounded">
+                    {getRaceLabel(card.race)}
                   </span>
                 )}
               </div>
 
-              {/* 攻守 */}
-              {card.atk !== null && (
-                <div className="flex gap-4 text-lg">
-                  <span className="text-red-400">
-                    ATK <span className="font-bold text-white">{card.atk}</span>
-                  </span>
-                  {card.def !== null && (
-                    <span className="text-blue-400">
-                      DEF <span className="font-bold text-white">{card.def}</span>
-                    </span>
-                  )}
+              {card.level !== undefined && (
+                <div className="text-yellow-400 text-sm">
+                  {'★'.repeat(card.level)}
                 </div>
               )}
 
-              {/* 效果描述 */}
-              <div className="p-4 bg-gray-800/50 rounded-lg">
-                <p className="text-gray-200 leading-relaxed whitespace-pre-wrap">
-                  {card.desc_cn || card.desc}
-                </p>
-              </div>
+              {(card.atk !== undefined || card.def !== undefined) && (
+                <div className="text-sm text-gray-300">
+                  ATK/{card.atk ?? '?'} DEF/{card.def ?? '?'}
+                </div>
+              )}
             </div>
           </div>
-        ) : (
-          <div className="text-center py-20 text-gray-400">
-            卡片信息加载失败
-          </div>
-        )}
+
+          {/* 效果文本 */}
+          {card.desc_cn && (
+            <div className="mt-4 p-3 bg-gray-800/50 rounded-lg">
+              <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
+                {card.desc_cn}
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
