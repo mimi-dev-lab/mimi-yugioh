@@ -18,13 +18,22 @@ const spellTrapTypeMap: Record<string, string> = {
 }
 
 export function useCards(filter?: CardFilter, page = 1, limit = 48) {
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cards, setCards] = useState<Card[]>([])
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
 
   const fetchCards = useCallback(async () => {
+    // 如果没有 filter，不请求 API，返回空状态
+    if (!filter) {
+      setCards([])
+      setTotal(0)
+      setTotalPages(0)
+      setLoading(false)
+      return
+    }
+
     try {
       setLoading(true)
       

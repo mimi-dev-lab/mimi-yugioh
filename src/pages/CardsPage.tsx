@@ -32,7 +32,13 @@ export default function CardsPage() {
     defMax: defRange[1] ?? undefined,
   }), [searchTerm, selectedFrames, selectedAttributes, selectedSpellTrapTypes, selectedRaces, selectedLevels, atkRange, defRange])
 
-  const { cards, loading, total, totalPages } = useCards(filter, page, 48)
+  // 判断是否有任何筛选条件
+  const hasAnyFilter = searchTerm || selectedFrames.length > 0 || selectedAttributes.length > 0 || 
+    selectedSpellTrapTypes.length > 0 || selectedRaces.length > 0 || selectedLevels.length > 0 ||
+    atkRange[0] !== null || atkRange[1] !== null || defRange[0] !== null || defRange[1] !== null
+
+  // 只有有筛选条件时才请求 API
+  const { cards, loading, total, totalPages } = useCards(hasAnyFilter ? filter : undefined, page, 48)
 
   // 切换筛选项
   const toggleFilter = <T,>(_arr: T[], item: T, setter: React.Dispatch<React.SetStateAction<T[]>>) => {
@@ -78,8 +84,12 @@ export default function CardsPage() {
             </div>
           </div>
           <div className="text-right">
-            <div className="text-3xl font-bold text-ygo-accent">{total.toLocaleString()}</div>
-            <div className="text-gray-400 text-sm">张卡牌</div>
+            <div className="text-3xl font-bold text-ygo-accent">
+              {hasAnyFilter ? total.toLocaleString() : '11,749'}
+            </div>
+            <div className="text-gray-400 text-sm">
+              {hasAnyFilter ? '符合条件' : '张卡牌'}
+            </div>
           </div>
         </div>
       </div>
@@ -261,7 +271,24 @@ export default function CardsPage() {
       </div>
 
       {/* Cards Grid */}
-      {loading ? (
+      {!hasAnyFilter ? (
+        // 空状态：引导用户搜索或筛选
+        <div className="flex flex-col items-center justify-center py-16">
+          <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-ygo-accent/20 to-purple-500/20 flex items-center justify-center border border-ygo-accent/20">
+            <Search className="text-ygo-accent" size={40} />
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2">开始搜索</h2>
+          <p className="text-gray-400 text-center max-w-md mb-8">
+            输入卡牌名称、效果关键词，或使用筛选器找到你想要的卡牌
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <QuickSearchButton label="灰流丽" onClick={() => { setSearchTerm('灰流丽'); setPage(1); }} />
+            <QuickSearchButton label="融合怪兽" onClick={() => { setSelectedFrames(['融合']); setPage(1); }} />
+            <QuickSearchButton label="龙族" onClick={() => { setSelectedRaces(['龙族']); setPage(1); }} />
+            <QuickSearchButton label="8星以上" onClick={() => { setSelectedLevels([8,9,10,11,12]); setPage(1); }} />
+          </div>
+        </div>
+      ) : loading ? (
         <div className="flex flex-col items-center justify-center py-20 gap-4">
           <Loader2 className="animate-spin text-ygo-accent" size={48} />
           <p className="text-gray-400">加载中...</p>
@@ -430,4 +457,16 @@ function getAttributeColor(attr: string): string {
     '神': 'yellow',
   }
   return map[attr] || 'gray'
+}
+
+// 快捷搜索按钮
+function QuickSearchButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-4 py-2 bg-gray-800/80 border border-gray-600/50 rounded-xl text-gray-300 hover:border-ygo-accent/50 hover:text-ygo-accent transition-all"
+    >
+      {label}
+    </button>
+  )
 }
