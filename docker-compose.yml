@@ -1,0 +1,15 @@
+services:
+  mimi-yugioh:
+    build: .
+    container_name: mimi-yugioh
+    ports:
+      - "3333:3000"
+    environment:
+      # 服务端用 Docker 内部地址
+      - SUPABASE_URL=http://host.docker.internal:54321
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+    volumes:
+      - /Users/lifan/clawd/projects/yugioh_cards/images:/app/public/card-images:ro
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

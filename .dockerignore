@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+_old_react
+*.md
+temp
+data
+supabase
+scripts
+dist
+functions
+migrations
