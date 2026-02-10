@@ -1,0 +1,37 @@
+{
+  "name": "mimi-yugioh",
+  "detectedAt": "2026-02-11",
+  "description": "游戏王卡组教学 Web APP — 卡片浏览、卡组详情、Combo模拟器、教学内容",
+  "stack": {
+    "language": "typescript",
+    "runtime": "node",
+    "framework": "next.js 16 (App Router)",
+    "ui": "tailwind css 4 + shadcn/ui + radix-ui",
+    "database": "supabase",
+    "packageManager": "pnpm",
+    "testFramework": null
+  },
+  "deployment": {
+    "platform": "docker (local Mac Air)",
+    "port": 3333,
+    "dockerfile": "multi-stage (node:22-alpine, pnpm → standalone)",
+    "dockerCompose": true,
+    "notes": "Card images mounted from ~/clawd/projects/yugioh_cards/images as read-only volume"
+  },
+  "conventions": {
+    "pages": "app/*/page.tsx (App Router, no src/ prefix)",
+    "components": "components/*.tsx",
+    "apiRoutes": "app/api/*/route.ts",
+    "data": "data/ (JSON data files for cards/combos)",
+    "scripts": "scripts/ (data generation, import scripts)",
+    "icons": "lucide-react only",
+    "styling": "tailwind + cn() utility"
+  },
+  "pitfalls": [
+    "No src/ directory — app/ and components/ are at project root",
+    "Card images are external volume mount, not in repo",
+    "Supabase accessed via host.docker.internal from Docker",
+    "DEVLOG.md tracks development history"
+  ],
+  "decisions": []
+}
