@@ -119,6 +119,21 @@ describe('搜索与提示：HTTP 接口', () => {
     assert.equal(line.hints, 2);
   }));
 
+  test('提示：用在后面的步上，结算只标那一步', () => withServer(async (call, data) => {
+    await seedCache(data, WHITE_ALBAZ_SEED);
+    await call('POST', '/hand/start', { seed: WHITE_ALBAZ_SEED });
+    let state = (await call('GET', '/hand')).body;
+    for (const response of FLAT.slice(0, -3)) state = (await call('POST', '/hand/choose', { indices: indicesFor(state.prompt, response) })).body;
+    const hint = await call('POST', '/hand/hint');
+    assert.equal(hint.status, 200, JSON.stringify(hint.body));
+    await call('POST', '/hand/choose', { indices: hint.body.indices });
+    await playFlat(call, FLAT.length - 2);
+    const ended = (await call('POST', '/hand/end')).body;
+    const marked = ended.steps.filter((x) => x.hinted).map((x) => x.step);
+    assert.equal(marked.length, 1);
+    assert.ok(marked[0] > 1, `提示是在后面才要的，标在第 ${marked[0]} 步`);
+  }));
+
   test('提示：走偏之后从当前局面再搜，不照路线的下一个回应（那个回应在当前提示里碰巧也合法）', () => withServer(async (call, data) => {
     // 编的缓存路线：先召唤封锁鸟，再放第 2 格。用户改召唤别的怪兽，到「放哪一格」的提示，路线的下一个回应 { place: 1 } 在这里也合法；
     // 再搜的结果是搜索只试的第一格（{ place: 0 }）。给出第 2 格就是没查是不是偏离
