@@ -24,7 +24,7 @@ describe('烙印的两条 Game8 路线在引擎里重放', () => {
 
   test('换种子洗牌，路线照样走通（路线不依赖卡组顺序）', async () => {
     for (const route of BRANDED.routes) {
-      const { endBoard } = await playRoute(engine, BRANDED, route, { seed: [5n, 9n, 21n, 34n] });
+      const { endBoard } = await playRoute(engine, BRANDED, route, { seed: 5 });
       assert.deepEqual(diffEnd(route, endBoard), []);
     }
   });

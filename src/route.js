@@ -5,16 +5,19 @@
 //   { chain: code }                      连锁窗口里发动某张卡的效果
 //   { pick: [code…] }                    选卡 / 选素材：按密码选，同一密码在列表里靠前的先选（卡组、手牌排在场上和墓地之前）
 //   { option: i } / { place: i } / { position: i }   选第 i 个选项 / 格子 / 表示形式
+//   { finishPick: true }                 逐张选的提示里选「选完」
+//   idle 和 chain 的回应可以多带 desc（效果描述号）：同一张卡有几个能发动的效果时用它指定哪一个
 //   'finish'                             之后的连锁窗口全放行，直到我方回合结束
-import { startSession } from './duel-session.js';
-import { expand } from './deck.js';
+import { openHandSession } from './duel-session.js';
 
 export function indicesFor(prompt, response) {
   const { options } = prompt;
   const named = (action) => options.findIndex((o) => o.action === action);
   if (typeof response === 'string') return [named(response)];
-  if (response.idle !== undefined) return [options.findIndex((o) => o.action === response.idle && o.code === response.code)];
-  if (response.chain !== undefined) return [options.findIndex((o) => o.action === 'chain' && o.code === response.chain)];
+  const sameDesc = (o) => response.desc === undefined || o.description === response.desc;
+  if (response.idle !== undefined) return [options.findIndex((o) => o.action === response.idle && o.code === response.code && sameDesc(o))];
+  if (response.chain !== undefined) return [options.findIndex((o) => o.action === 'chain' && o.code === response.chain && sameDesc(o))];
+  if (response.finishPick) return prompt.kind === 'pick-one' ? [named('finish')] : [-1];
   if (response.option !== undefined) return prompt.kind === 'option' ? [response.option] : [-1];
   if (response.place !== undefined) return prompt.kind === 'place' ? [response.place] : [-1];
   if (response.position !== undefined) return prompt.kind === 'position' ? [response.position] : [-1];
@@ -27,21 +30,61 @@ export function indicesFor(prompt, response) {
   throw new Error(`看不懂的回应 ${JSON.stringify(response)}`);
 }
 
+// 同一张卡在这个提示里有几个同动作的选项（一张卡几个效果）时，回应要带效果描述号 desc 才指得准；只有一个就不带
+export const descOf = (options, o) => (o.description !== undefined && options.filter((x) => x.action === o.action && x.code === o.code).length > 1 ? { desc: o.description } : {});
+
+// indicesFor 的反过来：用户（或搜索）在提示里选的下标 → 语义回应。选项下标会随起手、种子变，语义回应不变，所以路线、缓存和「是不是在最好路线上」都用它
+// 同一张卡在列表里有几张时，选哪一张不影响结果，回应里只记密码；逐张选里的「取消」没有对应的路线写法，记成 { unselect } 只用来比较
+export function responseFor(prompt, indices) {
+  const chosen = indices.map((i) => prompt.options[i]);
+  const one = chosen[0];
+  const desc = descOf(prompt.options, one);
+  switch (prompt.kind) {
+    case 'idle': return one.code === undefined ? one.action : { idle: one.action, code: one.code, ...desc };
+    case 'chain': return one.action === 'pass' ? 'pass' : { chain: one.code, ...desc };
+    case 'yes-no': return one.action;
+    case 'cards': return { pick: chosen.map((o) => o.code) };
+    case 'pick-one': return one.action === 'finish' ? { finishPick: true } : one.action === 'unselect' ? { unselect: one.code } : { pick: [one.code] };
+    case 'option': return { option: indices[0] };
+    case 'place': return { place: indices[0] };
+    case 'position': return { position: indices[0] };
+    default: throw new Error(`没法把 ${prompt.kind} 提示的选择写成回应`);
+  }
+}
+
+// 两个回应是不是同一个选择：选卡的顺序不算
+const normalize = (r) => JSON.stringify(r?.pick ? { ...r, pick: [...r.pick].sort((x, y) => x - y) } : r);
+export const sameResponse = (a, b) => normalize(a) === normalize(b);
+
+// 用户的选择和路线上的回应算不算同一个：在 sameResponse 之外，放哪一格、什么表示形式也不计（搜索只试第一个，用户选别的格子不算偏离；这是近似，换格子偶尔会影响后面的路线）
+export const sameChoice = (a, b) => (a?.place !== undefined && b?.place !== undefined) || (a?.position !== undefined && b?.position !== undefined) || sameResponse(a, b);
+
 // 一步 = 主阶段的一个命令，或连锁窗口里发动一个效果；它后面的选卡、选格子、放行都算在这一步里。用户的操作记录和路线的「每一步之后的场面」都按这个切
 export const startsStep = (prompt, indices) => prompt.kind === 'idle' || (prompt.kind === 'chain' && prompt.options[indices[0]]?.action === 'chain');
 
+export const ACTION_NAMES = { summon: '召唤', 'monster-set': '盖放怪兽', 'special-summon': '特殊召唤', 'position-change': '改变表示形式', 'spell-set': '盖放', activate: '发动', 'to-battle': '进入战斗阶段', 'end-turn': '结束回合' };
+
+// 用户选了这些选项，操作记录、提示和路线每步的文字怎么写
+export function labelFor(deck, prompt, indices) {
+  const md = (code) => deck.cards[code]?.md ?? String(code);
+  const chosen = indices.map((i) => prompt.options[i]);
+  const one = chosen[0];
+  switch (prompt.kind) {
+    case 'idle': return `${ACTION_NAMES[one.action] ?? one.action}${one.code === undefined ? '' : ` ${md(one.code)}`}`;
+    case 'cards': return chosen.length ? `选 ${chosen.map((o) => md(o.code)).join('、')}` : '不选';
+    case 'pick-one': return one.action === 'finish' ? '选完' : `${one.action === 'unselect' ? '取消' : '选'} ${md(one.code)}`;
+    case 'chain': return one.action === 'pass' ? '不发动' : `连锁发动 ${md(one.code)}`;
+    case 'yes-no': return one.action === 'yes' ? '发动' : '不发动';
+    case 'place': return `放在 ${one.location === 0x4 ? '怪兽区' : '魔陷区'} 第 ${one.sequence + 1} 格`;
+    default: return `选第 ${indices[0] + 1} 项`;
+  }
+}
+
 const describeOptions = (prompt) => prompt.options.map((o) => [o.action, o.code].filter((x) => x !== undefined).join(' ')).join(' | ');
 
-// 起手以外的主卡组 = 主卡组 − 起手；种子固定，所以重放结果不随洗牌变
-// 默认用路线自己写的起手；传 hand 就换成别的起手（结算时拿用户真实的起手重放，起手里没有的卡对不上就抛错）。boards 是按 startsStep 切的每一步之后的场面
+// 默认用路线自己写的起手；传 hand 就换成别的起手（结算时拿用户真实的起手重放，起手里没有的卡对不上就抛错）；seed 是发牌的种子（不给用 1）。boards 是按 startsStep 切的每一步之后的场面
 export async function playRoute(engine, deck, route, { seed, hand = route.hand } = {}) {
-  const rest = expand(deck.main);
-  for (const code of hand) {
-    const i = rest.indexOf(code);
-    if (i < 0) throw new Error(`起手里的 ${code} 不在主卡组里`);
-    rest.splice(i, 1);
-  }
-  const session = await startSession(engine, { hand, deck: rest, extra: expand(deck.extra), ...(seed ? { seed } : {}) });
+  const session = await openHandSession(engine, deck, hand, seed);
   try {
     const boards = [];
     const choose = (prompt, indices) => {

@@ -26,6 +26,24 @@ export async function start(env = {}) {
   });
 }
 
+// 起服务、对它发请求、用完关掉：fn(call, data)，call(method, path, body) 返回 { status, body }，data 是临时数据目录
+export const api = (url) => async (method, path, body) => {
+  const res = await fetch(`${url}${path}`, { method, ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+  return { status: res.status, body: await res.json() };
+};
+export async function withServer(fn, env = {}) {
+  const data = env.YUGIOH_DATA ?? await dataDir();
+  const server = await start({ YUGIOH_ENGINE: ENGINE_DIR, ...env, YUGIOH_DATA: data });
+  try { return await fn(api(server.url), data); } finally { server.stop(); }
+}
+
+// 这个种子发出的起手含白之落胤，而且 Game8 路线在这手上重放得通（别的含白之落胤的起手，别的牌会让路线里的选卡对不上，那种手的基准靠搜索）
+export const WHITE_ALBAZ_SEED = 37;
+// 这个种子发出的是烂手（没有起手卡）：搜索几秒搜完，没有 Game8 路线
+export const BRICK_SEED = 1;
+// 这两个种子发出的起手是同样的 5 张牌（排序后相同），但发牌的顺序和洗牌不同；第一个种子发出的顺序没排序，搜索不到一秒搜完（找法：对种子逐个发牌比 handKey）
+export const SAME_FIVE_SEEDS = [129274, 6];
+
 // 引擎数据（公开的卡库和脚本）在复用的缓存目录里，./ci 的 engine 那一项负责下载；不是用户的数据
 export const ENGINE_DIR = process.env.YUGIOH_ENGINE ?? join(homedir(), '.cache/mimi-yugioh/engine');
 export const openTestEngine = () => openEngine(openEngineFiles(ENGINE_DIR));

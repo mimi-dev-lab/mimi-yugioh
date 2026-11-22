@@ -8,6 +8,8 @@ import { openEngineFiles } from './engine-files.js';
 import { HandError, startHand } from './hand.js';
 import { RATING_NAMES, ROLES, cardStates, dueCodes, grade, nextQuestion, rate, review } from './quiz.js';
 import { rngFrom } from './hand.js';
+import { HINT_BUDGET_MS, SEARCH_BUDGET_MS, searchHand } from './search.js';
+import { openSearchCache } from './search-cache.js';
 import { openStore } from './store.js';
 
 const PORT = Number(process.env.PORT ?? 4519);
@@ -15,10 +17,18 @@ const PORT = Number(process.env.PORT ?? 4519);
 const DATA = process.env.YUGIOH_DATA ?? join(homedir(), '.mimi-yugioh');
 const ENGINE = process.env.YUGIOH_ENGINE ?? join(DATA, 'engine');
 const DECK = BRANDED;
+const SEARCH_MS = Number(process.env.YUGIOH_SEARCH_MS ?? SEARCH_BUDGET_MS); // 一手的搜索时间上限；0 = 不搜索
 
 const store = openStore(DATA);
 let enginePromise = null; // 第一次打牌才打开引擎：没下载引擎数据时 /health 照样能用
 const engine = () => (enginePromise ??= openEngine(openEngineFiles(ENGINE)).catch((e) => { enginePromise = null; throw e; }));
+
+// 后台搜索和它的缓存（怎么管见 src/search-cache.js）。提示要用 CPU 的时候，后台搜索停着等它（等的时间不计进时间上限）
+let hinting = 0;
+const searchCache = openSearchCache({
+  store, deck: DECK, now: Date.now, budgetMs: SEARCH_MS, isPaused: () => hinting > 0,
+  search: async (hand, seed, options) => searchHand(await engine(), DECK, { hand, seed, ...options }),
+});
 
 let active = null; // 进行中的一手（同一时间只有一手）
 let handCount = 0;
@@ -52,6 +62,7 @@ async function route(req, pathname, query) {
       const number = store.readHands().filter((r) => r.type === 'hand').length + 1; // 第几手：日志里结算过的手数 + 1
       active = await startHand(await engine(), DECK, { id: `${now}-${++handCount}`, seed, now, number });
       store.setActive(active.info);
+      searchCache.ensure(active.info.hand, seed);
       return [200, active.view(now)];
     }
     case 'GET /hand': return [200, needActive().view(now)];
@@ -61,9 +72,19 @@ async function route(req, pathname, query) {
       hand.submit(indices, now);
       return [200, hand.view(now)];
     }
+    case 'POST /hand/hint': {
+      const hand = needActive();
+      hinting++;
+      let result;
+      try { result = await hand.hint({ searched: searchCache.state(hand.info.hand), now: Date.now, budgetMs: HINT_BUDGET_MS }); } finally { hinting--; }
+      if (active !== hand) throw new HandError('这一手已经换了', 409);
+      return [200, result];
+    }
     case 'POST /hand/end': {
       const hand = needActive();
-      const { settlement, record } = await hand.end(now, store.readHands());
+      const { settlement, record } = await hand.end(now, store.readHands(), searchCache.state(hand.info.hand));
+      // 缓存的路线在这手的种子下重放不了：这次结算先不用它，再用这手的种子搜一遍，覆盖缓存
+      if (settlement.benchmark.search === 'replay-failed') searchCache.ensure(hand.info.hand, hand.info.seed, { force: true });
       store.appendHand(record);
       store.clearActive();
       active = null;
