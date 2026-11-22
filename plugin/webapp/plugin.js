@@ -18,7 +18,8 @@ import { createElement as h, useState, useEffect, useCallback, useRef } from "re
 const TABS = ["首页", "记卡", "记录"];
 const HINT_FACTOR = 0.8; // same number as the service's scoring (DESIGN.md「评分」); only shown on the hint button
 // engine location bits
-const LOC = { hand: 0x2, monsters: 0x4, spellTraps: 0x8, grave: 0x10 };
+const LOC = { hand: 0x2, monsters: 0x4, spellTraps: 0x8, grave: 0x10, banished: 0x20, extra: 0x40 };
+const ZONE_TITLE = { extra: "额外卡组", grave: "墓地", banished: "除外区" }; // the card lists opened from the side of the field
 const ACTION_LABEL = { summon: "召唤", "monster-set": "盖放", "special-summon": "特殊召唤", "position-change": "改变表示形式", "spell-set": "盖放", activate: "发动" };
 const ZONE_LABEL = { 0x1: "卡组", 0x2: "手牌", 0x4: "场上", 0x8: "场上", 0x10: "墓地", 0x20: "除外", 0x40: "额外" };
 // what the engine is asking a card for (HINTMSG_* in the scripts' constant.lua)
@@ -140,7 +141,7 @@ function PromptPanel({ rest, prompt, busy, send }) {
 // ---- the hand in progress ----
 function Play({ rest, hand, cards, busy, send, end, hint }) {
   const [sel, setSel] = useState(null); // { zone, code, sequence }
-  const [graveOpen, setGraveOpen] = useState(false);
+  const [zoneOpen, setZoneOpen] = useState(null); // "extra" | "grave" | "banished": the card list on top
   const [now, setNow] = useState(0);
   const base = useRef({ at: 0, ms: 0 });
   useEffect(() => { base.current = { at: performance.now(), ms: hand.elapsedMs }; setNow(hand.elapsedMs); }, [hand.elapsedMs, hand.id]);
@@ -155,9 +156,10 @@ function Play({ rest, hand, cards, busy, send, end, hint }) {
   const prompt = hand.prompt;
   const idle = prompt?.kind === "idle" ? prompt : null;
   const actionsFor = (zone, card) => (idle ? idle.options.map((o, i) => ({ ...o, i })).filter((o) => o.code === card.code && o.location === LOC[zone] && o.sequence === card.sequence && ACTION_LABEL[o.action]) : []);
+  const endPhase = idle ? idle.options.findIndex((o) => o.action === "end-turn") : -1;
   const info = sel ? cards[sel.code] : null;
   const legal = sel ? actionsFor(sel.zone, sel) : [];
-  const pickCard = (zone, card) => { setSel({ zone, code: card.code, sequence: card.sequence }); setGraveOpen(false); };
+  const pickCard = (zone, card) => { setSel({ zone, code: card.code, sequence: card.sequence }); setZoneOpen(null); };
   const isSel = (zone, card) => sel && sel.zone === zone && sel.code === card.code && sel.sequence === card.sequence;
   const cardEl = (zone, card, props = {}) => h(Card, { key: `${zone}-${card.sequence}-${card.code}`, rest, card, selected: isSel(zone, card), ok: actionsFor(zone, card).length > 0, onClick: () => pickCard(zone, card), ...props });
 
@@ -167,6 +169,10 @@ function Play({ rest, hand, cards, busy, send, end, hint }) {
   const emz = (seq) => { const c = at(board.monsters, seq); return c ? h(Slot, { key: `e${seq}` }, cardEl("monsters", c)) : h(Slot, { key: `e${seq}`, dashed: true, label: "额外怪兽区" }); };
   const field = at(board.spellTraps, 5);
   const topGrave = board.grave.at(-1);
+  const anyLegal = (zone) => board[zone].some((c) => actionsFor(zone, c).length > 0);
+  // 额外 / 除外 are buttons that open the card list; a green dot says some card in it has a legal action right now
+  const zoneButton = (zone, label) => h("button", { className: "yg-slot flat yg-zbtn", "aria-label": ZONE_TITLE[zone], onClick: () => setZoneOpen(zone), disabled: board[zone].length === 0 },
+    h("span", { className: "yg-zt" }, `${label} ${board[zone].length}`), anyLegal(zone) ? h("span", { className: "yg-ok", title: "有可做的操作" }) : null);
   const restrictions = hand.restrictions ?? [];
   const rows = hand.steps ?? [];
 
@@ -194,33 +200,34 @@ function Play({ rest, hand, cards, busy, send, end, hint }) {
         h("div", { className: "yg-line" }, h("strong", null, "场地"), h("span", { className: "yg-lab" }, `召唤权 ${hand.normalSummonUsed ? "已用" : "未用"}`), h("span", { className: "yg-fill" }),
           restrictions.length ? h("span", { className: "yg-warn yg-mono" }, restrictions.join("；")) : null),
         h("div", { className: "yg-field" },
-          h("div", { className: "yg-side" }, h(Slot, { label: "场地魔法" }, field ? cardEl("spellTraps", field) : null), h(Slot, { label: `额外 ${board.extra.length}`, tall: false })),
+          h("div", { className: "yg-side" }, h(Slot, { label: "场地魔法" }, field ? cardEl("spellTraps", field) : null), zoneButton("extra", "额外")),
           h("div", { className: "yg-zones" },
             h("div", { className: "yg-rowz emz" }, h("span", { className: "gap" }), emz(5), h("span", { className: "gap" }), emz(6), h("span", { className: "gap" })),
             h("div", { className: "yg-rowz mz" }, [0, 1, 2, 3, 4].map(mz)),
             h("div", { className: "yg-rowz sz" }, [0, 1, 2, 3, 4].map(sz))),
           h("div", { className: "yg-side" },
             h("div", { className: "yg-grave" }, h("span", { className: "yg-zt top" }, `墓地 ${board.grave.length}`),
-              h(Slot, { label: "" }, topGrave ? h(Card, { rest, card: topGrave, dim: true, onClick: () => setGraveOpen(!graveOpen), selected: graveOpen }) : null)),
-            h("div", { className: "yg-row" }, h(Slot, { label: `除外 ${board.banished.length}`, tall: false }), h(Slot, { label: `卡组 ${board.deck}`, tall: false })))),
+              h(Slot, { label: "" }, topGrave ? h(Card, { rest, card: topGrave, dim: true, ok: anyLegal("grave"), onClick: () => setZoneOpen(zoneOpen === "grave" ? null : "grave"), selected: zoneOpen === "grave" }) : null)),
+            h("div", { className: "yg-row" }, zoneButton("banished", "除外"), h(Slot, { label: `卡组 ${board.deck}`, tall: false })))),
         h("div", { className: "yg-handrow" }, h("span", { className: "yg-lab" }, `手牌 ${board.hand.length}`), board.hand.map((c) => cardEl("hand", c, { small: true })))),
       h("div", { className: "yg-detail" },
         info ? [
           h("div", { className: "yg-line", key: "t" }, h("span", { className: "yg-title" }, info.md), h("span", { className: "yg-chip on" }, info.role)),
           h("div", { className: "yg-ops", key: "o" }, legal.length
-            ? legal.map((o, n) => h("button", { key: o.i, className: `yg-btn${n === 0 ? " primary" : ""}`, disabled: busy || !idle, onClick: () => send([o.i]) }, `${ACTION_LABEL[o.action]}${o.action === "activate" && legal.filter((x) => x.action === "activate").length > 1 ? ` · 效果 ${o.i + 1}` : ""}`))
+            ? legal.map((o, n) => h("button", { key: o.i, className: `yg-btn${n === 0 ? " primary" : ""}`, disabled: busy || !idle, onClick: () => send([o.i]) }, `${o.action === "special-summon" && o.location === LOC.extra ? "额外卡组特殊召唤" : ACTION_LABEL[o.action]}${o.action === "activate" && legal.filter((x) => x.action === "activate").length > 1 ? ` · 效果 ${o.i + 1}` : ""}`))
             : h("span", { className: "yg-lab" }, idle ? "现在没有可做的操作" : "先回答上面的选择")),
           h("div", { className: "yg-facts", key: "f" },
             [["干什么", info.does], ["条件代价", info.cost], ["限制", info.limit, true]].map(([k, v, warn]) => h("div", { key: k, className: "yg-fact" }, h("span", { className: "yg-lab" }, k), h("span", { className: warn ? "yg-warn" : "" }, v)))),
         ] : h("p", { className: "yg-lab pad" }, "点手牌、场上或墓地的一张卡，看它现在能做什么，和它的角色、三件事。"),
         h("div", { className: "yg-final" },
           h("button", { className: "yg-btn ghost", disabled: busy || hand.status !== "playing", onClick: hint, title: "照提示走下一步；每用一次分数 ×0.8" }, "提示", h("span", { className: "yg-mono yg-lab" }, `分数 ×${HINT_FACTOR}`)),
+          endPhase >= 0 ? h("button", { className: "yg-btn ghost yg-phase", disabled: busy, onClick: () => send([endPhase]), title: "先进结束阶段：结束阶段才能发动的效果（回手、检索）由你来选；直接「结束回合」会把它们都放过" }, "进结束阶段") : null,
           h("button", { className: "yg-btn solid", disabled: busy, onClick: end }, "结束回合"))),
     ),
-    graveOpen ? h("div", { className: "yg-modal", role: "dialog", "aria-label": "墓地" },
-      h("div", { className: "yg-prompt" }, h("div", { className: "yg-prompt-title" }, `墓地（${board.grave.length}）`),
-        h("div", { className: "yg-opts" }, board.grave.map((c) => cardEl("grave", c))),
-        h("div", { className: "yg-row" }, h("button", { className: "yg-btn", onClick: () => setGraveOpen(false) }, "关上")))) : null,
+    zoneOpen ? h("div", { className: "yg-modal", role: "dialog", "aria-label": ZONE_TITLE[zoneOpen] },
+      h("div", { className: "yg-prompt" }, h("div", { className: "yg-prompt-title" }, `${ZONE_TITLE[zoneOpen]}（${board[zoneOpen].length}）· 带绿点的卡现在有操作可做`),
+        h("div", { className: "yg-zlist" }, board[zoneOpen].map((c) => cardEl(zoneOpen, c, { small: true, dim: zoneOpen === "grave" }))),
+        h("div", { className: "yg-row" }, h("button", { className: "yg-btn", onClick: () => setZoneOpen(null) }, "关上")))) : null,
     prompt && prompt.kind !== "idle" && hand.status === "playing" ? h("div", { className: "yg-modal" }, h(PromptPanel, { rest, prompt, busy, send })) : null);
 }
 
@@ -704,6 +711,7 @@ const CSS = `
 .yg-rowz.sz .yg-slot { height: 44px; } .yg-rowz.emz .yg-slot { height: 70px; }
 .yg-zt { font-size: 10px; color: #bdbdbd; line-height: 1.4; } .yg-zt.top { position: absolute; top: -16px; left: 0; right: 0; }
 .yg-grave { position: relative; }
+.yg-zbtn { font: inherit; color: inherit; cursor: pointer; } .yg-zbtn:disabled { cursor: default; opacity: .6; } .yg-zbtn .yg-ok { top: 4px; right: 4px; }
 .yg-card { position: relative; width: 100%; height: 100%; padding: 0; background: none; border: 0; border-radius: 3px; }
 .yg-card.sel { outline: 2px solid #c8ff3d; outline-offset: 2px; }
 .yg-card.dim img, .yg-card.dim .yg-noart { opacity: .75; }
@@ -725,10 +733,11 @@ const CSS = `
 .yg-fact { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid #1c1c1c; }
 .yg-detail .pad { padding: 8px 0; }
 .yg-final { margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
-.yg-final .yg-btn { min-height: 46px; }
+.yg-final .yg-btn { min-height: 46px; } .yg-final .yg-phase { grid-column: 1 / -1; min-height: 34px; }
 .yg-modal { position: absolute; inset: 0; background: rgba(0, 0, 0, .82); display: flex; align-items: center; justify-content: center; z-index: 5; }
 .yg-prompt { background: #0b0b0b; border: 1px solid #3a3a3a; border-radius: 10px; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; max-width: 900px; max-height: 90%; overflow: auto; align-items: center; }
 .yg-prompt-title { font-size: 15px; font-weight: 600; }
+.yg-zlist { display: flex; flex-wrap: wrap; gap: 14px 22px; justify-content: center; align-items: flex-start; max-width: 720px; padding-bottom: 12px; } .yg-zlist .yg-card { flex: none; margin-bottom: 26px; }
 .yg-opts { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; align-items: flex-start; }
 .yg-opt { width: 88px; padding: 0; position: relative; background: none; border: 0; border-radius: 4px; height: 128px; margin-bottom: 44px; }
 .yg-opt.sel { outline: 2px solid #c8ff3d; outline-offset: 2px; }

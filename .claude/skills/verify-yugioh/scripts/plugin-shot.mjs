@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 // plugin-verify 的 shot 用的浏览器脚本：用本机的无头 Chromium（不装依赖）打开临时网页工作区，像用户一样从侧栏点「游戏王」（默认是「总览」页签），
 // 可选地切页签、开始 / 继续一手、点一张卡、点它的操作、回答引擎的提示、结束回合，写 <name>.png / .txt / .json（网络记录）。
-// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, tab, start, resume, select, do, answer, prefer, hint, end, replay, compare }>'
+// --route <id>：照卡组数据里的一条展开路线（src/decks/branded-routes.js），只用页面点击一步步走（点卡、点操作按钮、点浮层里的选项、点「进结束阶段」），
+// 额外卡组、墓地、除外区里的卡先点开区域的卡列表再点卡；每个回应点完等页面变了再走下一个。
+// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, tab, start, resume, select, do, answer, prefer, route, routeFrom, routeSteps, open, pickIn, hint, end, replay, compare }>'
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const opts = JSON.parse(process.argv[2]);
 // 假数据里服务端的「现在」（东京 2026-10-30）：seed.mjs、test/helpers.js 的 NOW 同一天
@@ -159,6 +162,95 @@ async function main() {
       await sleep(500);
     }
     await until(() => !document.querySelector('.yg-modal [aria-label="引擎的选择"]'), null, 20000, '引擎的提示都答完了').catch(fail);
+  }
+  // 照路线走：每个回应换成页面上的点击。找不到要点的东西就报错，写明是哪一步哪个回应
+  if (opts.route) {
+    const { BRANDED } = await import(fileURLToPath(new URL('../../../../src/decks/branded.js', import.meta.url)));
+    const route = BRANDED.routes.find((r) => r.id === opts.route);
+    if (!route) throw new Error(`没有路线 ${opts.route}`);
+    const md = (code) => BRANDED.cards[code].md;
+    const snapshot = () => evaluate(() => JSON.stringify([document.querySelector('.yg-modal')?.innerHTML ?? '', document.querySelector('.yg-table')?.innerText ?? '', document.querySelector('.yg-detail')?.innerHTML ?? '', document.querySelector('.yg-handrow')?.innerHTML ?? '']));
+    // 点了之后等页面变了（浮层、操作记录、详情区、手牌任一处），再留一小会儿让它画完
+    const changed = async (before, what) => {
+      const end = Date.now() + 20000;
+      while ((await snapshot()) === before) {
+        if (Date.now() > end) throw new Error(`点了「${what}」页面没有变化`);
+        await sleep(150);
+      }
+      await sleep(200);
+    };
+    const click = (js, arg) => evaluate(`(a) => { ${js} }`, arg);
+    const clickIn = async (what, js, arg) => {
+      const before = await snapshot();
+      const ok = await click(js, arg);
+      if (!ok) throw new Error(`页面上点不到「${what}」`);
+      await changed(before, what);
+    };
+    // 主阶段对一张卡做一个动作：卡可能在手牌 / 场上，也可能要先打开额外卡组、墓地、除外区的列表
+    const opText = { activate: (t) => t.startsWith('发动'), 'special-summon': (t) => t.includes('特殊召唤'), summon: (t) => t === '召唤', 'monster-set': (t) => t.startsWith('盖放'), 'spell-set': (t) => t.startsWith('盖放') };
+    const doIdle = async (r, where) => {
+      const name = md(r.code);
+      const places = [null, '额外卡组', '墓地', '除外区'];
+      for (const zone of places) {
+        if (zone) { // 先打开这个区域的列表
+          const opened = await evaluate((z) => { const b = [...document.querySelectorAll('.yg-board button.yg-zbtn, .yg-board .yg-grave button.yg-card')].find((x) => (z === '墓地' ? x.closest('.yg-grave') : x.getAttribute('aria-label') === z)); if (!b || b.disabled) return false; b.click(); return true; }, zone);
+          if (!opened) continue;
+          await sleep(300);
+        }
+        const picked = await evaluate(({ name, zone }) => {
+          const scope = zone ? document.querySelector('.yg-modal') : document.querySelector('.yg-board');
+          const b = [...scope.querySelectorAll('button.yg-card')].filter((x) => x.getAttribute('aria-label') === name && (zone || !x.closest('.yg-grave')))[0];
+          if (!b) return false;
+          b.click();
+          return true;
+        }, { name, zone });
+        if (!picked) { if (zone) await evaluate(() => { [...document.querySelectorAll('.yg-modal button')].find((b) => b.innerText === '关上')?.click(); }); continue; }
+        await sleep(300);
+        const labels = await evaluate(() => [...document.querySelectorAll('.yg-ops button')].filter((b) => !b.disabled).map((b) => b.innerText.trim()));
+        const hit = labels.find(opText[r.idle]);
+        if (hit) { await clickIn(`${name} ${hit}`, 'const b = [...document.querySelectorAll(".yg-ops button")].find((x) => x.innerText.trim() === a); if (!b) return false; b.click(); return true;', hit); return; }
+      }
+      throw new Error(`${where}：点不到「${name}」的操作 ${r.idle}`);
+    };
+    const modalButton = () => `const b = [...document.querySelectorAll(".yg-modal button")].find((x) => !x.disabled && x.innerText.trim() === a); if (!b) return false; b.click(); return true;`;
+    const optionByName = `const b = [...document.querySelectorAll(".yg-modal button.yg-opt")].find((x) => x.querySelector(".yg-name")?.innerText.trim() === a); if (!b) return false; b.click(); return true;`;
+    for (const [n, step] of route.steps.slice(0, opts.routeSteps ?? route.steps.length).entries()) {
+      if (n + 1 < (opts.routeFrom ?? 1)) continue;
+      const where = `第 ${n + 1} 步「${step.text}」`;
+      for (const r of step.do) {
+        if (r === 'finish') { // 剩下的连锁窗口一个个点「不发动」，直到我方回合结束、浮层消失
+          for (let i = 0; i < 40 && (await evaluate(() => !!document.querySelector('.yg-modal'))); i++) await clickIn(`${where} 不发动`, modalButton(), '不发动');
+          continue;
+        }
+        if (r === 'pass' || r === 'no') await clickIn(`${where} 不发动`, modalButton(), '不发动');
+        else if (r === 'yes') await clickIn(`${where} 发动`, modalButton(), '发动');
+        else if (r === 'end-turn') await clickIn(`${where} 进结束阶段`, 'const b = [...document.querySelectorAll(".yg-final button")].find((x) => !x.disabled && x.innerText.trim() === "进结束阶段"); if (!b) return false; b.click(); return true;');
+        else if (r.idle) await doIdle(r, where);
+        else if (r.chain) await clickIn(`${where} 连锁 ${md(r.chain)}`, optionByName, md(r.chain));
+        else if (r.pick) {
+          for (const code of r.pick) await clickIn(`${where} 选 ${md(code)}`, optionByName, md(code));
+          const confirm = await evaluate(() => [...document.querySelectorAll('.yg-modal button')].some((x) => /^确定/.test(x.innerText) && !x.disabled));
+          if (confirm) await clickIn(`${where} 确定`, 'const b = [...document.querySelectorAll(".yg-modal button")].find((x) => /^确定/.test(x.innerText) && !x.disabled); b.click(); return true;');
+        } else if (r.finishPick) await clickIn(`${where} 选完`, modalButton(), '选完');
+        else if (r.option !== undefined) await clickIn(`${where} 第 ${r.option + 1} 项`, 'const bs = [...document.querySelectorAll(".yg-modal button.yg-btn.wide")]; if (!bs[a]) return false; bs[a].click(); return true;', r.option);
+        else if (r.place !== undefined || r.position !== undefined) {
+          if ((r.place ?? r.position) !== 0) throw new Error(`${where}：页面驱动只支持第一个格子 / 表示形式`);
+          await clickIn(`${where} 放置 / 表示形式`, 'const b = document.querySelector(".yg-modal button.yg-btn.wide"); if (!b) return false; b.click(); return true;');
+        } else throw new Error(`${where}：看不懂的回应 ${JSON.stringify(r)}`);
+      }
+    }
+    if (!opts.routeSteps) await until(() => !document.querySelector('.yg-modal'), null, 20000, '路线走完，没有悬着的提示').catch(fail);
+  }
+  // --open 额外卡组|墓地|除外区：点开这个区域的卡列表（停在列表上截图）；--pick-in 卡名：在列表里点这张卡，列表关上、详情区显示它
+  if (opts.open) {
+    const opened = await evaluate((z) => { const b = [...document.querySelectorAll('.yg-board button.yg-zbtn, .yg-board .yg-grave button.yg-card')].find((x) => (z === '墓地' ? x.closest('.yg-grave') : x.getAttribute('aria-label') === z)); if (!b || b.disabled) return false; b.click(); return true; }, opts.open);
+    if (!opened) throw new Error(`桌面上点不开「${opts.open}」（没有卡？）`);
+    await until((z) => document.querySelector('.yg-modal')?.getAttribute('aria-label') === (z === '墓地' ? '墓地' : z), opts.open, 10000, `「${opts.open}」的卡列表打开`);
+  }
+  if (opts.pickIn) {
+    const clicked = await evaluate((n) => { const b = [...document.querySelectorAll('.yg-modal button.yg-card')].find((x) => x.getAttribute('aria-label') === n); if (!b) return false; b.click(); return true; }, opts.pickIn);
+    if (!clicked) throw new Error(`卡列表里没有卡「${opts.pickIn}」`);
+    await until((n) => document.querySelector('.yg-detail .yg-title')?.innerText === n && !document.querySelector('.yg-modal'), opts.pickIn, 10000, `详情区显示「${opts.pickIn}」`);
   }
   // 记卡页签：--quiz-start 点「开始记卡」出第一题（--quiz-kind 指定题型就一直换到出这种）；--quiz-answer N 像用户那样答 N 题：按数字键 1 选第一项、
   // identify 再按 5 选第一个角色、回车提交、等反馈出来，还有下一题就回车翻页。最后停在答完的反馈上

@@ -88,6 +88,19 @@ shot settled --design --resume --answer 14 --end --replay
 has settled "总分" "场面分" "速度加成" "提示 1 次" "0.8" "第 2 步用了提示" "每一步之后的场面" "最好终场" "你的终场" "逐步对照" "最好" "你" "用提示" "走偏" "基准：" "白之落胤 1 卡初动起手平均" "再来一手" "重打这一手"
 lacks settled "1:30" "2:30" "3:30"
 has settled-replay "手牌 5" "白之落胤" "抽牌小丑与封锁鸟" "白之圣女 艾克利西亚" "天底的使徒" "超融合" "0 次 · ×1.0"
+# 额外卡组、墓地、除外区：重打的这一手（同样 5 张卡）里先只用页面点击走 Game8 白之落胤路线的前 2 步，点开「额外卡组」的卡列表（带绿点的卡现在有操作），点黑衣龙之艾克利西亚，详情区出现「额外卡组特殊召唤」；
+# 再走第 3、4 步（用这个按钮同调；黑衣龙把自己除外），除外区里出现被除外的黑衣龙，墓地的列表也点得开；最后从第 5 步走完整条路线，结束回合，终场和 Game8 一致
+shot extra-list --design --resume --route white-albaz --route-steps 2 --open 额外卡组
+has extra-list "额外卡组（" "带绿点的卡现在有操作可做" "黑衣龙之艾克利西亚" "三英的相剑师" "关上"
+lacks extra-list "%" "还差" "估值"
+shot extra-op --design --resume --open 额外卡组 --pick-in 黑衣龙之艾克利西亚
+has extra-op "黑衣龙之艾克利西亚" "额外卡组特殊召唤"
+shot banished-list --design --resume --route white-albaz --route-from 3 --route-steps 4 --open 除外区
+has banished-list "除外区（1）" "黑衣龙之艾克利西亚"
+shot grave-list --design --resume --open 墓地
+has grave-list "墓地（" "白之落胤" "白之圣女 艾克利西亚"
+shot walked --design --resume --route white-albaz --route-from 5 --end
+has walked "总分" "场面分" "基准：" "你的终场" "引导之圣女 库妸㽗" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "黑衣龙之艾克利西亚"
 # 记卡：开始、答一道题（数字键选、回车提交），出对错、卡的三件事和下次到期；再答一道，到期张数跟着少
 shot quiz --design --tab 记卡 --quiz-start --quiz-kind identify
 has quiz "这张卡叫什么？是什么角色？" "本题已用" "这张卡的答题用时" "还剩" "提交" "Master Duel 卡名：？" "角色（可多选）" "起手" "延伸" "终端" "打断" "手坑" "回收"
