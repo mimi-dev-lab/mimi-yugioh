@@ -4,14 +4,8 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { BRANDED } from '../src/decks/branded.js';
 import { indicesFor } from '../src/route.js';
-import { dataDir, ENGINE_DIR, start } from './helpers.js';
+import { dataDir, BRICK_SEED, WHITE_ALBAZ_SEED, withServer as withServerEnv } from './helpers.js';
 
-// 这个种子发出的起手含白之落胤，而且 Game8 路线在这手上重放得通（别的含白之落胤的起手，别的牌会让路线里的选卡对不上，那种手暂时用个人最好当基准，搜索在后面的票）
-const WHITE_ALBAZ_SEED = 37;
-const api = (url) => async (method, path, body) => {
-  const res = await fetch(`${url}${path}`, { method, ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
-  return { status: res.status, body: await res.json() };
-};
 const logLines = async (dir) => (await readFile(join(dir, 'hands.jsonl'), 'utf8').catch(() => '')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
 
 // 把 Game8 路线一步步交给服务：每个回应对着服务返回的当前提示选下标（'finish' 交给「结束回合」）
@@ -31,11 +25,8 @@ async function playRouteOverHttp(call, route) {
 }
 
 describe('打一手：HTTP 接口', () => {
-  async function withServer(fn, env = {}) {
-    const data = env.YUGIOH_DATA ?? await dataDir();
-    const server = await start({ YUGIOH_ENGINE: ENGINE_DIR, ...env, YUGIOH_DATA: data });
-    try { return await fn(api(server.url), data); } finally { server.stop(); }
-  }
+  // 这个文件测打一手，不测搜索：不搜索（YUGIOH_SEARCH_MS=0），基准只剩 Game8 和个人最好，结果不随搜索快慢变
+  const withServer = (fn, env = {}) => withServerEnv(fn, { YUGIOH_SEARCH_MS: '0', ...env });
 
   test('固定种子发含白之落胤的起手，按 Game8 路线逐步提交，结算场面分 100、基准来源 Game8，日志追加一行', () => withServer(async (call, data) => {
     const started = await call('POST', '/hand/start', { seed: WHITE_ALBAZ_SEED });
@@ -137,21 +128,21 @@ describe('打一手：HTTP 接口', () => {
     assert.equal(state2.steps[0].step, 1);
     assert.match(state2.steps[0].text, /^发动 白之落胤/);
     // 操作记录那一行：动作 + 选了哪些卡，「不发动」「放在第几格」「选第几项」折叠掉
-    assert.equal(state2.steps[0].summary, '发动 白之落胤 · 选 三英的相剑师、白之圣女 艾克利西亚');
+    assert.equal(state2.steps[0].summary, '发动 白之落胤 · 选 三英的相剑师、教导之圣女 艾克利西亚');
     assert.ok(!/不发动|放在|选第/.test(state2.steps[0].summary));
     assert.match(state2.steps[0].spent, /手牌 −1（白之落胤），额外 −1/);
-    assert.match(state2.steps[0].gained, /场上 \+2（白之落胤、白之圣女 艾克利西亚）/);
+    assert.match(state2.steps[0].gained, /场上 \+2（白之落胤、教导之圣女 艾克利西亚）/);
     const text = JSON.stringify(res.body);
     for (const leak of ['value', 'bestValue', 'fieldScore', 'curve']) assert.ok(!text.includes(`"${leak}`), leak);
     assert.deepEqual(res.body.restrictions, ['本回合额外卡组只能特殊召唤 8 星融合 / 同调怪兽（白之落胤）']);
   }));
 
-  test('烂手直接结束回合：没有 Game8 路线，基准是个人最好（暂定），写明', () => withServer(async (call, data) => {
-    const brickSeed = 1;
-    await call('POST', '/hand/start', { seed: brickSeed });
+  test('烂手直接结束回合：没有 Game8 路线，也不搜索，基准是个人最好（暂定），写明', () => withServer(async (call, data) => {
+    await call('POST', '/hand/start', { seed: BRICK_SEED });
     const ended = (await call('POST', '/hand/end')).body;
     assert.equal(ended.benchmark.source, 'personal');
     assert.equal(ended.benchmark.provisional, true);
+    assert.equal(ended.benchmark.search, 'none');
     assert.equal(ended.finalBoard.hand.length, 5);
     assert.equal(ended.fieldScore, 100);
     assert.equal((await logLines(data)).length, 1);

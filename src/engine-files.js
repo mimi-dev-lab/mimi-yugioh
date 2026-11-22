@@ -13,7 +13,13 @@ export function openEngineFiles(dir) {
   const getData = db.prepare('select * from datas where id = ?');
 
   // 引擎要的卡牌数据格式（ocgcore-wasm 的 cardReader）
+  // 读过的卡和脚本记在内存里：搜索要反复回滚重开决斗，每次重新读文件和卡库太慢
+  const cards = new Map();
   const cardReader = (code) => {
+    if (!cards.has(code)) cards.set(code, readCard(code));
+    return cards.get(code);
+  };
+  const readCard = (code) => {
     const r = getData.get(code);
     if (!r) return null;
     const setcodes = [];
@@ -28,7 +34,12 @@ export function openEngineFiles(dir) {
       attack: r.atk, defense: link ? 0 : r.def, lscale: (level >> 24) & 0xff, rscale: (level >> 16) & 0xff, link_marker: link ? r.def : 0,
     };
   };
+  const scripts = new Map();
   const scriptReader = (name) => {
+    if (!scripts.has(name)) scripts.set(name, readScript(name));
+    return scripts.get(name);
+  };
+  const readScript = (name) => {
     for (const path of [join(dir, 'scripts/official', name), join(dir, 'scripts', name)]) if (existsSync(path)) return readFileSync(path, 'utf8');
     return null;
   };
