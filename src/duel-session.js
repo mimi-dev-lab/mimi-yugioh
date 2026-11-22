@@ -19,6 +19,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   let handle = null;
   let message = null; // 引擎停在哪个提示上
   let finished = false;
+  let endBoard = null; // 我方回合结束（对手回合开始）时的场面，没到那一刻是 null
 
   function build() {
     if (handle) core.destroyDuel(handle);
@@ -39,6 +40,14 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     core.startDuel(handle);
     finished = false;
     message = null;
+    endBoard = null;
+  }
+
+  // 我方的场面：每个区域里的卡（编号、名字、格子）
+  function snapshot() {
+    const at = (location) => core.duelQueryLocation(handle, { flags: 0x1, controller: 0, location })
+      .map((c, sequence) => (c ? { code: c.code, name: files.name(c.code), sequence } : null)).filter(Boolean);
+    return { hand: at(L.HAND), monsters: at(L.MZONE), spellTraps: at(L.SZONE), grave: at(L.GRAVE), banished: at(L.REMOVED), deck: core.duelQueryCount(handle, 0, L.DECK), extra: at(L.EXTRA) };
   }
 
   // 推进引擎直到它要我们选，或者决斗结束；对手的提示自动放弃
@@ -46,6 +55,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     for (let guard = 0; guard < MAX_STEPS; guard++) {
       const status = core.duelProcess(handle);
       const messages = core.duelGetMessage(handle);
+      if (!endBoard && messages.some((m) => m.type === M.NEW_TURN && m.player === 1)) endBoard = snapshot();
       if (status === OcgProcessResult.END) { finished = true; message = null; return; }
       if (status !== OcgProcessResult.WAITING) continue;
       const m = messages[messages.length - 1];
@@ -164,12 +174,9 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
       history.push(response);
       advance();
     },
-    // 我方的场面：每个区域里的卡（编号、名字、格子）
-    board() {
-      const at = (location) => core.duelQueryLocation(handle, { flags: 0x1, controller: 0, location })
-        .map((c, sequence) => (c ? { code: c.code, name: files.name(c.code), sequence } : null)).filter(Boolean);
-      return { hand: at(L.HAND), monsters: at(L.MZONE), spellTraps: at(L.SZONE), grave: at(L.GRAVE), banished: at(L.REMOVED), deck: core.duelQueryCount(handle, 0, L.DECK), extra: at(L.EXTRA) };
-    },
+    board() { return snapshot(); },
+    // 我方回合结束那一刻的场面（对手回合开始时记下），没结束是 null；回合结束后的抽牌不算在里面
+    get endBoard() { return endBoard; },
     // 存档：记下现在走到第几个选择；回滚：同样的种子重放到那里，合法选项和存档时一致
     checkpoint() { return history.length; },
     rollback(checkpoint) {

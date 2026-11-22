@@ -46,6 +46,12 @@ test('outbound：src/ 里的外部地址抓得到，本机的不算，注释不�
   assert.deepEqual(run('outbound', root), ['src/a.js 里有外部地址 example.com：服务只连本机']);
 });
 
+test('outbound：src/decks/ 里的出处链接不算，但同一个地址写在别的 src/ 文件里照抓，decks 里的 fetch 也照抓', () => {
+  const root = repo({ 'src/decks/a.js': 'export const SOURCE = { url: "https://game8.jp/x" };', 'src/b.js': 'const u = "https://game8.jp/x";' });
+  assert.deepEqual(run('outbound', root), ['src/b.js 里有外部地址 game8.jp：服务只连本机']);
+  assert.match(run('boundary', repo({ 'src/decks/a.js': 'fetch("https://game8.jp/x");' })).join('\n'), /src\/decks\/a\.js 用了 node:https \/ fetch/);
+});
+
 test('test-isolation：测试里写常驻端口、tailnet 地址、真实数据目录都抓得到', () => {
   const root = repo({ 'test/a.test.js': 'fetch("http://127.0.0.1:4519/health"); const d = "~/.mimi-yugioh"; const t = "mini.tail597608.ts.net";' });
   assert.equal(run('test-isolation', root).length, 3);

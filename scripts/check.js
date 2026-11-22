@@ -31,6 +31,8 @@ const BOUNDARY = [
 ];
 
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
+// 卡组数据（src/decks/）里的出处链接是引用，不是请求；服务不发请求由 boundary 的 node:https / fetch 规则兜着，对 src/ 下所有文件都生效
+const OUTBOUND_EXEMPT = /^src\/decks\//;
 // 线上的东西：常驻服务的端口、tailnet 地址、真实数据目录
 const LIVE = [/\b4519\b/, /mini\.tail597608/, /[~/'"`]\.mimi-yugioh\b/];
 // 不查 test-isolation 的测试文件：它给这条检查造的坏仓里本来就要写这些
@@ -50,8 +52,8 @@ const RULES = {
     for (const f of LEGACY_FILES) if (existsSync(join(root, f))) out.push(`${f} 是旧应用（Next.js / Supabase / Cloudflare）的文件，不许回来`);
     return out;
   },
-  // src/ 和 scripts/ 里写的地址只许本机；scripts/prepare-engine.js 是唯一下载公开引擎数据的地方，不在此列
-  outbound: (root) => jsFiles(root, 'src').flatMap((f) => [...new Set([...withoutComments(read(root, f)).matchAll(/https?:\/\/([a-zA-Z0-9.-]+)/g)].map((m) => m[1]))]
+  // src/ 里写的地址只许本机（src/decks/ 里的出处链接除外）；scripts/prepare-engine.js 是唯一下载公开引擎数据的地方，不在此列
+  outbound: (root) => jsFiles(root, 'src').filter((f) => !OUTBOUND_EXEMPT.test(f.replaceAll('\\', '/'))).flatMap((f) => [...new Set([...withoutComments(read(root, f)).matchAll(/https?:\/\/([a-zA-Z0-9.-]+)/g)].map((m) => m[1]))]
     .filter((host) => !LOCAL_HOSTS.has(host)).map((host) => `${f} 里有外部地址 ${host}：服务只连本机`)),
   'test-isolation': (root) => jsFiles(root, 'test').filter((f) => !ISOLATION_EXEMPT.has(f)).flatMap((f) => {
     const text = withoutComments(read(root, f));

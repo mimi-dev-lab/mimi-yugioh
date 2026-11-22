@@ -61,4 +61,16 @@ describe('决斗会话', () => {
     assert.throws(() => s.rollback(cp + 100), /存档/);
     s.close();
   });
+
+  test('endBoard：我方回合结束前是 null，结束时记下当时的场面（之后的抽牌不算）', async () => {
+    const s = await startSession(engine, PROBE_DUEL);
+    drive(s, PLAN().slice(0, 2));
+    assert.equal(s.endBoard, null);
+    const handBefore = s.board().hand.length;
+    s.choose([s.prompt().options.findIndex((o) => o.action === 'end-turn')]);
+    for (let guard = 0; guard < 50 && !s.endBoard && s.prompt()?.kind === 'chain'; guard++) s.choose([s.prompt().options.length - 1]);
+    assert.ok(s.endBoard);
+    assert.equal(s.endBoard.hand.length, handBefore);
+    s.close();
+  });
 });
