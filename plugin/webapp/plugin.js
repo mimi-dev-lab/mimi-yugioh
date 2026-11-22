@@ -162,7 +162,7 @@ function Play({ rest, hand, cards, busy, send, end }) {
             h("span", { key: `${r.step}x`, className: "td" }, r.text.split(" → ")[0], r.text.includes(" → ") ? h("span", { className: "yg-rest" }, ` → ${r.text.split(" → ").slice(1).join(" → ")}`) : null),
             h("span", { key: `${r.step}c`, className: "td soft" }, `${r.spent} → ${r.gained}`),
           ]),
-          hand.status === "playing" && idle ? [h("span", { key: "pn", className: "yg-mono td now" }, rows.length + 1), h("span", { key: "pt", className: "yg-mono td now" }, clock(now)), h("span", { key: "px", className: "td now" }, "轮到你"), h("span", { key: "pc", className: "td" })] : null))),
+          hand.status === "playing" && (idle || rows.length === 0) ? [h("span", { key: "pn", className: "yg-mono td now" }, rows.length + 1), h("span", { key: "pt", className: "yg-mono td now" }, clock(now)), h("span", { key: "px", className: "td now" }, "轮到你"), h("span", { key: "pc", className: "td" })] : null))),
     h("section", { className: "yg-bottom" },
       h("div", { className: "yg-board" },
         h("div", { className: "yg-line" }, h("strong", null, "场地"), h("span", { className: "yg-lab" }, `召唤权 ${hand.normalSummonUsed ? "已用" : "未用"}`), h("span", { className: "yg-fill" }),
