@@ -5,7 +5,8 @@
 ## 结构
 
 ```
-src/server.js        本地服务（Node 22 内置 http，只监听 127.0.0.1:4519）：/health 和打一手的接口；环境变量、「现在」只在这里取
+src/server.js        本地服务（Node 22 内置 http，只监听 127.0.0.1:4519）：环境变量、「现在」、开端口只在这里，请求转给 service.js
+src/service.js       接口：每条路径做什么（handle(method, path, …) → [状态码, 应答]）；「现在」、数据目录、引擎由调用方传入。HTTP 服务和模拟学习者调的是它
 src/hand.js          一手：发牌（种子可注入）、记操作和时间、提示、结算（挑基准、算分、每一步之后的场面）；纯逻辑，引擎、卡组、「现在」、历史记录由调用方传入
 src/search.js        最好场面搜索：在决斗会话里做有限偏离的深度优先搜索（存档回滚、置换表），按场面值评估终场，得出最好场面值和路线（语义回应）；也给提示用（从当前局面再搜）；纯逻辑，会话、卡组、「现在」、时间上限由调用方传入
 src/practice.js      练习：按弱点发牌（拒绝采样）、隐藏基准手（固定一组、每 5 手一次）、首页统计；纯函数，卡组、日志记录、种子由调用方传入
@@ -19,12 +20,15 @@ src/banlist.js       Master Duel 禁限表（自己维护，现行 2026-11-05，
 src/route.js         展开路线重放：把一条路线的步骤喂给决斗会话，走到我方回合结束，返回终场，并和路线上写的终场对照
 src/decks/branded.js         烙印卡组数据：卡表、卡名、角色、三件事、打断数、起手类型规则
 src/decks/branded-routes.js  烙印的两条 Game8 展开路线（引擎可重放的步骤序列）
+src/sim-learner.js   模拟学习者的学习模型：每张卡的认识度 + 每个决定点会不会（FSRS 遗忘）、在合法选项里做决定、从复盘 / 提示 / 记卡 / 路线 / 分数学；纯逻辑，「现在」、随机源由调用方传入
+src/simulation.js    模拟实验的一个学习者：按练法跑 N 天（记卡、看路线、打练习手、看复盘），天末考基准手；经 service.js 的 handle() 打牌，服务和模拟时钟由调用方给
 src/engine-files.js  读引擎数据：cards.cdb（node:sqlite）和卡牌脚本，给会话提供 cardReader、scriptReader、卡名；只读
 scripts/prepare-engine.js  把固定版本的 Project Ignis CardScripts 和 BabelCDB 的 cards.cdb 下载到引擎数据目录（唯一联网的地方）
 scripts/fetch-card-names.js  按日文卡名向 ygocdb 查密码和简中名（md_name），整理卡组数据时手动跑；服务不联网
 scripts/sync-card-images.js  把卡组用到的卡图从 NAS 经 ssh（stat + tar）复制到数据目录 images/；手动跑，`--dry-run` 只打出要复制的文件数
 scripts/plugin-setup  把插件链进 Hermes 的插件目录（`--home <目录>` 沙盒用；`--live` 是上线那一步，单独一张票，要用户点头）
 scripts/plugin-smoke.sh  ./ci 的插件冒烟：临时 Hermes 网页工作区里开始一手、点卡、发动、回答提示、结束回合
+scripts/simulate.js  手动跑的模拟学习者实验（练习池预先搜索、多进程、出 docs/simulation/ 的表和图）；`--smoke` 是 ./ci 的冒烟。图在 scripts/sim-charts.js
 scripts/search-bench.js  手动跑的搜索计时：20 个随机种子发牌、搜索，打印每手的起手类型、用时、是否超时、最好值，以及用时分布和超时比例；不进 ./ci
 scripts/check.js     ./ci 用的架构约定检查（boundary、deps-whitelist、outbound、test-isolation、plugin、plugin-loads）
 plugin/              Hermes 插件「游戏王」（路由 /yugioh）：plugin.yaml、dashboard/（后端，只转发给本机服务）、webapp/plugin.js（页面）
@@ -128,6 +132,15 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 - **隐藏基准手**：`benchmarkHands(deck)` 从种子 `BENCHMARK_SEED_BASE`(700000) 往上数，每个起手类型取 `BENCHMARK_PER_TYPE`(2) 手（起手牌互不相同），一共 8 手，固定不变。每打满 `BENCHMARK_EVERY`(5) − 1 手练习手，下一手（第 5、10、15……手）是基准手，按顺序轮着发；作废的手不占位。基准手的起手牌不会作为练习手发出（发牌时拒绝）；`POST /hand/hint` 对基准手回 409「这一手不能用提示」，不计次数；结算和普通一手一样（不带 `benchmarkHand`），日志的 `benchmarkHand` 为 true。`POST /hand/start` 带 `seed`（重打、测试）照它发；发出来的起手是基准手的牌，仍算基准手（重打不能绕过提示限制、不进练习统计）。
 - **`GET /home`**：`hands`（日志里结算过的手数，含基准手）、`points`（每个练习手：`number`、`handType`、`handTypeName`、`durationMs`、`fieldScore`、`speedBonus`、`total`；基准手不在里面，号码照占）、`best`（总分最高的点）、`last`（最近一个练习手）、`types`（每个打过的起手类型：`count`、`avgFieldScore`、`avgDurationMs`，按平均场面从高到低）、`tip`（打过至少 `TIP_MIN_HANDS`(3) 手的类型里平均场面最低且不到 100 的那类，没有是 null）、`progress`（基准手按打的先后：`points`[`index`、`total`…]、`average`）。0 手时都是空的。
 - 页面：散点横轴用时（到 5:00，更慢的手把轴拉长）、纵轴场面分；速度加成区画在场面 ≥ 90% 的一条带里，颜色从 60 秒到 5:00 线性变淡，写「60 秒内 +20，到 5:00 线性降为 0」，不画 1:30 / 2:30 / 3:30 分档（那是设计稿自己画的，规格 #1 说不用）。到期记卡数来自 `GET /quiz`。
+
+## 效果验证（模拟学习者）
+
+规格 #1「效果验证 ①」。做法、参数、成功标准和结果都在 [docs/simulation-report.md](docs/simulation-report.md)，这里只记和代码有关的约定：
+
+- 模拟学习者经 `src/service.js` 的 `handle()` 打牌和记卡，和 HTTP 接口同一份逻辑；「现在」是模拟的时钟。搜索和提示的时间上限用「取一次时钟走 1 毫秒」的计步时钟（`openService` 的 `searchNow`），同样的输入同样的结果。
+- 练习手从预先搜好的练习池（`scripts/simulate.js` 的 `POOL_SIZE` 手）里抽：`nextDeal` / `pickPractice` 的 `candidateSeed` 换候选种子的来源；`weakDealing: false` 时每类权重都是 1（去掉按弱点发牌）。产品里两个选项都用默认。
+- `searchCache.ensure` 返回这次搜索的 Promise（没开新搜索是 null），预先搜练习池时等它；服务不等。
+- 模拟服务的 `searchMs` 是 0：只读共用的搜索缓存，不在后台搜，所以结果不受后台搜索快慢影响。
 
 ## 接口
 
