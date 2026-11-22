@@ -341,6 +341,101 @@ function Settled({ rest, result, busy, onAgain, onReplay, onHome }) {
 
 // ---- end of settlement ----
 
+// ---- home (design-r3/clock-home): every hand as a point (time × field), best and latest marked, the speed-bonus zone on the linear rule, per-type averages, the benchmark curve ----
+const TYPE_COLOR = { "white-albaz": "#c8ff3d", other: "#ececec", "branded-fusion": "#ff9a6b", brick: "#8a8a8a" };
+const typeColor = (id) => TYPE_COLOR[id] ?? "#bdbdbd";
+// same numbers as the service's scoring (DESIGN.md「评分」): full bonus up to FULL_BONUS_S, none from NO_BONUS_S, linear between; only for a field score from SPEED_MIN
+const FULL_BONUS_S = 60;
+const NO_BONUS_S = 300;
+const SPEED_MIN = 0.9;
+const QUICK_ANSWER_S = 5; // a quick answer in 记卡 (EASY_MS in src/quiz.js), for "about N minutes"
+
+function Scatter({ home }) {
+  const W = 820, H = 620, L = 62, R = 26, T = 40, B = 56;
+  const spanS = Math.max(NO_BONUS_S, Math.ceil(Math.max(0, ...home.points.map((p) => p.durationMs)) / 60000) * 60);
+  const x = (s) => L + (s / spanS) * (W - L - R);
+  const y = (v) => T + (1 - v) * (H - T - B);
+  const step = spanS > 600 ? 120 : 60;
+  const { best, last } = home;
+  const same = best && last && best.number === last.number;
+  const label = (p, text, dy) => {
+    const right = x(p.durationMs / 1000) > W - 230;
+    return h("text", { x: x(p.durationMs / 1000) + (right ? -14 : 14), y: y(p.fieldScore / 100) + dy, textAnchor: right ? "end" : "start", fontSize: 13, fontWeight: 600, fill: text.color, stroke: "#000", strokeWidth: 4, paintOrder: "stroke", className: "yg-mono" }, text.t);
+  };
+  return h("svg", { className: "yg-scatter", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "每一手的用时和场面" },
+    h("defs", null, h("linearGradient", { id: "yg-zone", gradientUnits: "userSpaceOnUse", x1: x(FULL_BONUS_S), x2: x(NO_BONUS_S), y1: 0, y2: 0 },
+      h("stop", { offset: 0, stopColor: "#c8ff3d", stopOpacity: 0.26 }), h("stop", { offset: 1, stopColor: "#c8ff3d", stopOpacity: 0 }))),
+    h("rect", { x: x(0), y: y(1), width: x(NO_BONUS_S) - x(0), height: y(SPEED_MIN) - y(1), fill: "url(#yg-zone)" }),
+    h("text", { x: W - R - 8, y: y(SPEED_MIN) - 9, textAnchor: "end", fontSize: 13, fill: "#c8ff3d" }, "速度加成区：场面 ≥ 90%，60 秒内 +20，到 5:00 线性降为 0"),
+    [[FULL_BONUS_S, "+20"], [NO_BONUS_S, "0"]].map(([s, t]) => h("text", { key: s, x: x(s), y: y(SPEED_MIN) + 16, textAnchor: "middle", fontSize: 11, fill: "#bdbdbd", className: "yg-mono" }, t)),
+    h("line", { x1: L, x2: W - R, y1: y(SPEED_MIN), y2: y(SPEED_MIN), stroke: "#6f8f2a", strokeDasharray: "4 4" }),
+    h("line", { x1: L, x2: W - R, y1: y(0.5), y2: y(0.5), stroke: "#333" }),
+    h("path", { d: `M${L},${T}V${H - B}H${W - R}`, fill: "none", stroke: "#8a8a8a" }),
+    [[1, "100%"], [SPEED_MIN, "90%"], [0.5, "50%"], [0, "0"]].map(([v, t]) => h("text", { key: t, x: L - 8, y: y(v) + 4, textAnchor: "end", fontSize: 12, fill: v === SPEED_MIN ? "#c8ff3d" : "#bdbdbd", className: "yg-mono" }, t)),
+    Array.from({ length: Math.floor(spanS / step) + 1 }, (_, i) => h("text", { key: i, x: x(i * step), y: H - B + 22, textAnchor: "middle", fontSize: 12, fill: "#bdbdbd", className: "yg-mono" }, clock(i * step * 1000))),
+    h("text", { x: (L + W - R) / 2, y: H - 8, textAnchor: "middle", fontSize: 12, fill: "#bdbdbd" }, "用时"),
+    home.points.length === 0 ? h("text", { x: (L + W - R) / 2, y: H / 2, textAnchor: "middle", fontSize: 15, fill: "#bdbdbd" }, "还没有记录：打完第一手，这里会出现一个点") : null,
+    home.points.map((p) => h("circle", { key: p.number, cx: x(p.durationMs / 1000), cy: y(p.fieldScore / 100), r: best && p.number === best.number ? 9 : 6, fill: typeColor(p.handType), fillOpacity: 0.92 })),
+    last ? h("circle", { cx: x(last.durationMs / 1000), cy: y(last.fieldScore / 100), r: 13, fill: "none", stroke: "#fff", strokeWidth: 2 }) : null,
+    best ? label(best, { color: "#c8ff3d", t: `${same ? "最好 · 刚才" : "最好"} ${best.total}（${clock(best.durationMs)} · ${best.fieldScore}%）` }, same ? -16 : -14) : null,
+    last && !same ? label(last, { color: "#fff", t: `刚才 ${clock(last.durationMs)} · ${last.fieldScore}%` }, 5) : null);
+}
+
+// the real progress: the total of each benchmark hand in the order played (the service only tells which ones are benchmarks here, in the curve)
+function Progress({ progress }) {
+  const pts = progress.points;
+  const W = 300, H = 64, L = 6, R = 6, T = 8, B = 8;
+  const x = (i) => (pts.length < 2 ? (L + W - R) / 2 : L + (i / (pts.length - 1)) * (W - L - R));
+  const y = (v) => T + (1 - Math.min(120, Math.max(0, v)) / 120) * (H - T - B);
+  return h("div", { className: "yg-prog" },
+    h("div", { className: "yg-lab" }, progress.average === null ? "真实进步（固定的基准手）" : `真实进步（固定的基准手）· ${pts.length} 次 · 平均 ${progress.average} 分`),
+    pts.length < 2
+      ? h("p", { className: "yg-lab" }, "打过 2 次以上才画曲线；用没有提示的固定手量进步，比分数涨没涨更可信。")
+      : h("svg", { className: "yg-progsvg", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "基准手的总分曲线" },
+        h("line", { x1: L, x2: W - R, y1: y(100), y2: y(100), stroke: "#333" }),
+        h("path", { d: pts.map((p, i) => `${i ? "L" : "M"}${x(i)},${y(p.total)}`).join(""), fill: "none", stroke: "#c8ff3d", strokeWidth: 2 }),
+        pts.map((p, i) => h("circle", { key: p.index, cx: x(i), cy: y(p.total), r: 3, fill: "#c8ff3d" }))));
+}
+
+function Home({ home, due, busy, ready, hasHand, onStart, onResume, onQuiz }) {
+  const best = home?.best;
+  const tip = home?.tip;
+  const minutes = due ? Math.max(1, Math.ceil((due * QUICK_ANSWER_S) / 60)) : 0;
+  return h("div", { className: "yg-dash", "aria-label": "首页" },
+    h("section", { className: "yg-panel yg-chart" },
+      h("div", { className: "yg-line" }, h("strong", null, "每一手：用时 × 场面"), h("span", { className: "yg-lab" }, "越往左上越好 · 一个点是一手")),
+      home ? h(Scatter, { home }) : null),
+    h("div", { className: "yg-side" },
+      h("section", { className: "yg-start" },
+        h("p", null, "随机 5 张 · 先攻 · 计时从发牌开始"),
+        h("div", { className: "yg-row" },
+          h("button", { className: "yg-startbtn", disabled: busy || !ready, onClick: onStart }, "开始一手"),
+          hasHand ? h("button", { className: "yg-resumebtn", onClick: onResume }, "继续这一手") : null)),
+      due === null ? null : h("button", { className: "yg-panel yg-due", onClick: onQuiz },
+        h("span", { className: "yg-bignum yg-mono" }, due),
+        h("span", null, h("strong", null, due ? "张卡到期" : "没有到期的卡"), h("div", { className: "yg-lab" }, due ? `记卡 · 快答约 ${minutes} 分钟` : "记卡 · 之后到期的会出现在这里"))),
+      h("section", { className: "yg-panel yg-best" },
+        h("div", { className: "yg-lab" }, "个人最好"),
+        best
+          ? h("div", { className: "yg-col tight" },
+            h("div", { className: "yg-line" }, h("span", { className: "yg-bestnum yg-mono" }, best.total), h("span", { className: "yg-lab" }, `场面 ${best.fieldScore} + 速度 ${best.speedBonus}`)),
+            h("div", { className: "yg-lab" }, `${clock(best.durationMs)} · ${best.handTypeName} · 第 ${best.number} 手`))
+          : h("p", { className: "yg-lab" }, "还没有：打完一手就有了。")),
+      h("section", { className: "yg-panel yg-types" },
+        h("div", { className: "yg-lab" }, "各类起手 · 平均场面 · 平均用时"),
+        home && home.types.length
+          ? h("ul", { className: "yg-typelist" }, home.types.map((t) => h("li", { key: t.id },
+            h("span", { className: "yg-dot", style: { background: typeColor(t.id) } }),
+            h("span", { className: "yg-fill" }, t.name),
+            h("strong", { className: "yg-mono" }, `${t.avgFieldScore}%`), h("span", { className: "yg-mono yg-lab" }, clock(t.avgDurationMs)))))
+          : h("p", { className: "yg-lab" }, "打完一手就有各类起手的平均场面和用时。"),
+        home ? h(Progress, { progress: home.progress }) : null,
+        h("p", { className: "yg-tip" }, tip
+          ? `${tip.name}：平均场面 ${tip.avgFieldScore}%、平均用时 ${clock(tip.avgDurationMs)}，最值得练，发牌会多发这类。`
+          : "每类起手打满 3 手，这里会写最值得练的是哪类。"))));
+}
+// ---- end of home ----
+
 // ---- 记卡: one question at a time, timed by the service from the moment it is handed out ----
 const BAR_MS = 10000; // the bar's full length; 5 s is where a right answer counts as Easy (EASY_MS / HARD_MS in src/quiz.js)
 const EASY_S = 5;
@@ -493,6 +588,8 @@ function YugiohApp({ rest }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  const [home, setHome] = useState(null); // GET /home: the points, best, per-type averages, benchmark curve
+  const [due, setDue] = useState(null); // GET /quiz: cards due for 记卡 (null until known)
 
   const call = useCallback(async (fn) => {
     setBusy(true); setError("");
@@ -507,24 +604,29 @@ function YugiohApp({ rest }) {
     })();
   }, [rest, call]);
 
+  // 首页的数据：回到首页（开始时、打完一手回来、换页签）就重新取
+  useEffect(() => {
+    if (screen !== "home" || tab !== "首页") return;
+    (async () => {
+      try { setHome(await rest("/home")); } catch { /* the error banner belongs to actions; the home keeps what it had */ }
+      try { setDue((await rest("/quiz")).due); } catch { setDue(null); }
+    })();
+  }, [rest, screen, tab]);
+
   const start = (seed) => call(async () => { const v = await rest("/hand/start", { method: "POST", body: seed === undefined ? {} : { seed } }); setHand(v); setResult(null); setScreen("play"); });
   const send = (indices) => call(async () => setHand(await rest("/hand/choose", { method: "POST", body: { indices } })));
   const hint = () => call(async () => { const t = await rest("/hand/hint", { method: "POST", body: {} }); setHand(await rest("/hand/choose", { method: "POST", body: { indices: t.indices } })); });
   const end = () => call(async () => { const r = await rest("/hand/end", { method: "POST", body: {} }); setResult(r); setHand(null); setScreen("settled"); });
 
   const header = h("header", { className: "yg-head" }, h("h1", null, "游戏王"),
+    home ? h("span", { className: "yg-lab" }, `烙印 · 已打 ${home.hands} 手`) : null,
     h("nav", { className: "yg-tabs" }, TABS.map((t) => h("button", { key: t, className: `yg-tab${tab === t ? " on" : ""}`, onClick: () => { setTab(t); setScreen("home"); } }, t))));
   let main;
   if (screen === "play" && hand) main = h(Play, { rest, hand, cards, busy, send, end, hint });
   else if (screen === "settled" && result) main = h(Settled, { rest, result, busy, onAgain: () => start(), onReplay: () => start(result.seed), onHome: () => setScreen("home") });
   else if (tab === "记卡") main = h(Quiz, { rest });
   else if (tab !== "首页") main = h("div", { className: "yg-home" }, h("h2", null, tab), h("p", { className: "yg-lab" }, `「${tab}」还没做，在后面的票里。`));
-  else main = h("div", { className: "yg-home", "aria-label": "首页" },
-    h("h2", null, "计时赛"),
-    h("p", { className: "yg-lab" }, "从烙印卡组随机发 5 张，先攻，自由展开；计时从发牌开始。"),
-    h("div", { className: "yg-row" },
-      h("button", { className: "yg-btn primary big", disabled: busy || !ready, onClick: () => start() }, "开始一手"),
-      hand ? h("button", { className: "yg-btn big", onClick: () => setScreen("play") }, "继续这一手") : null));
+  else main = h(Home, { home, due, busy, ready, hasHand: !!hand, onStart: () => start(), onResume: () => setScreen("play"), onQuiz: () => setTab("记卡") });
   return h("div", { className: "yg", "data-ready": ready ? "true" : "false" },
     screen === "play" || (screen === "settled" && result) ? null : header,
     error ? h("div", { className: "yg-error", role: "alert" }, error) : null,
@@ -542,10 +644,31 @@ const CSS = `
 .yg-warn { color: #ff9a6b; }
 .yg-head { display: flex; align-items: center; gap: 24px; margin-bottom: 18px; }
 .yg-head h1 { font-size: 18px; }
-.yg-tabs { display: flex; gap: 6px; }
+.yg-tabs { display: flex; gap: 6px; margin-left: auto; }
 .yg-tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 6px 12px; color: #bdbdbd; }
 .yg-tab.on { color: #c8ff3d; border-color: #c8ff3d; }
 .yg-error { border: 1px solid #ff9a6b; color: #ff9a6b; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
+.yg-dash { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: stretch; }
+.yg-panel { border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px 18px; background: #000; text-align: left; }
+.yg-chart { display: flex; flex-direction: column; gap: 6px; }
+.yg-scatter { width: 100%; height: auto; flex: 1; }
+.yg-side { display: flex; flex-direction: column; gap: 14px; }
+.yg-start { background: #c8ff3d; color: #000; border-radius: 10px; padding: 16px 20px 18px; min-height: 150px; display: flex; flex-direction: column; justify-content: space-between; }
+.yg-start p { font-weight: 600; font-size: 12px; }
+.yg .yg-startbtn { background: none; border: 0; padding: 0; color: #000; font-size: 36px; font-weight: 700; text-align: left; }
+.yg .yg-startbtn:disabled { opacity: .5; cursor: default; }
+.yg .yg-resumebtn { margin-left: auto; border: 1px solid #000; border-radius: 5px; background: none; color: #000; min-height: 34px; padding: 0 14px; font-weight: 600; }
+.yg .yg-due { display: flex; color: inherit; align-items: center; gap: 14px; width: 100%; }
+.yg-bignum { font-size: 40px; line-height: 1; }
+.yg-bestnum { font-size: 52px; line-height: 1; color: #c8ff3d; }
+.yg-types { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.yg-typelist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.yg-typelist li { display: flex; align-items: center; gap: 10px; }
+.yg-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.yg-prog { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.yg-progsvg { width: 100%; height: auto; }
+.yg-tip { font-weight: 600; font-size: 12px; line-height: 1.5; }
+
 .yg-home { display: flex; flex-direction: column; gap: 16px; padding: 24px 4px; max-width: 640px; }
 .yg-home h2 { font-size: 20px; }
 .yg-row { display: flex; gap: 8px; align-items: center; } .yg-row.wrap { flex-wrap: wrap; }

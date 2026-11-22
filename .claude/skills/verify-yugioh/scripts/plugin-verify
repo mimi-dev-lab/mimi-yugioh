@@ -2,7 +2,7 @@
 """Drive the 游戏王 plugin in a throwaway web workspace on made-up data. Nothing here reaches the user's web workspace
 (9120), panel (9119), the live yugioh service (4519) or ~/.mimi-yugioh.
 
-  plugin-verify up [--hand-seed N]      start a yugioh service on made-up data (yv launch), then a Hermes gateway that
+  plugin-verify up [--hand-seed N] [--made-up-hands N]      start a yugioh service on made-up data (yv launch), then a Hermes gateway that
                                          serves only its Webapp with this checkout's plugin/ (YUGIOH_URL = that instance);
                                          prints run.json, then runs doctor. A failed `up` stops what it started.
   plugin-verify doctor                   is this run worth driving? (read-only; exit 0 = yes)
@@ -210,7 +210,8 @@ def ready(run: dict) -> bool:
 
 def cmd_up(a) -> int:
     seed = a.hand_seed
-    started = yv("launch", *(["--hand-seed", str(seed)] if seed is not None else []), *(["--images", a.images] if a.images else []))
+    started = yv("launch", *(["--hand-seed", str(seed)] if seed is not None else []), *(["--images", a.images] if a.images else []),
+                   *(["--made-up-hands", str(a.made_up_hands)] if a.made_up_hands is not None else []))
     sys.stderr.write(started.stderr)
     m_run, m_url = re.search(r"^run: (\S+)", started.stdout, re.M), re.search(r"就绪：(http://127\.0\.0\.1:\d+)", started.stdout)
     if started.returncode or not m_run or not m_url:
@@ -346,6 +347,7 @@ def main() -> int:
     u = sub.add_parser("up")
     u.add_argument("--hand-seed", type=int, default=None, help="deal this seed through the service before the browser opens (same hand every time)")
     u.add_argument("--images", default=None, help="a folder of real card pictures (<code>.webp) to copy in instead of the made-up ones")
+    u.add_argument("--made-up-hands", type=int, default=None, help="write this many made-up settled hands into the data folder first (every 5th is a benchmark hand; 1 = a single hand), so the 首页 has something to draw")
     u.set_defaults(f=cmd_up)
     sub.add_parser("doctor").set_defaults(f=cmd_doctor)
     s = sub.add_parser("shot")

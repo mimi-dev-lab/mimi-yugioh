@@ -55,9 +55,10 @@ const PAGE_BAD = [
   [/https?:\/\//, '页面里写了网址：不引外部字体、图片，不往外发请求'],
 ];
 // 页面文字里不许出现的字样（样式表里的 100% 之类不算）：规格 #1 要保留解谜感，展开中不显示离最好还差多少
-// 结算屏（plugin.js 里 `// ---- settlement` 到 `// ---- end of settlement` 之间）是结束回合以后才画的，可以写百分比，不查这一段
+// 结算屏（plugin.js 里 `// ---- settlement` 到 `// ---- end of settlement` 之间）是结束回合以后才画的，首页（`// ---- home` 到 `// ---- end of home`）不在展开中，都可以写百分比，不查这两段
 const PAGE_TEXT_BAD = /还差|估值|\d\s*%|百分/;
 const SETTLEMENT_REGION = /\/\/ ---- settlement[\s\S]*?\/\/ ---- end of settlement[^\n]*/;
+const HOME_REGION = /\/\/ ---- home[\s\S]*?\/\/ ---- end of home[^\n]*/; // 首页也画百分比（每手的场面分、各类起手的平均），不在展开中屏里
 // 卡组数据（src/decks/）里的出处链接是引用，不是请求；服务不发请求由 boundary 的 node:https / fetch 规则兜着，对 src/ 下所有文件都生效
 const OUTBOUND_EXEMPT = /^src\/decks\//;
 // 线上的东西：常驻服务的端口、tailnet 地址、真实数据目录
@@ -87,7 +88,7 @@ const RULES = {
     const js = withoutComments(read(root, PLUGIN_JS));
     for (const m of importsOf(js)) if (!PLUGIN_MODULES.has(m)) out.push(`${PLUGIN_JS} import 了 ${m}：页面只许 import 网页工作区给的 ${[...PLUGIN_MODULES].join('、')}`);
     for (const [re, why] of PAGE_BAD) if (re.test(js)) out.push(`${PLUGIN_JS}：${why}`);
-    if (PAGE_TEXT_BAD.test(read(root, PLUGIN_JS).replace(SETTLEMENT_REGION, '').replace(/const CSS = `[\s\S]*?`;/, ''))) out.push(`${PLUGIN_JS}：页面文字里有百分比、场面估值或「还差」：展开中屏不显示这些（结算在结束回合以后）`);
+    if (PAGE_TEXT_BAD.test(read(root, PLUGIN_JS).replace(SETTLEMENT_REGION, '').replace(HOME_REGION, '').replace(/const CSS = `[\s\S]*?`;/, ''))) out.push(`${PLUGIN_JS}：页面文字里有百分比、场面估值或「还差」：展开中屏不显示这些（结算在结束回合以后）`);
     const py = stripPy(read(root, PLUGIN_API));
     for (const [re, why] of API_BAD) if (re.test(py)) out.push(`${PLUGIN_API}：${why}`);
     if (!/YUGIOH_URL/.test(py) || !/LOCAL_HOSTS/.test(py)) out.push(`${PLUGIN_API}：转发的地址要由 YUGIOH_URL 定，并且只许本机（LOCAL_HOSTS）`);
