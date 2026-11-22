@@ -3,6 +3,7 @@
 // 插件页由同目录的 plugin-verify 驱动（它先调这里的 launch）。用法见上一级的 SKILL.md。
 //   yv launch [--hand-seed N] [--images <目录>]  起服务，打出「就绪：<地址>」「run: <id>」「证据目录：<目录>」。--hand-seed：开页面之前先发这个种子的一手
 //                                                （37 发含白之落胤的起手）；--images：复制这个目录里的真卡图（<卡号>.webp），默认用编的单色小图
+//                                                --made-up-hands N：开服务之前往数据目录的 hands.jsonl 写 N 条编的结算（每 5 条里有 1 条基准手；1 = 只有一手），首页有数据可画
 //   yv doctor [--run <id>]          这次值不值得驱动（只读；退出码 0 = 值得）
 //   yv cleanup [--run <id>] [--all] 停这次起的服务（pid 和命令行都对得上才停），删临时目录，证据留下
 //   yv api <路径> [--run <id>]       只读的第二个视图：GET 这次的服务（例如 /hand），打出 JSON
@@ -63,6 +64,22 @@ async function waitFor(fn, ms, what) {
   }
 }
 
+// 编的结算记录（只给首页画图用）：固定的伪随机，每次一样；用时和场面随手数变好，各类起手的水平不同（烙印融合最差、烂手没有场面可差）
+function madeUpHands(n) {
+  const kinds = [['white-albaz', 0.92, 120], ['branded-fusion', 0.62, 215], ['other', 0.74, 170], ['brick', 1, 70]];
+  let a = 12345;
+  const rnd = () => { a = (Math.imul(a, 1103515245) + 12345) >>> 0; return a / 2 ** 32; };
+  return Array.from({ length: n }, (_, i) => {
+    const [handType, level, secs] = kinds[Math.floor(rnd() * kinds.length)];
+    const progress = n > 1 ? i / (n - 1) : 0;
+    const fieldScore = Math.round(Math.min(100, Math.max(15, 100 * (level + (1 - level) * 0.5 * progress + (rnd() - 0.5) * 0.3))));
+    const seconds = Math.round(Math.max(25, secs * (1.15 - 0.3 * progress) + (rnd() - 0.5) * 70));
+    const speedBonus = fieldScore >= 90 ? Math.round(20 * Math.min(1, Math.max(0, (300 - seconds) / 240))) : 0;
+    const benchmarkHand = n > 1 && i % 5 === 4;
+    return { type: 'hand', v: 1, id: `made-up-${i + 1}`, seed: i + 1, hand: [], handType, benchmarkHand, startedAt: 1700000000000 + i * 600000, durationMs: seconds * 1000, hints: 0, fieldScore, speedBonus, speedCounted: fieldScore >= 90, hintFactor: 1, total: fieldScore + speedBonus };
+  });
+}
+
 async function launch(opts) {
   if (!existsSync(join(ENGINE, 'VERSION'))) die(`没有引擎数据 ${ENGINE}：先 node scripts/prepare-engine.js "${ENGINE}"`);
   const handSeed = opts['hand-seed'] === undefined ? null : Number(opts['hand-seed']);
@@ -80,6 +97,7 @@ async function launch(opts) {
     if (real && existsSync(real)) copyFileSync(real, join(images, `${code}.webp`));
     else if (!opts.images) writeFileSync(join(images, `${code}.webp`), FAKE_WEBP);
   }
+  if (opts['made-up-hands'] !== undefined) writeFileSync(join(data, 'hands.jsonl'), madeUpHands(Number(opts['made-up-hands'])).map((r) => `${JSON.stringify(r)}\n`).join(''));
   const serverLog = join(dir, 'server.log');
   const out = openSync(serverLog, 'a');
   const server = spawn(process.execPath, [SERVER], { cwd: REPO, detached: true, stdio: ['ignore', out, out],
@@ -154,5 +172,5 @@ function data(opts, [file]) {
 const [cmd, ...rest] = process.argv.slice(2);
 const { opts, pos } = parse(rest);
 const COMMANDS = { launch, doctor, cleanup, api: () => api(opts, pos), data: () => data(opts, pos), runs: () => console.log(ids().join('\n') || '（没有）') };
-if (!COMMANDS[cmd]) die('子命令：launch [--hand-seed N] [--images 目录] | doctor | api /路径 | data <文件> [--tail N] | cleanup [--all] | runs（都可带 --run <id>）');
+if (!COMMANDS[cmd]) die('子命令：launch [--hand-seed N] [--images 目录] [--made-up-hands N] | doctor | api /路径 | data <文件> [--tail N] | cleanup [--all] | runs（都可带 --run <id>）');
 await COMMANDS[cmd](opts);

@@ -1,7 +1,7 @@
 // 一手：发牌、操作、结算。包住决斗会话，记每一步的操作和时间，结束时按「评分」一节算分、挑基准。
 // 纯逻辑：引擎、卡组、「现在」（毫秒）、历史记录都由调用方传进来（见 AGENTS.md「边界」）。展开中不给用户看离最好差多少，所以 view() 不含场面值。
 import { openHandSession, stateKey } from './duel-session.js';
-import { classifyHand, expand } from './deck.js';
+import { classifyHand, expand, handTypeName } from './deck.js';
 import { stepLedger } from './ledger.js';
 import { ACTION_NAMES, indicesFor, labelFor, playRoute, responseFor, sameChoice, startsStep, summarizeLabels } from './route.js';
 import { boardValue, curve, interruptsOf, score } from './scoring.js';
@@ -32,7 +32,7 @@ export function deal(deck, seed) {
 export const handKey = (hand) => [...hand].sort((a, b) => a - b).join('-');
 export class HandError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
 
-export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
+export async function startHand(engine, deck, { id, seed, now, number = 1, benchmark: isBenchmarkHand = false }) {
   const { hand } = deal(deck, seed);
   const open = () => openHandSession(engine, deck, hand, seed);
   const session = await open();
@@ -44,7 +44,7 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
   const stepBefore = new Map(); // 每一步开始前的场面，算「花了 → 换来」用
   let step = 0;
   const startedAt = now;
-  const info = { id, seed, hand: [...hand], startedAt };
+  const info = { id, seed, hand: [...hand], startedAt, ...(isBenchmarkHand ? { benchmark: true } : {}) };
 
   const named = (o) => ({ ...o, ...(o.code === undefined ? {} : { md: md(o.code), role: deck.cards[o.code]?.role }) });
   const label = (prompt, indices) => labelFor(deck, prompt, indices);
@@ -154,6 +154,7 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
   // 没有，或者已偏离，就从当前局面用 budgetMs 再搜一次（不照 Game8 路线排序），给第一个回应。再搜在另开的会话里重放用户的选择，不动用户的这一手。
   // 返回 { indices, text, hints }，indices 是当前提示的合法选项下标
   async function hint({ searched, budgetMs, now: clock }) {
+    if (isBenchmarkHand) throw new HandError('这一手不能用提示', 409);
     const prompt = session.prompt();
     if (session.endBoard || !prompt) throw new HandError('现在没有要选的提示', 409);
     const made = actions.length;
@@ -196,14 +197,13 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
     const cardsOf = (list) => list.map((c) => ({ code: c.code, md: md(c.code) }));
     // 这类起手（日志里同一个起手类型的）的平均总分，含这一手
     const handType = classifyHand(deck, hand);
-    const typeTotals = [...history.filter((r) => r.type === 'hand' && r.handType === handType).map((r) => r.total), result.total];
-    const typeName = deck.handTypes.find((t) => t.id === handType)?.name ?? (handType === 'brick' ? '烂手' : '其他起手');
+    const typeTotals = [...history.filter((r) => r.type === 'hand' && !r.benchmarkHand && r.handType === handType).map((r) => r.total), result.total];
     const record = {
-      type: 'hand', v: 1, id, seed, hand: [...hand], handType, benchmarkHand: false, startedAt, durationMs: at - startedAt, hints,
+      type: 'hand', v: 1, id, seed, hand: [...hand], handType, benchmarkHand: isBenchmarkHand, startedAt, durationMs: at - startedAt, hints,
       actions: actions.map(({ step: s, at: t, kind, text, indices, valueAfter }) => ({ step: s, atMs: t, kind, text, indices, value: valueAfter })),
       endBoard: final, userValue, bestValue: base.value, benchmark: benchmarkInfo, ...result,
     };
-    const { type: _type, ...shown } = record;
+    const { type: _type, benchmarkHand: _benchmark, ...shown } = record; // 基准手的结算和普通一手一样，不告诉用户
     const settlement = {
       ...shown,
       finalBoard: { hand: endBoard.hand.map((c) => ({ ...c, md: md(c.code) })), monsters: endBoard.monsters.map((c) => ({ ...c, md: md(c.code) })), spellTraps: endBoard.spellTraps.map((c) => ({ ...c, md: md(c.code) })) },
@@ -212,7 +212,7 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
       parts: { user: { interrupts: interruptsOf(deck, endBoard), hand: endBoard.hand.length }, best: base.line && base.source !== 'personal' ? { interrupts: interruptsOf(deck, base.line.endBoard), hand: base.line.endBoard.hand.length } : null },
       steps: userSteps.map(({ state: _state, ...step }) => step),
       bestSteps,
-      handTypeStats: { type: handType, name: typeName, average: Math.round(typeTotals.reduce((a, b) => a + b, 0) / typeTotals.length), count: typeTotals.length },
+      handTypeStats: { type: handType, name: handTypeName(deck, handType), average: Math.round(typeTotals.reduce((a, b) => a + b, 0) / typeTotals.length), count: typeTotals.length },
       curve: { user: userSteps.map((s) => (base.value > 0 ? s.value / base.value : 1)), best: base.line ? curve(deck, base.line.boards, base.value) : null },
     };
     // 走偏的那一步：用户第 i 步之后的局面和最好路线第 i 步之后的不一样（两边都按 startsStep 切步）；一直一样就是 null

@@ -7,6 +7,7 @@ POST /hand/<sub>         → POST /hand/<sub>            (every write, one route
                                                          is a 404 here and never reaches the service; the body goes through as it is)
                                                          start: deal a new hand (a seed in the body replays that hand); choose: answer the prompt;
                                                          hint: ask for the next step (counts against the score); end: end the turn
+GET  /home               → GET  /home                  (首页: every hand as a point, personal best, per-type averages, the benchmark-hand curve)
 GET  /cards              → GET  /cards                 (every card of the deck: Master Duel name, role, the three things)
 GET  /card-image?code=N  → GET  /card-image?code=N     (one card picture, as JSON with base64; the code has to be digits)
 GET  /quiz               → GET  /quiz                  (记卡: how many cards are due)
@@ -77,6 +78,12 @@ async def hand_write(sub: str, request: Request):
     if sub not in HAND_WRITES:
         return JSONResponse({"error": f"没有这个接口：/hand/{sub}"}, status_code=404)
     status, body = await asyncio.to_thread(forward, "POST", f"/hand/{sub}", await request.body())
+    return JSONResponse(body, status_code=status)
+
+
+@router.get("/home")
+async def home():
+    status, body = await asyncio.to_thread(forward, "GET", "/home")
     return JSONResponse(body, status_code=status)
 
 

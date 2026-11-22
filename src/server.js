@@ -6,6 +6,7 @@ import { BRANDED } from './decks/branded.js';
 import { openEngine } from './duel-session.js';
 import { openEngineFiles } from './engine-files.js';
 import { HandError, startHand } from './hand.js';
+import { benchmarkHands, homeStats, nextDeal } from './practice.js';
 import { RATING_NAMES, ROLES, cardStates, dueCodes, grade, nextQuestion, rate, review } from './quiz.js';
 import { rngFrom } from './hand.js';
 import { HINT_BUDGET_MS, SEARCH_BUDGET_MS, searchHand } from './search.js';
@@ -17,6 +18,7 @@ const PORT = Number(process.env.PORT ?? 4519);
 const DATA = process.env.YUGIOH_DATA ?? join(homedir(), '.mimi-yugioh');
 const ENGINE = process.env.YUGIOH_ENGINE ?? join(DATA, 'engine');
 const DECK = BRANDED;
+const BENCHMARKS = benchmarkHands(DECK); // 隐藏基准手：固定的一组，不进练习池
 const SEARCH_MS = Number(process.env.YUGIOH_SEARCH_MS ?? SEARCH_BUDGET_MS); // 一手的搜索时间上限；0 = 不搜索
 
 const store = openStore(DATA);
@@ -58,13 +60,17 @@ async function route(req, pathname, query) {
       const body = await readBody(req);
       if (body.seed !== undefined && !(Number.isInteger(body.seed) && body.seed >= 0 && body.seed < 2 ** 32)) throw new HandError('seed 要是 0 到 2^32-1 的整数');
       if (active) { active.close(); voidHand(active.info, '开了新的一手，这一手作废'); active = null; }
-      const seed = body.seed ?? (now % 2 ** 32);
-      const number = store.readHands().filter((r) => r.type === 'hand').length + 1; // 第几手：日志里结算过的手数 + 1
-      active = await startHand(await engine(), DECK, { id: `${now}-${++handCount}`, seed, now, number });
+      // 不给种子：该发基准手就发基准手（每 5 手一次），否则按弱点发练习手；给了种子（重打、测试）就照它发，算练习手
+      const history = store.readHands();
+      const { seed, benchmark } = body.seed === undefined ? nextDeal(DECK, history, { seed: now % 2 ** 32, benchmarks: BENCHMARKS }) : { seed: body.seed, benchmark: false };
+      const number = history.filter((r) => r.type === 'hand').length + 1; // 第几手：日志里结算过的手数 + 1
+      active = await startHand(await engine(), DECK, { id: `${now}-${++handCount}`, seed, now, number, benchmark });
       store.setActive(active.info);
       searchCache.ensure(active.info.hand, seed);
       return [200, active.view(now)];
     }
+    // 首页：每一手的散点、个人最好、各类起手的平均、最值得练的类型、基准手的进步曲线（基准手只出现在曲线里）
+    case 'GET /home': return [200, homeStats(DECK, store.readHands())];
     case 'GET /hand': return [200, needActive().view(now)];
     case 'POST /hand/choose': {
       const hand = needActive();

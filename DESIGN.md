@@ -8,6 +8,7 @@
 src/server.js        本地服务（Node 22 内置 http，只监听 127.0.0.1:4519）：/health 和打一手的接口；环境变量、「现在」只在这里取
 src/hand.js          一手：发牌（种子可注入）、记操作和时间、提示、结算（挑基准、算分、每一步之后的场面）；纯逻辑，引擎、卡组、「现在」、历史记录由调用方传入
 src/search.js        最好场面搜索：在决斗会话里做有限偏离的深度优先搜索（存档回滚、置换表），按场面值评估终场，得出最好场面值和路线（语义回应）；也给提示用（从当前局面再搜）；纯逻辑，会话、卡组、「现在」、时间上限由调用方传入
+src/practice.js      练习：按弱点发牌（拒绝采样）、隐藏基准手（固定一组、每 5 手一次）、首页统计；纯函数，卡组、日志记录、种子由调用方传入
 src/scoring.js       评分：场面值、场面分、速度加成、提示系数、总分；纯函数，常量和下面「评分」一节同名
 src/quiz.js          记卡：出题（三种）、批改、评分换算、到期的卡、FSRS 状态（ts-fsrs）；纯函数，卡组、日志行、「现在」、种子由调用方传入
 src/store.js         数据目录的读写（日志、进行中的一手、卡图、搜索缓存）；唯一读写数据目录的地方
@@ -119,6 +120,15 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
   服务重启时没搜完的不留痕迹，下次开这手重新搜。
 - **提示**（`hand.hint`）：先找现成的路线照着给下一步：搜完了就只看缓存里搜出的最好路线；没搜完（pending、超时、失败、none）就看能重放的 Game8 路线。用户到现在的选择（语义形式）是某条路线的前缀、路线的下一个回应在当前提示里合法，就给它。比较时 `place`（放哪一格）和 `position`（表示形式）不分是哪个：搜索只试第一个，用户选了别的格子不算偏离（近似：换格子偶尔会影响后面的路线）。没有可照的路线或已偏离，就在另开的会话里重放用户的选择，从当前局面用 `HINT_BUDGET_MS` 再搜一次（不照 Game8 路线排序），给第一个回应，不动用户的这一手。返回的是当前提示的选项下标 `indices` 加一句 `text`；`hints` 加 1，结算的提示系数 = 0.8^`hints`，`view` 和日志的 `hints` 都是它。
 
+## 练习与首页
+
+常量在 `src/practice.js`，名字和这里一致。
+
+- **按弱点发牌**：每个起手类型一个权重 = 1 + `WEAK_BOOST`(3) × (1 − 最近 `WEAK_RECENT`(10) 手练习手的平均场面分 ÷ 100)，没打过的类型是 1（全 100 分也是 1）。发牌用拒绝采样：随机抽一手（种子由 `rngFrom` 推出，所以这手的种子就能重发同样的牌），按「该类型权重 ÷ 当前最大权重」的概率接受，否则再抽，最多 `MAX_REDRAWS`(60) 次；单张卡的概率不动。基准手不算练习表现。例：固定种子 0–2999，烙印融合起手没有历史时 284 次，场面分都是 40 时 683 次。
+- **隐藏基准手**：`benchmarkHands(deck)` 从种子 `BENCHMARK_SEED_BASE`(700000) 往上数，每个起手类型取 `BENCHMARK_PER_TYPE`(2) 手（起手牌互不相同），一共 8 手，固定不变。每打满 `BENCHMARK_EVERY`(5) − 1 手练习手，下一手（第 5、10、15……手）是基准手，按顺序轮着发；作废的手不占位。基准手的起手牌不会作为练习手发出（发牌时拒绝）；`POST /hand/hint` 对基准手回 409「这一手不能用提示」，不计次数；结算和普通一手一样（不带 `benchmarkHand`），日志的 `benchmarkHand` 为 true。`POST /hand/start` 带 `seed`（重打、测试）一律当练习手。
+- **`GET /home`**：`hands`（日志里结算过的手数，含基准手）、`points`（每个练习手：`number`、`handType`、`handTypeName`、`durationMs`、`fieldScore`、`speedBonus`、`total`；基准手不在里面，号码照占）、`best`（总分最高的点）、`last`（最近一个练习手）、`types`（每个打过的起手类型：`count`、`avgFieldScore`、`avgDurationMs`，按平均场面从高到低）、`tip`（打过至少 `TIP_MIN_HANDS`(3) 手的类型里平均场面最低且不到 100 的那类，没有是 null）、`progress`（基准手按打的先后：`points`[`index`、`total`…]、`average`）。0 手时都是空的。
+- 页面：散点横轴用时（到 5:00，更慢的手把轴拉长）、纵轴场面分；速度加成区画在场面 ≥ 90% 的一条带里，颜色从 60 秒到 5:00 线性变淡，写「60 秒内 +20，到 5:00 线性降为 0」，不画 1:30 / 2:30 / 3:30 分档（那是设计稿自己画的，规格 #1 说不用）。到期记卡数来自 `GET /quiz`。
+
 ## 接口
 
 只听 127.0.0.1。一次只有一手。错误是 `{ error }`：400 请求不合法（选择非法、局面不变）、404 没有进行中的一手、409 状态不允许。
@@ -129,6 +139,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 | `GET /hand` | 当前一手：`status`（`playing` / `turn-over`）、`elapsedMs`、`hints`、`prompt`（`kind` 和合法选项，选项带 Master Duel 卡名 `md` 和角色）、`board`（手牌、怪兽区、魔陷区、墓地、除外、额外卡组）、`normalSummonUsed`（召唤权）、`restrictions`（已生效限制）、`actions`（每个选择一条：第几步、距开局毫秒、文字）、`steps`（操作记录，每一步一行：`step`、`atMs` 是这一步最后一个选择的时间、`text`、`spent` / `gained` 是这一步前后各区域的卡之差，见 `src/ledger.js`：花了 = 离开手牌 / 额外 / 卡组 / 场上的，换来 = 进入场上 / 手牌 / 墓地 / 除外的，手牌→场上两边都写）。展开中没有场面值，也没有离最好的差距 |
 | `POST /hand/choose` `{ indices }` | 对当前提示选选项下标数组（单选放一个）。非法选择 400，局面不变。返回当前一手 |
 | `POST /hand/hint` | 要一个提示：返回 `{ indices, text, hints }`，`indices` 是当前提示的合法选项下标（直接交给 `/hand/choose` 就是照提示走），`text` 是一句说明，`hints` 是这一手到现在要过几次。当前提示不需要选择（没有提示、回合已结束）返回 409，不计数。算法见「最好场面搜索」 |
+| `GET /home` | 首页统计，见「练习与首页」 |
 | `GET /cards` | 卡组里每张卡：`md`（Master Duel 简中名）、`role`、`does / cost / limit`（三件事）；页面点卡时显示 |
 | `GET /card-image?code=N` | 一张卡图，`{ code, type, base64 }`（插件经 `ctx.rest` 只读 JSON，页面拼成 data: 地址）；数据目录 `images/` 里没有就 404；`code` 只收纯数字 |
 | `GET /quiz` | 记卡：`{ due, reviewing, fresh }`，到期的张数（答过的到期了的 + 没答过的） |
@@ -152,7 +163,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 | 文件 | 内容 |
 |---|---|
-| `hands.jsonl` | 只追加，一行一个 JSON。结算一行（`type: "hand"`）：`id`、`seed`、`hand`（起手 5 个密码）、`handType`、`benchmarkHand`（是不是基准手，现在恒为 false）、`startedAt`（毫秒）、`durationMs`、`hints`（提示次数）、`actions`（每个选择一条：`step`、`atMs`、`kind`、`text`、`indices`、`value` 是这个选择之后的场面值）、`endBoard`（终场的手牌、怪兽区、魔陷区密码）、`userValue`、`bestValue`、`benchmark`（`source`：`search` / `game8` / `personal`，`routeId`（Game8 路线才有）、`provisional`、`search`：搜索现状 `done` / `pending` / `timed-out` / `failed` / `none` / `replay-failed`）、`fieldScore`、`speedBonus`、`speedCounted`、`hintFactor`、`total`。作废一行（`type: "void"`）：`id`、`seed`、`hand`、`startedAt`、`reason` |
+| `hands.jsonl` | 只追加，一行一个 JSON。结算一行（`type: "hand"`）：`id`、`seed`、`hand`（起手 5 个密码）、`handType`、`benchmarkHand`（是不是基准手）、`startedAt`（毫秒）、`durationMs`、`hints`（提示次数）、`actions`（每个选择一条：`step`、`atMs`、`kind`、`text`、`indices`、`value` 是这个选择之后的场面值）、`endBoard`（终场的手牌、怪兽区、魔陷区密码）、`userValue`、`bestValue`、`benchmark`（`source`：`search` / `game8` / `personal`，`routeId`（Game8 路线才有）、`provisional`、`search`：搜索现状 `done` / `pending` / `timed-out` / `failed` / `none` / `replay-failed`）、`fieldScore`、`speedBonus`、`speedCounted`、`hintFactor`、`total`。作废一行（`type: "void"`）：`id`、`seed`、`hand`、`startedAt`、`reason` |
 | `images/<卡号>.webp` | 卡图，`scripts/sync-card-images.js` 从 NAS 复制来，只放卡组用到的几十张；不进仓。cn 卡图上印的是另一套译名，页面一律把 `md_name` 写在图下方；NAS 上没有的卡（现在是 82344137 原初之神 法拉）页面在图的位置写卡名 |
 | `quiz.jsonl` | 只追加，一行一次答题：`type: "answer"`、`at`（毫秒）、`code`、`kind`、`correct`、`ms`、`rating`（Again/Hard/Good/Easy）、`picked`（`option`、`roles`）、`card`（答完之后这张卡的 FSRS 状态，JSON）。一张卡现在的状态 = 它最后一行的 `card`，没有单独的状态文件，所以不会和答题记录对不上 |
 | `search/<起手>.json` | 搜索缓存，一手起手一个文件，文件名是排序后的 5 个密码用 `-` 连起来（`handKey`）。内容：`v`（版本，`searchVersion(deck)` 的字符串，对不上现行的就当没有这条）、`hand`（排序后的 5 个密码）、`seed`（搜它用的种子）、`budgetMs`（搜它时的时间上限；超时的条目在现在的上限更大时重搜）、`at`（写入时的毫秒时间）、`timedOut`、`value`（找到的最好场面值，一条都没找到是 null）、`steps`（路线，格式同卡组数据里的 `routes[].steps`，每个回应是语义回应）、`nodes`、`elapsedMs`。先写临时文件再改名；`timedOut` 为 true 的不当基准 |
@@ -160,4 +171,4 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 ## 插件
 
-`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /hand`、`POST /hand/{start,choose,end}`（白名单 `HAND_WRITES`，别的路径 404 不到服务）、`GET /cards`、`GET /card-image?code=`（只收数字）。服务没应答是 502。页面 `plugin/webapp/plugin.js`：首页（开始一手 / 继续这一手）、记卡和记录（占位）、展开中屏（照设计稿 clock-play：计时、提示次数、操作记录、场地、手牌、点卡的详情和合法操作、引擎提示的浮层、提示按钮、结束回合）、小结算（总分、场面分、速度加成、提示系数；完整结算屏另一张票）。提示按钮写着「分数 ×0.8」但现在是灰的：服务的提示接口 `POST /hand/hint` 已有，插件转发和按钮接上另开票。展开中页面拿不到场面值：服务不发，页面上也不许出现百分比、「还差」、估值（`./ci` 的 plugin 检查查源码，plugin-smoke 查渲染出来的文字）。
+`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /hand`、`POST /hand/{start,choose,end}`（白名单 `HAND_WRITES`，别的路径 404 不到服务）、`GET /home`、`GET /cards`、`GET /card-image?code=`（只收数字）。服务没应答是 502。页面 `plugin/webapp/plugin.js`：首页（开始一手 / 继续这一手）、记卡和记录（占位）、展开中屏（照设计稿 clock-play：计时、提示次数、操作记录、场地、手牌、点卡的详情和合法操作、引擎提示的浮层、提示按钮、结束回合）、小结算（总分、场面分、速度加成、提示系数；完整结算屏另一张票）。提示按钮写着「分数 ×0.8」但现在是灰的：服务的提示接口 `POST /hand/hint` 已有，插件转发和按钮接上另开票。展开中页面拿不到场面值：服务不发，页面上也不许出现百分比、「还差」、估值（`./ci` 的 plugin 检查查源码，plugin-smoke 查渲染出来的文字）。

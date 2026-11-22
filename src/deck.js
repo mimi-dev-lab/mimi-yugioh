@@ -31,3 +31,8 @@ export function classifyHand(deck, hand) {
   for (const type of deck.handTypes) if (type.has.some((code) => hand.includes(code))) return type.id;
   return hand.some((code) => deck.cards[code]?.role === '起手') ? 'other' : 'brick';
 }
+
+// 起手类型的显示名：卡组数据里有名字的用它，其余是「其他起手」和「烂手」
+export function handTypeName(deck, id) {
+  return deck.handTypes.find((t) => t.id === id)?.name ?? (id === 'brick' ? '烂手' : '其他起手');
+}
