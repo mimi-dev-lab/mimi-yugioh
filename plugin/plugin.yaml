@@ -1,0 +1,11 @@
+name: yugioh
+version: 0.1.0
+description: "游戏王 in the web workspace (mimi-dev-lab/mimi-yugioh)"
+author: "mimi-dev-lab"
+requires_hermes: ">=0.22"
+tags: [dashboard]
+# A shell only: the web workspace page (webapp/plugin.js, linked as ~/.hermes/desktop-plugins/yugioh) and one thin backend
+# (dashboard/plugin_api.py) that forwards to the yugioh service on this machine. Rules and scores are worked out by src/, not here.
+# register() adds no tools or hooks.
+provides_tools: []
+provides_hooks: []

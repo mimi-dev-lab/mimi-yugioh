@@ -16,7 +16,7 @@ const repo = (files) => {
   }
   return root;
 };
-const RULES = ['deps-whitelist', 'outbound', 'test-isolation', 'boundary'];
+const RULES = ['deps-whitelist', 'outbound', 'test-isolation', 'boundary', 'plugin', 'plugin-loads'];
 
 test('本仓现在的样子过所有规则', () => {
   for (const rule of RULES) assert.deepEqual(run(rule, HERE), [], rule);
@@ -59,4 +59,22 @@ test('test-isolation：测试里写常驻端口、tailnet 地址、真实数据�
 
 test('不认识的规则名报错', () => {
   assert.match(run('nope', HERE)[0], /没有这条检查/);
+});
+
+const GOOD_API = 'import urllib.request\nLOCAL_HOSTS = ("127.0.0.1",)\nimport os\nos.environ.get("YUGIOH_URL")\n';
+const GOOD_JS = 'import { ROUTES_AREA } from "@hermes/plugin-sdk";\nimport { createElement as h } from "react";\nconst CSS = `.a { width: 100%; }`;\n';
+
+test('plugin：页面 import 别的东西、自己发请求、写外部网址、展开中写百分比或「还差」，后端起子进程、读文件、写外部地址，都抓得到', () => {
+  const ok = repo({ 'plugin/webapp/plugin.js': GOOD_JS, 'plugin/dashboard/plugin_api.py': GOOD_API });
+  assert.deepEqual(run('plugin', ok), []); // 样式表里的 100% 不算
+  const bad = repo({
+    'plugin/webapp/plugin.js': 'import x from "lodash";\nfetch("/a");\nconst s = "https://fonts.example.com/a";\nconst t = "还差 3 分 80%";\n',
+    'plugin/dashboard/plugin_api.py': 'import subprocess\nopen("a")\nu = "http://example.com/x"\n',
+  });
+  const problems = run('plugin', bad).join('\n');
+  for (const want of [/import 了 lodash/, /不自己发请求/, /写了网址/, /百分比、场面估值或「还差」/, /起子进程或另开网络连接/, /读文件/, /写了不是本机的地址/, /YUGIOH_URL/]) assert.match(problems, want);
+});
+
+test('plugin：缺文件时说明缺哪个', () => {
+  assert.match(run('plugin', repo({}))[0], /没有 plugin\/webapp\/plugin\.js/);
 });

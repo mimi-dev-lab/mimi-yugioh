@@ -8,7 +8,8 @@
 src/server.js        本地服务（Node 22 内置 http，只监听 127.0.0.1:4519）：/health 和打一手的接口；环境变量、「现在」只在这里取
 src/hand.js          一手：发牌（种子可注入）、记操作和时间、结算（挑基准、算分、每一步之后的场面）；纯逻辑，引擎、卡组、「现在」、历史记录由调用方传入
 src/scoring.js       评分：场面值、场面分、速度加成、提示系数、总分；纯函数，常量和下面「评分」一节同名
-src/store.js         数据目录的读写（日志、进行中的一手）；唯一写数据目录的地方
+src/store.js         数据目录的读写（日志、进行中的一手、卡图）；唯一读写数据目录的地方
+src/ledger.js        一步的「花了什么 → 换来什么」：比较这一步前后我方各区域的卡；纯函数
 src/duel-session.js  决斗会话：包住规则引擎 ocgcore-wasm，一手牌一个会话；开局（卡组、起手、种子）、当前提示和合法选项、提交选择、查场面、存档回滚；纯逻辑，卡库和脚本由调用方注入
 src/deck.js          卡组：展开张数、检查卡组数据（40/15 张、禁限、每张卡的名字角色三件事打断数）、起手分类；纯函数
 src/banlist.js       Master Duel 禁限表（自己维护，现行 2026-11-05，只收和卡组有关的条目）
@@ -18,7 +19,12 @@ src/decks/branded-routes.js  烙印的两条 Game8 展开路线（引擎可重�
 src/engine-files.js  读引擎数据：cards.cdb（node:sqlite）和卡牌脚本，给会话提供 cardReader、scriptReader、卡名；只读
 scripts/prepare-engine.js  把固定版本的 Project Ignis CardScripts 和 BabelCDB 的 cards.cdb 下载到引擎数据目录（唯一联网的地方）
 scripts/fetch-card-names.js  按日文卡名向 ygocdb 查密码和简中名（md_name），整理卡组数据时手动跑；服务不联网
-scripts/check.js     ./ci 用的架构约定检查（boundary、deps-whitelist、outbound、test-isolation）
+scripts/sync-card-images.js  把卡组用到的卡图从 NAS 经 ssh（stat + tar）复制到数据目录 images/；手动跑，`--dry-run` 只打出要复制的文件数
+scripts/plugin-setup  把插件链进 Hermes 的插件目录（`--home <目录>` 沙盒用；`--live` 是上线那一步，单独一张票，要用户点头）
+scripts/plugin-smoke.sh  ./ci 的插件冒烟：临时 Hermes 网页工作区里开始一手、点卡、发动、回答提示、结束回合
+scripts/check.js     ./ci 用的架构约定检查（boundary、deps-whitelist、outbound、test-isolation、plugin、plugin-loads）
+plugin/              Hermes 插件「游戏王」（路由 /yugioh）：plugin.yaml、dashboard/（后端，只转发给本机服务）、webapp/plugin.js（页面）
+.claude/skills/verify-yugioh/  在真页面上验证的技能：yv.mjs（临时服务）、plugin-verify（临时网页工作区）、plugin-shot.mjs（无头 Chromium）
 test/                模块测试与起服务的测试（帮手 helpers.js：PORT=0、临时数据目录、打开引擎、按计划驱动会话）
 ci                   合并前的统一检查（land 跑它），检查项在 checks/list（./ci 是 mac-mini 共用运行器的拷贝）
 ```
@@ -30,6 +36,8 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 | `PORT` | `4519` | 端口（`0` = 随便挑一个空闲的） |
 | `YUGIOH_DATA` | `~/.mimi-yugioh` | 数据目录（仓外、不进 git） |
 | `YUGIOH_ENGINE` | `$YUGIOH_DATA/engine` | 引擎数据目录（卡库、脚本）；测试和 `./ci` 用 `~/.cache/mimi-yugioh/engine` |
+| `YUGIOH_URL` | `http://127.0.0.1:4519` | 插件后端转发到哪个服务（只许本机）；在 Hermes 网关的环境里设 |
+| `YUGIOH_NAS`、`YUGIOH_NAS_IMAGES` | `lifan222@192.168.10.124`、`mimi-projects/mimi-yugioh/images/cn` | 只有 `scripts/sync-card-images.js` 读：NAS 的 ssh 地址和卡图目录（相对它的家目录） |
 
 ## 引擎数据
 
@@ -88,8 +96,10 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 | 路径 | 作用 |
 |---|---|
 | `POST /hand/start` `{ seed? }` | 开始一手。`seed` 是 0 到 2^32-1 的整数，同一个种子发同一手、引擎洗同一副牌；不给就用现在的时间。已有进行中的一手会被作废（日志记 `void`）。返回当前一手 |
-| `GET /hand` | 当前一手：`status`（`playing` / `turn-over`）、`elapsedMs`、`hints`、`prompt`（`kind` 和合法选项，选项带 Master Duel 卡名 `md` 和角色）、`board`（手牌、怪兽区、魔陷区、墓地、除外、额外卡组）、`normalSummonUsed`（召唤权）、`restrictions`（已生效限制）、`actions`（第几步、距开局毫秒、文字）。展开中没有场面值，也没有离最好的差距 |
+| `GET /hand` | 当前一手：`status`（`playing` / `turn-over`）、`elapsedMs`、`hints`、`prompt`（`kind` 和合法选项，选项带 Master Duel 卡名 `md` 和角色）、`board`（手牌、怪兽区、魔陷区、墓地、除外、额外卡组）、`normalSummonUsed`（召唤权）、`restrictions`（已生效限制）、`actions`（每个选择一条：第几步、距开局毫秒、文字）、`steps`（操作记录，每一步一行：`step`、`atMs` 是这一步最后一个选择的时间、`text`、`spent` / `gained` 是这一步前后各区域的卡之差，见 `src/ledger.js`：花了 = 离开手牌 / 额外 / 卡组 / 场上的，换来 = 进入场上 / 手牌 / 墓地 / 除外的，手牌→场上两边都写）。展开中没有场面值，也没有离最好的差距 |
 | `POST /hand/choose` `{ indices }` | 对当前提示选选项下标数组（单选放一个）。非法选择 400，局面不变。返回当前一手 |
+| `GET /cards` | 卡组里每张卡：`md`（Master Duel 简中名）、`role`、`does / cost / limit`（三件事）；页面点卡时显示 |
+| `GET /card-image?code=N` | 一张卡图，`{ code, type, base64 }`（插件经 `ctx.rest` 只读 JSON，页面拼成 data: 地址）；数据目录 `images/` 里没有就 404；`code` 只收纯数字 |
 | `POST /hand/end` | 结束回合并结算：还停在主阶段就进结束阶段，之后放行连锁、不发动可选效果；遇到要选的东西返回 409，用户选完再结束。返回结算（分数各项、`benchmark`、终场和最好终场、`steps`、`curve`、`divergeStep`），并往日志追加一行 |
 
 `restrictions` 是按卡写死的（`src/decks/branded.js` 的 `RESTRICTIONS`）：这张卡发动过效果，就列出它带来的当回合限制，只收卡面写着「发动回合」的几条；引擎不对外报限制。`normalSummonUsed` 来自引擎的召唤、盖放怪兽消息。
@@ -99,4 +109,9 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 | 文件 | 内容 |
 |---|---|
 | `hands.jsonl` | 只追加，一行一个 JSON。结算一行（`type: "hand"`）：`id`、`seed`、`hand`（起手 5 个密码）、`handType`、`benchmarkHand`（是不是基准手，现在恒为 false）、`startedAt`（毫秒）、`durationMs`、`hints`、`actions`（每个选择一条：`step`、`atMs`、`kind`、`text`、`indices`、`value` 是这个选择之后的场面值）、`endBoard`（终场的手牌、怪兽区、魔陷区密码）、`userValue`、`bestValue`、`benchmark`（`source`、`routeId`、`provisional`）、`fieldScore`、`speedBonus`、`speedCounted`、`hintFactor`、`total`。作废一行（`type: "void"`）：`id`、`seed`、`hand`、`startedAt`、`reason` |
+| `images/<卡号>.webp` | 卡图，`scripts/sync-card-images.js` 从 NAS 复制来，只放卡组用到的几十张；不进仓。cn 卡图上印的是另一套译名，页面一律把 `md_name` 写在图下方；NAS 上没有的卡（现在是 82344137 原初之神 法拉）页面在图的位置写卡名 |
 | `active.json` | 进行中的一手的开局信息（`id`、`seed`、`hand`、`startedAt`）；结算时删。服务启动时发现它还在，说明上次没打完，记一行 `void`（原因：服务重启）再删 |
+
+## 插件
+
+`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /hand`、`POST /hand/{start,choose,end}`（白名单 `HAND_WRITES`，别的路径 404 不到服务）、`GET /cards`、`GET /card-image?code=`（只收数字）。服务没应答是 502。页面 `plugin/webapp/plugin.js`：首页（开始一手 / 继续这一手）、记卡和记录（占位）、展开中屏（照设计稿 clock-play：计时、提示次数、操作记录、场地、手牌、点卡的详情和合法操作、引擎提示的浮层、提示按钮、结束回合）、小结算（总分、场面分、速度加成、提示系数；完整结算屏另一张票）。提示按钮写着「分数 ×0.8」但现在是灰的：提示接口属于 #5（最好场面搜索）。展开中页面拿不到场面值：服务不发，页面上也不许出现百分比、「还差」、估值（`./ci` 的 plugin 检查查源码，plugin-smoke 查渲染出来的文字）。

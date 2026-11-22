@@ -2,6 +2,7 @@
 // 纯逻辑：引擎、卡组、「现在」（毫秒）、历史记录都由调用方传进来（见 AGENTS.md「边界」）。展开中不给用户看离最好差多少，所以 view() 不含场面值。
 import { startSession } from './duel-session.js';
 import { classifyHand, expand } from './deck.js';
+import { stepLedger } from './ledger.js';
 import { playRoute, startsStep } from './route.js';
 import { boardValue, curve, score } from './scoring.js';
 
@@ -40,6 +41,7 @@ export async function startHand(engine, deck, { id, seed, now }) {
   const session = await startSession(engine, { hand, deck: rest, extra: expand(deck.extra), seed: engineSeed });
   const md = (code) => deck.cards[code]?.md ?? String(code);
   const actions = []; // { step, at（距开局毫秒）, kind, text, indices, valueAfter, state }
+  const stepBefore = new Map(); // 每一步开始前的场面，算「花了 → 换来」用
   let step = 0;
   const startedAt = now;
   const info = { id, seed, hand: [...hand], startedAt };
@@ -64,10 +66,21 @@ export async function startHand(engine, deck, { id, seed, now }) {
     if (!prompt) throw new HandError('没有要选的提示了', 409);
     let text = '';
     try { text = label(prompt, indices); } catch { /* 下标不合法：读不到选项，由下面的 choose 报错 */ }
+    const before = session.board();
     try { session.choose(indices); } catch (e) { throw new HandError(e.message); } // 非法选择在这里被拒绝，会话状态不变
-    if (startsStep(prompt, indices) || step === 0) step++;
+    if (startsStep(prompt, indices) || step === 0) { step++; stepBefore.set(step, before); }
     const board = session.board();
-    actions.push({ step, at: at - startedAt, kind: prompt.kind, text, indices, valueAfter: boardValue(deck, board), state: stateKey(board) });
+    actions.push({ step, at: at - startedAt, kind: prompt.kind, text, indices, valueAfter: boardValue(deck, board), state: stateKey(board), board });
+  }
+
+  // 操作记录：每一步一行（时间取这一步最后一个选择的时间），「花了 → 换来」是这一步开始前和现在最后一个选择之后的场面之差
+  function stepRows() {
+    const rows = [];
+    for (const a of actions) {
+      const last = rows.at(-1);
+      if (last?.step === a.step) { last.atMs = a.at; last.text += ` → ${a.text}`; last.after = a.board; } else rows.push({ step: a.step, atMs: a.at, text: a.text, after: a.board });
+    }
+    return rows.map(({ after, ...r }) => ({ ...r, ...stepLedger(stepBefore.get(r.step), after, md) }));
   }
 
   function view(at) {
@@ -81,6 +94,7 @@ export async function startHand(engine, deck, { id, seed, now }) {
       normalSummonUsed: session.normalSummonUsed,
       restrictions: (deck.restrictions ?? []).filter((r) => session.activated.includes(r.code)).map((r) => r.text),
       actions: actions.map(({ step: s, at: t, text }) => ({ step: s, atMs: t, text })),
+      steps: stepRows(),
     };
   }
 
