@@ -128,10 +128,10 @@ describe('打一手：HTTP 接口', () => {
     assert.equal(state2.steps[0].step, 1);
     assert.match(state2.steps[0].text, /^发动 白之落胤/);
     // 操作记录那一行：动作 + 选了哪些卡，「不发动」「放在第几格」「选第几项」折叠掉
-    assert.equal(state2.steps[0].summary, '发动 白之落胤 · 选 三英的相剑师、白之圣女 艾克利西亚');
+    assert.equal(state2.steps[0].summary, '发动 白之落胤 · 选 三英的相剑师、教导之圣女 艾克利西亚');
     assert.ok(!/不发动|放在|选第/.test(state2.steps[0].summary));
     assert.match(state2.steps[0].spent, /手牌 −1（白之落胤），额外 −1/);
-    assert.match(state2.steps[0].gained, /场上 \+2（白之落胤、白之圣女 艾克利西亚）/);
+    assert.match(state2.steps[0].gained, /场上 \+2（白之落胤、教导之圣女 艾克利西亚）/);
     const text = JSON.stringify(res.body);
     for (const leak of ['value', 'bestValue', 'fieldScore', 'curve']) assert.ok(!text.includes(`"${leak}`), leak);
     assert.deepEqual(res.body.restrictions, ['本回合额外卡组只能特殊召唤 8 星融合 / 同调怪兽（白之落胤）']);
