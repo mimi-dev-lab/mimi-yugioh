@@ -14,8 +14,8 @@ const jsFiles = (root, dir) => filesIn(root, dir, /\.js$/);
 // 去掉整行注释和块注释（注释里提到 process.env 不算用了它）
 const withoutComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
-// 依赖白名单：只有规则引擎；ts-fsrs（间隔复习）到用它的那张票再加进来
-const ALLOWED_DEPS = new Set(['ocgcore-wasm']);
+// 依赖白名单：规则引擎和间隔复习（#9 加了 ts-fsrs）
+const ALLOWED_DEPS = new Set(['ocgcore-wasm', 'ts-fsrs']);
 // 旧应用（2026-02 的 Next.js + Supabase + Cloudflare）不许回来
 const LEGACY_FILES = ['next.config.ts', 'next.config.js', 'next.config.mjs', 'wrangler.toml', 'supabase', 'app', 'components', 'migrations', 'Dockerfile', 'docker-compose.yml'];
 const LEGACY_DEPS = /^(next|react|react-dom|@supabase\/.*|wrangler|@cloudflare\/.*|tailwindcss|radix-ui)$/;

@@ -6,6 +6,8 @@ import { BRANDED } from './decks/branded.js';
 import { openEngine } from './duel-session.js';
 import { openEngineFiles } from './engine-files.js';
 import { HandError, startHand } from './hand.js';
+import { RATING_NAMES, ROLES, cardStates, dueCodes, grade, nextQuestion, rate, review } from './quiz.js';
+import { rngFrom } from './hand.js';
 import { openStore } from './store.js';
 
 const PORT = Number(process.env.PORT ?? 4519);
@@ -20,6 +22,7 @@ const engine = () => (enginePromise ??= openEngine(openEngineFiles(ENGINE)).catc
 
 let active = null; // 进行中的一手（同一时间只有一手）
 let handCount = 0;
+let quiz = null; // 记卡：现在在答的这一题（{ question, answer, code, shownAt }），同一时间一题；答完或换新题就清掉
 
 // 把一手没打完就作废的情况记进日志：服务重启时留在 active.json 里的、或者被新开的一手顶掉的
 const voidHand = (info, reason) => { store.appendHand({ type: 'void', ...info, reason }); store.clearActive(); };
@@ -73,6 +76,35 @@ async function route(req, pathname, query) {
       const bytes = store.readImage(query.get('code'));
       if (!bytes) return [404, { error: '没有这张卡图（先跑 scripts/sync-card-images.js）' }];
       return [200, { code: Number(query.get('code')), type: 'image/webp', base64: bytes.toString('base64') }];
+    }
+    // 记卡：到期的张数（有记录以来答过的卡到期了的 + 没答过的），没有每日题量
+    case 'GET /quiz': {
+      const { reviewing, fresh } = dueCodes(DECK, cardStates(store.readQuiz()), new Date(now), rngFrom(0));
+      return [200, { due: reviewing.length + fresh.length, reviewing: reviewing.length, fresh: fresh.length }];
+    }
+    // 出下一题：计时从这一刻起；没有到期的卡时 { done: true }。再调一次就换一题（上一题作废、不记录）
+    case 'POST /quiz/next': {
+      const next = nextQuestion(DECK, store.readQuiz(), new Date(now), now % 2 ** 32);
+      if (!next) { quiz = null; return [200, { done: true, due: 0 }]; }
+      quiz = { ...next, shownAt: now };
+      return [200, { done: false, due: next.due, fresh: next.fresh, lastMs: next.lastMs, history: next.history, ...next.question }];
+    }
+    // 答题：{ option: 选项下标, roles: [角色] }，用时由服务从出题算起；记一行日志（带新的 FSRS 状态），返回对错、正确答案、这张卡的三件事、下次到期
+    case 'POST /quiz/answer': {
+      if (!quiz) throw new HandError('没有在答的题（先 POST /quiz/next）', 404);
+      const { option, roles = [] } = await readBody(req);
+      if (!Number.isInteger(option) || option < 0 || option >= quiz.question.options.length) throw new HandError('option 要是选项的下标');
+      if (!Array.isArray(roles) || roles.some((r) => !ROLES.includes(r))) throw new HandError(`roles 只能是 ${ROLES.join('、')}`);
+      const ms = now - quiz.shownAt;
+      const { correct } = grade(quiz.answer, { option, roles });
+      const rating = rate(correct, ms);
+      const prior = cardStates(store.readQuiz()).get(quiz.code) ?? null;
+      const card = review(prior, rating, new Date(now));
+      store.appendQuiz({ type: 'answer', at: now, code: quiz.code, kind: quiz.question.kind, correct, ms, rating: RATING_NAMES[rating], picked: { option, roles }, card });
+      const c = DECK.cards[quiz.code];
+      const result = { correct, ms, rating: RATING_NAMES[rating], dueInMs: new Date(card.due) - now, answerIndex: quiz.answer.index, answerRoles: quiz.answer.roles, card: { code: quiz.code, md: c.md, role: c.role, does: c.does, cost: c.cost, limit: c.limit } };
+      quiz = null;
+      return [200, result];
     }
     default: return [404, { error: '没有这个接口' }];
   }
