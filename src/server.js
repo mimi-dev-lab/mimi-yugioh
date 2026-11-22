@@ -26,7 +26,7 @@ const voidHand = (info, reason) => { store.appendHand({ type: 'void', ...info, r
 const stale = store.readActive();
 if (stale) voidHand(stale, '服务重启，进行中的一手作废');
 
-const json = (res, status, value) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value));
+const json = (res, status, value) => { const text = JSON.stringify(value); res.writeHead(status, { 'content-type': 'application/json' }).end(text); }; // 先序列化再写头：序列化出错时还能回 500
 const readBody = async (req) => {
   let text = '';
   for await (const chunk of req) text += chunk;
@@ -46,7 +46,8 @@ async function route(req, pathname, query) {
       if (body.seed !== undefined && !(Number.isInteger(body.seed) && body.seed >= 0 && body.seed < 2 ** 32)) throw new HandError('seed 要是 0 到 2^32-1 的整数');
       if (active) { active.close(); voidHand(active.info, '开了新的一手，这一手作废'); active = null; }
       const seed = body.seed ?? (now % 2 ** 32);
-      active = await startHand(await engine(), DECK, { id: `${now}-${++handCount}`, seed, now });
+      const number = store.readHands().filter((r) => r.type === 'hand').length + 1; // 第几手：日志里结算过的手数 + 1
+      active = await startHand(await engine(), DECK, { id: `${now}-${++handCount}`, seed, now, number });
       store.setActive(active.info);
       return [200, active.view(now)];
     }

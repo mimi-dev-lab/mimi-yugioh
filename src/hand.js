@@ -35,12 +35,13 @@ const stateKey = (b) => ['hand', 'monsters', 'spellTraps', 'grave', 'banished'].
 export const handKey = (hand) => [...hand].sort((a, b) => a - b).join('-');
 export class HandError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
 
-export async function startHand(engine, deck, { id, seed, now }) {
+export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
   const { hand, rest } = deal(deck, seed);
   const engineSeed = [0, 1, 2, 3].map((i) => BigInt((seed + i) >>> 0));
   const session = await startSession(engine, { hand, deck: rest, extra: expand(deck.extra), seed: engineSeed });
   const md = (code) => deck.cards[code]?.md ?? String(code);
   const actions = []; // { step, at（距开局毫秒）, kind, text, indices, valueAfter, state }
+  let source = null; // 当前这一步是哪张卡的哪个动作发起的（浮层标题用）
   const stepBefore = new Map(); // 每一步开始前的场面，算「花了 → 换来」用
   let step = 0;
   const startedAt = now;
@@ -68,7 +69,11 @@ export async function startHand(engine, deck, { id, seed, now }) {
     try { text = label(prompt, indices); } catch { /* 下标不合法：读不到选项，由下面的 choose 报错 */ }
     const before = session.board();
     try { session.choose(indices); } catch (e) { throw new HandError(e.message); } // 非法选择在这里被拒绝，会话状态不变
-    if (startsStep(prompt, indices) || step === 0) { step++; stepBefore.set(step, before); }
+    if (startsStep(prompt, indices) || step === 0) {
+      step++; stepBefore.set(step, before);
+      const o = prompt.options[indices[0]];
+      source = o?.code === undefined ? null : { code: o.code, md: md(o.code), action: ACTION_NAMES[o.action] ?? (o.action === 'chain' ? '连锁发动' : o.action) };
+    }
     const board = session.board();
     actions.push({ step, at: at - startedAt, kind: prompt.kind, text, indices, valueAfter: boardValue(deck, board), state: stateKey(board), board });
   }
@@ -80,7 +85,15 @@ export async function startHand(engine, deck, { id, seed, now }) {
       const last = rows.at(-1);
       if (last?.step === a.step) { last.atMs = a.at; last.text += ` → ${a.text}`; last.after = a.board; } else rows.push({ step: a.step, atMs: a.at, text: a.text, after: a.board });
     }
-    return rows.map(({ after, ...r }) => ({ ...r, ...stepLedger(stepBefore.get(r.step), after, md) }));
+    return rows.map(({ after, ...r }) => ({ ...r, summary: summarize(r.step), ...stepLedger(stepBefore.get(r.step), after, md) }));
+  }
+
+  // 一步在操作记录里的一行：发起的动作 + 选了哪些卡；「不发动」「放在第几格」「选第几项」「选完」这类机械确认折叠掉（完整的在 text 里）
+  function summarize(n) {
+    const mine = actions.filter((a) => a.step === n);
+    const picks = [...new Set(mine.slice(1).filter((a) => /^选 /.test(a.text)).flatMap((a) => a.text.slice(2).split('、')))];
+    const shown = picks.length > 3 ? `${picks.slice(0, 3).join('、')} 等 ${picks.length} 张` : picks.join('、');
+    return `${mine[0].text}${shown ? ` · 选 ${shown}` : ''}`;
   }
 
   function view(at) {
@@ -88,8 +101,8 @@ export async function startHand(engine, deck, { id, seed, now }) {
     const prompt = session.prompt();
     const withNames = (list) => list.map((c) => ({ ...c, md: md(c.code) }));
     return {
-      id, status: session.endBoard ? 'turn-over' : 'playing', startedAt, elapsedMs: at - startedAt, hints: 0,
-      prompt: session.endBoard || !prompt ? null : { ...prompt, options: prompt.options.map(named) },
+      id, number, status: session.endBoard ? 'turn-over' : 'playing', startedAt, elapsedMs: at - startedAt, hints: 0,
+      prompt: session.endBoard || !prompt ? null : { ...prompt, ...(prompt.kind !== 'idle' && source ? { source } : {}), options: prompt.options.map(named) },
       board: { hand: withNames(board.hand), monsters: withNames(board.monsters), spellTraps: withNames(board.spellTraps), grave: withNames(board.grave), banished: withNames(board.banished), deck: board.deck, extra: withNames(board.extra) },
       normalSummonUsed: session.normalSummonUsed,
       restrictions: (deck.restrictions ?? []).filter((r) => session.activated.includes(r.code)).map((r) => r.text),

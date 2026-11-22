@@ -21,6 +21,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   let finished = false;
   let endBoard = null; // 我方回合结束（对手回合开始）时的场面，没到那一刻是 null
   let normalSummonUsed = false; // 我方这回合的召唤权（通常召唤或盖放怪兽）用掉了没有
+  let lastHint = null; // 最近一条给我方的选择提示（HINT_SELECTMSG 的字符串编号）
+  let promptHint = null; // 当前提示对应的那一条
   const activated = []; // 我方发动过效果的卡的密码，按发动顺序
 
   function build() {
@@ -45,6 +47,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     endBoard = null;
     normalSummonUsed = false;
     activated.length = 0;
+    lastHint = null;
+    promptHint = null;
   }
 
   // 我方的场面：每个区域里的卡（编号、名字、格子）
@@ -63,6 +67,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
         if (m.type === M.SUMMONING && m.controller === 0) normalSummonUsed = true;
         if (m.type === M.SET && m.controller === 0 && m.location === L.MZONE) normalSummonUsed = true;
         if (m.type === M.CHAINING && m.triggering_controller === 0) activated.push(m.code);
+        if (m.type === M.HINT && m.player === 0 && m.hint_type === 3) lastHint = Number(m.hint); // HINT_SELECTMSG：下一个选卡提示是干什么的（constant.lua 的 HINTMSG_*）
       }
       if (!endBoard && messages.some((m) => m.type === M.NEW_TURN && m.player === 1)) endBoard = snapshot();
       if (status === OcgProcessResult.END) { finished = true; message = null; return; }
@@ -70,6 +75,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
       const m = messages[messages.length - 1];
       if (m.player === 1) { core.duelSetResponse(handle, autoResponse(m)); continue; }
       message = m;
+      promptHint = lastHint;
+      lastHint = null;
       return;
     }
     throw new Error('引擎推进了太多步还没停下');
@@ -158,7 +165,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     prompt() {
       if (!message) return null;
       const { responses: _r, ...prompt } = describe(message);
-      return prompt;
+      return prompt.kind === 'cards' || prompt.kind === 'pick-one' ? { ...prompt, hint: promptHint } : prompt;
     },
     // 提交选择：选项的下标数组（单选的提示放一个）。选了不合法的抛错
     choose(indices) {

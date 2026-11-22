@@ -18,6 +18,10 @@ const HINT_FACTOR = 0.8; // same number as the service's scoring (DESIGN.md「�
 // engine location bits
 const LOC = { hand: 0x2, monsters: 0x4, spellTraps: 0x8, grave: 0x10 };
 const ACTION_LABEL = { summon: "召唤", "monster-set": "盖放", "special-summon": "特殊召唤", "position-change": "改变表示形式", "spell-set": "盖放", activate: "发动" };
+const ZONE_LABEL = { 0x1: "卡组", 0x2: "手牌", 0x4: "场上", 0x8: "场上", 0x10: "墓地", 0x20: "除外", 0x40: "额外" };
+// what the engine is asking a card for (HINTMSG_* in the scripts' constant.lua)
+const HINT_LABEL = { 500: "解放", 501: "丢弃", 502: "破坏", 503: "除外", 504: "送去墓地", 505: "回到手牌", 506: "加入手牌", 507: "回到卡组", 508: "通常召唤", 509: "特殊召唤", 510: "盖放",
+  511: "当融合素材", 512: "当同调素材", 513: "当超量素材", 531: "解放", 533: "当连接素材", 549: "作为攻击对象", 551: "作为对象" };
 const POSITION_LABEL = { 1: "攻击表示", 2: "里侧攻击表示", 4: "守备表示", 8: "里侧守备表示" };
 
 const clock = (ms) => { const s = Math.floor(Math.max(0, ms) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
@@ -58,29 +62,49 @@ function PromptPanel({ rest, prompt, busy, send }) {
   useEffect(() => setPicked([]), [prompt]);
   const opts = prompt.options.map((o, i) => ({ ...o, i }));
   const single = prompt.min === 1 && prompt.max === 1;
-  const toggle = (i) => setPicked((p) => (p.includes(i) ? p.filter((x) => x !== i) : [...p, i]));
-  const cardOption = (o, onClick, extra) => h("button", { key: o.i, className: `yg-opt${picked.includes(o.i) ? " sel" : ""}`, onClick, disabled: busy },
-    h(CardArt, { rest, code: o.code, md: o.md }), h("span", { className: "yg-name" }, o.md), extra ? h("span", { className: "yg-sub" }, extra) : null);
+  // identical cards (two 烙印龙 阿尔比昂) are one tile with a count; clicking takes one more of the group
+  const groups = [];
+  for (const o of opts) {
+    const g = o.code === undefined ? null : groups.find((x) => x.code === o.code && x.location === o.location && x.action === o.action);
+    if (g) g.idx.push(o.i); else groups.push({ ...o, idx: [o.i] });
+  }
+  const takenIn = (g) => g.idx.filter((i) => picked.includes(i));
+  const clickGroup = (g) => {
+    if (single) return send([g.idx[0]]);
+    const taken = takenIn(g);
+    if (taken.length < g.idx.length && picked.length < prompt.max) return setPicked([...picked, g.idx.find((i) => !picked.includes(i))]);
+    return setPicked(picked.filter((i) => !g.idx.includes(i)));
+  };
+  const cardOption = (g, onClick, extra) => h("button", { key: g.i, className: `yg-opt${takenIn(g).length ? " sel" : ""}`, onClick, disabled: busy },
+    h(CardArt, { rest, code: g.code, md: g.md }),
+    g.idx.length > 1 ? h("span", { className: "yg-count" }, !single && prompt.kind === "cards" ? `${takenIn(g).length}/${g.idx.length}` : `×${g.idx.length}`) : null,
+    h("span", { className: "yg-name" }, g.md), extra ? h("span", { className: "yg-sub" }, extra) : null);
   const textOption = (o, text) => h("button", { key: o.i, className: "yg-btn wide", onClick: () => send([o.i]), disabled: busy }, text);
+  const src = prompt.source ? `${prompt.source.action} ${prompt.source.md} · ` : "";
+  const cancel = prompt.cancel ? h("button", { key: "cancel", className: "yg-btn", disabled: busy, onClick: () => send([]) }, "取消") : null;
   let title; let body;
   switch (prompt.kind) {
-    case "cards":
-      title = single ? "选一张" : `选 ${prompt.min}${prompt.max !== prompt.min ? `–${prompt.max}` : ""} 张`;
-      body = [h("div", { className: "yg-opts", key: "o" }, opts.map((o) => cardOption(o, () => (single ? send([o.i]) : toggle(o.i))))),
-        single ? null : h("div", { className: "yg-row", key: "b" },
-          h("button", { className: "yg-btn primary", disabled: busy || picked.length < prompt.min || picked.length > prompt.max, onClick: () => send([...picked].sort((a, b) => a - b)) }, `确定（${picked.length}）`))];
+    case "cards": {
+      const zones = [...new Set(opts.map((o) => ZONE_LABEL[o.location]))];
+      const what = HINT_LABEL[prompt.hint];
+      title = `${src}选 ${prompt.min}${prompt.max !== prompt.min ? `–${prompt.max}` : ""} 张${zones.length === 1 && zones[0] ? `${zones[0]}的` : ""}卡${what ? `：${what}` : ""}`;
+      body = [h("div", { className: "yg-opts", key: "o" }, groups.map((g) => cardOption(g, () => clickGroup(g)))),
+        h("div", { className: "yg-row", key: "b" },
+          single ? null : h("button", { className: "yg-btn primary", disabled: busy || picked.length < prompt.min || picked.length > prompt.max, onClick: () => send([...picked].sort((a, b) => a - b)) }, `确定（${picked.length}）`), cancel)];
       break;
-    case "pick-one":
-      title = "逐张选择";
-      body = h("div", { className: "yg-opts" }, opts.map((o) => (o.action === "finish"
-        ? h("button", { key: o.i, className: "yg-btn primary", onClick: () => send([o.i]), disabled: busy }, "选完")
-        : cardOption(o, () => send([o.i]), o.action === "unselect" ? "已选 · 点击取消" : null))));
+    }
+    case "pick-one": {
+      const what = HINT_LABEL[prompt.hint];
+      title = `${src}逐张选择${what ? `：${what}` : ""}`;
+      body = [h("div", { className: "yg-opts", key: "o" }, groups.filter((g) => g.action !== "finish").map((g) => cardOption(g, () => send([g.idx[0]]), g.action === "unselect" ? "已选 · 点击取消" : null))),
+        h("div", { className: "yg-row", key: "b" }, opts.filter((o) => o.action === "finish").map((o) => h("button", { key: o.i, className: "yg-btn primary", onClick: () => send([o.i]), disabled: busy }, "选完")), cancel)];
       break;
+    }
     case "chain":
       title = "连锁：要发动吗？";
-      body = h("div", { className: "yg-opts" }, opts.map((o) => (o.action === "pass"
-        ? h("button", { key: o.i, className: "yg-btn", onClick: () => send([o.i]), disabled: busy }, "不发动")
-        : cardOption(o, () => send([o.i]), "发动"))));
+      body = h("div", { className: "yg-opts" }, groups.map((g) => (g.action === "pass"
+        ? h("button", { key: g.i, className: "yg-btn", onClick: () => send([g.idx[0]]), disabled: busy }, "不发动")
+        : cardOption(g, () => send([g.idx[0]]), "发动"))));
       break;
     case "yes-no": {
       const subject = opts.find((o) => o.md);
@@ -90,16 +114,16 @@ function PromptPanel({ rest, prompt, busy, send }) {
       break;
     }
     case "option":
-      title = "选一项";
+      title = `${src}选一项`;
       body = h("div", { className: "yg-col" }, opts.map((o) => textOption(o, `第 ${o.i + 1} 项`)));
       break;
     case "position":
-      title = "选表示形式";
+      title = `${src}选表示形式`;
       body = h("div", { className: "yg-row" }, opts.map((o) => textOption(o, POSITION_LABEL[o.position] ?? `形式 ${o.position}`)));
       break;
     case "place": {
       const mine = opts.filter((o) => o.player === 0);
-      title = "选放置的位置";
+      title = `${src}选放置的位置`;
       body = h("div", { className: "yg-row wrap" }, (mine.length ? mine : opts).map((o) => textOption(o,
         o.location === LOC.monsters ? (o.sequence >= 5 ? `额外怪兽区 ${o.sequence - 4}` : `怪兽区 第 ${o.sequence + 1} 格`) : (o.sequence === 5 ? "场地区" : `魔陷区 第 ${o.sequence + 1} 格`))));
       break;
@@ -147,7 +171,7 @@ function Play({ rest, hand, cards, busy, send, end }) {
   return h("div", { className: "yg-play", "data-status": hand.status },
     h("section", { className: "yg-top" },
       h("div", { className: "yg-clock" },
-        h("div", { className: "yg-lab" }, `这一手 · 用时`),
+        h("div", { className: "yg-lab" }, `第 ${hand.number} 手 · 用时`),
         h("div", { className: "yg-time", "aria-label": "用时" }, clock(now)),
         h("div", { className: "yg-col tight" },
           h("div", { className: "yg-line" }, h("span", { className: "yg-lab" }, "提示"), h("span", { className: "yg-mono" }, `${hand.hints} 次 · ×${factorText(hand.hints)}`)),
@@ -159,7 +183,7 @@ function Play({ rest, hand, cards, busy, send, end }) {
           rows.flatMap((r) => [
             h("span", { key: `${r.step}n`, className: "yg-mono td" }, r.step),
             h("span", { key: `${r.step}t`, className: "yg-mono td dim" }, clock(r.atMs)),
-            h("span", { key: `${r.step}x`, className: "td" }, r.text.split(" → ")[0], r.text.includes(" → ") ? h("span", { className: "yg-rest" }, ` → ${r.text.split(" → ").slice(1).join(" → ")}`) : null),
+            h("span", { key: `${r.step}x`, className: "td", title: r.text }, r.summary ?? r.text),
             h("span", { key: `${r.step}c`, className: "td soft" }, `${r.spent} → ${r.gained}`),
           ]),
           hand.status === "playing" && (idle || rows.length === 0) ? [h("span", { key: "pn", className: "yg-mono td now" }, rows.length + 1), h("span", { key: "pt", className: "yg-mono td now" }, clock(now)), h("span", { key: "px", className: "td now" }, "轮到你"), h("span", { key: "pc", className: "td" })] : null))),
@@ -337,6 +361,7 @@ const CSS = `
 .yg-opt .yg-art { height: 128px; }
 .yg-opt .yg-name { position: absolute; left: -6px; right: -6px; top: 132px; font-size: 11px; color: #d6d6d6; text-align: center; line-height: 1.3; }
 .yg-opt .yg-sub { position: absolute; left: 0; right: 0; top: 168px; font-size: 10px; color: #c8ff3d; text-align: center; }
+.yg-count { position: absolute; right: 2px; top: 2px; min-width: 22px; padding: 1px 5px; border-radius: 9px; background: #c8ff3d; color: #000; font-size: 11px; font-weight: 600; }
 .yg-big { width: 120px; height: 175px; }
 @media (max-width: 900px) { .yg-bottom { grid-template-columns: 1fr; } .yg-grid4 { grid-template-columns: repeat(2, 1fr); } }
 `;
