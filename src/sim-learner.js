@@ -31,7 +31,6 @@ export const KNOWN_SPEEDUP = 0.6; // 照会的那步走时，用时乘这个
 export const MAX_CHOICES = 150; // 一手最多做这么多个选择，之后能结束回合就结束
 
 const scheduler = fsrs(); // 默认参数，不开 fuzz
-const DAY_MS = 86400000;
 const ROLE_VALUE = { 终端: 3, 打断: 3, 起手: 2, 延伸: 2, 回收: 1, 手坑: 0 };
 const IDLE_PRIORITY = { activate: 4, 'special-summon': 4, summon: 3, 'end-turn': 0.5, 'spell-set': 0.3, 'monster-set': 0.3, 'position-change': 0 };
 
@@ -195,4 +194,3 @@ export function learnFromQuiz(learner, code, rating, now) {
   remember(learner.cards, code, now, Rating[rating]);
 }
 
-export { DAY_MS };

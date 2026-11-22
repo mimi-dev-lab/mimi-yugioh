@@ -2,9 +2,9 @@
 // 打牌、记卡都经服务的 handle()（和 HTTP 接口同一份逻辑）；服务、数据目录、「现在」（模拟的时钟）由调用方给。纯逻辑，不读文件、不取真实时间。
 import { handKey, rngFrom } from './hand.js';
 import { nextDeal } from './practice.js';
-import { DAY_MS, MAX_CHOICES, answerQuiz, createLearner, decide, knownCount, learnFromHint, learnFromQuiz, learnFromReview, learnFromScore, stepItems, study, wantsHint } from './sim-learner.js';
+import { MAX_CHOICES, answerQuiz, createLearner, decide, knownCount, learnFromHint, learnFromQuiz, learnFromReview, learnFromScore, stepItems, study, wantsHint } from './sim-learner.js';
 
-// 练法：完整系统和两种对照，以及完整系统各去掉一个功能
+// 练法：完整系统和两种对照（所有练法的练习里都不插基准手，见 runLearner），以及完整系统各去掉一个功能
 const FULL = { quiz: true, weakDealing: true, review: true, hints: true, study: false };
 export const REGIMENS = {
   full: { name: '完整系统', ...FULL },
@@ -23,14 +23,16 @@ export const REVIEW_MS = 40000; // 看一次结算复盘（逐步对照）
 export const SCORE_LOOK_MS = 5000; // 只看分数
 export const HINT_READ_MS = 3000; // 看一次提示
 export const QUIZ_FEEDBACK_MS = 3000; // 看一题的批改
+const DAY_MS = 86400000;
 export const EXAM_HOUR_MS = 22 * 3600000; // 天末考试的时刻（当天 0 点起）
 
+const request = (service) => (method, path, body) => service.handle(method, path, { readBody: async () => body ?? {} });
+// 只认 200：别的状态码说明模拟走到了不该走的地方，抛错
 const call = (service) => async (method, path, body) => {
-  const [status, value] = await service.handle(method, path, { readBody: async () => body ?? {} });
+  const [status, value] = await request(service)(method, path, body);
   if (status !== 200) throw new Error(`${method} ${path} → ${status} ${value.error}`);
   return value;
 };
-const callMaybe = (service) => (method, path, body) => service.handle(method, path, { readBody: async () => body ?? {} });
 
 // 打一手：从开局走到结算。learner 照自己的模型选，hints 为 true 时卡住了会要提示（基准手服务回 409，不算）。返回 { settlement, keys, hints, abandoned }；
 // abandoned：遇到服务还不支持的提示，这一手没法结算（settlement 是 null）
@@ -47,7 +49,7 @@ async function playHand(service, learner, deck, clock, { seed, hints: canHint })
     const endTurn = prompt.kind === 'idle' && n >= MAX_CHOICES ? prompt.options.findIndex((o) => o.action === 'end-turn') : -1;
     let d = endTurn >= 0 ? { indices: [endTurn], ms: 1000, keys: [], stuck: false } : decide(learner, deck, prompt, clock.t);
     if (canHint && wantsHint(learner, d, hints)) {
-      const [status, hint] = await callMaybe(service)('POST', '/hand/hint');
+      const [status, hint] = await request(service)('POST', '/hand/hint');
       if (status === 200) {
         hints++;
         clock.t += HINT_READ_MS;
@@ -123,12 +125,13 @@ export async function runLearner({ deck, open, profile, params, regimen, seed, d
       }
     }
     while (clock.t < dayEnd) {
-      const dealt = nextDeal(deck, practice.store.readHands(), { seed: Math.floor(rng() * 2 ** 32), benchmarks, weakDealing: regimen.weakDealing, candidateSeed: (r) => pool[Math.floor(r() * pool.length)] });
+      // 练习里不插基准手：考试的 8 手不参与练习（规格「只用不参与练习的基准手打分」），所以 benchmarks 传空；练习池本身不含基准手的牌
+      const dealt = nextDeal(deck, practice.store.readHands(), { seed: Math.floor(rng() * 2 ** 32), benchmarks: [], weakDealing: regimen.weakDealing, candidateSeed: (r) => pool[Math.floor(r() * pool.length)] });
       const { settlement, keys, hints, abandoned } = await playHand(practice.service, learner, deck, clock, { seed: dealt.seed, hints: regimen.hints });
       out.hints += hints;
       if (abandoned) { out.abandoned++; continue; } // 作废的一手不占基准手的位置，也没有结算可看
       out.hands++;
-      if (dealt.benchmark || benchmarkKeys.has(handKey(settlement.hand))) out.benchmarkHands++;
+      if (benchmarkKeys.has(handKey(settlement.hand))) out.benchmarkHands++; // 应该一直是 0：练习池不含基准手的牌
       clock.t += regimen.review ? REVIEW_MS : SCORE_LOOK_MS;
       if (regimen.review && learnFromReview(learner, settlement, clock.t)) out.reviews++;
       learnFromScore(learner, settlement.total, keys, clock.t);

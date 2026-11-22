@@ -237,8 +237,8 @@ async function main() {
     const pool = practicePool(poolSize);
     const benchmarks = benchmarkHands(DECK);
     const shared = openStore(cacheDir);
-    const searchEnv = (seeds) => seeds.filter((seed) => !shared.readSearch(handKey(deal(DECK, seed).hand)));
-    const toSearch = searchEnv([...benchmarks.map((b) => b.seed), ...pool]);
+    const unsearched = (seeds) => seeds.filter((seed) => !shared.readSearch(handKey(deal(DECK, seed).hand)));
+    const toSearch = unsearched([...benchmarks.map((b) => b.seed), ...pool]);
     if (toSearch.length) {
       console.log(`搜索 ${toSearch.length} 手的最好路线（上限 ${env.searchBudget} 步）…`);
       await runPool(workers, env, toSearch.map((seed, id) => ({ id, seed })), (t) => ({ type: 'search', ...t }), (done, all) => { if (done % 100 === 0 || done === all) console.log(`  ${done}/${all}  ${Math.round((Date.now() - started) / 1000)} 秒`); });

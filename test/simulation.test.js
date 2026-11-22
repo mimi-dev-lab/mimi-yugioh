@@ -38,10 +38,11 @@ describe('模拟学习者的实验', () => {
     assert.notDeepEqual(await runOnce({ seed: 4 }), a);
   });
 
-  test('只随机打只给分：不记卡、不要提示、不看复盘；每 5 手照样插一手基准手', async () => {
+  test('只随机打只给分：不记卡、不要提示、不看复盘；练习里没有基准手（基准手只在考试里打）', async () => {
     const r = await runOnce({ regimen: 'random' });
     assert.deepEqual([r.answers, r.hints, r.reviews, r.studied], [0, 0, 0, 0]);
-    assert.equal(r.benchmarkHands, Math.floor(r.hands / 5));
+    assert.ok(r.hands >= 5);
+    assert.equal(r.benchmarkHands, 0);
   });
 });
 
