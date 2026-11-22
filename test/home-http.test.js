@@ -89,7 +89,7 @@ describe('隐藏基准手：HTTP 接口', () => {
     }, { YUGIOH_DATA: data });
   });
 
-  test('练习手不会发出基准手的起手牌，发了 30 手也一样；给种子重打的手算练习手，可以用提示', async () => {
+  test('练习手不会发出基准手的起手牌，发了 30 手也一样；给种子重打普通手可以用提示；重打基准手仍是基准手，不能用提示', async () => {
     await withServer(async (call) => {
       const keys = new Set(benchmarkHands(BRANDED).map((b) => [...b.hand].sort((a, b2) => a - b2).join('-')));
       for (let i = 0; i < 4; i++) {
@@ -103,6 +103,9 @@ describe('隐藏基准手：HTTP 接口', () => {
       const replay = await call('POST', '/hand/start', { seed: WHITE_ALBAZ_SEED });
       assert.equal(replay.status, 200);
       assert.notEqual((await call('POST', '/hand/hint')).status, 409);
+      const again = await call('POST', '/hand/start', { seed: benchmarkHands(BRANDED)[0].seed }); // 重打基准手（结算里的 seed）
+      assert.equal(again.status, 200);
+      assert.equal((await call('POST', '/hand/hint')).status, 409);
     });
   });
 });

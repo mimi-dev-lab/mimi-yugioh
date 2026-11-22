@@ -125,7 +125,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 常量在 `src/practice.js`，名字和这里一致。
 
 - **按弱点发牌**：每个起手类型一个权重 = 1 + `WEAK_BOOST`(3) × (1 − 最近 `WEAK_RECENT`(10) 手练习手的平均场面分 ÷ 100)，没打过的类型是 1（全 100 分也是 1）。发牌用拒绝采样：随机抽一手（种子由 `rngFrom` 推出，所以这手的种子就能重发同样的牌），按「该类型权重 ÷ 当前最大权重」的概率接受，否则再抽，最多 `MAX_REDRAWS`(60) 次；单张卡的概率不动。基准手不算练习表现。例：固定种子 0–2999，烙印融合起手没有历史时 284 次，场面分都是 40 时 683 次。
-- **隐藏基准手**：`benchmarkHands(deck)` 从种子 `BENCHMARK_SEED_BASE`(700000) 往上数，每个起手类型取 `BENCHMARK_PER_TYPE`(2) 手（起手牌互不相同），一共 8 手，固定不变。每打满 `BENCHMARK_EVERY`(5) − 1 手练习手，下一手（第 5、10、15……手）是基准手，按顺序轮着发；作废的手不占位。基准手的起手牌不会作为练习手发出（发牌时拒绝）；`POST /hand/hint` 对基准手回 409「这一手不能用提示」，不计次数；结算和普通一手一样（不带 `benchmarkHand`），日志的 `benchmarkHand` 为 true。`POST /hand/start` 带 `seed`（重打、测试）一律当练习手。
+- **隐藏基准手**：`benchmarkHands(deck)` 从种子 `BENCHMARK_SEED_BASE`(700000) 往上数，每个起手类型取 `BENCHMARK_PER_TYPE`(2) 手（起手牌互不相同），一共 8 手，固定不变。每打满 `BENCHMARK_EVERY`(5) − 1 手练习手，下一手（第 5、10、15……手）是基准手，按顺序轮着发；作废的手不占位。基准手的起手牌不会作为练习手发出（发牌时拒绝）；`POST /hand/hint` 对基准手回 409「这一手不能用提示」，不计次数；结算和普通一手一样（不带 `benchmarkHand`），日志的 `benchmarkHand` 为 true。`POST /hand/start` 带 `seed`（重打、测试）照它发；发出来的起手是基准手的牌，仍算基准手（重打不能绕过提示限制、不进练习统计）。
 - **`GET /home`**：`hands`（日志里结算过的手数，含基准手）、`points`（每个练习手：`number`、`handType`、`handTypeName`、`durationMs`、`fieldScore`、`speedBonus`、`total`；基准手不在里面，号码照占）、`best`（总分最高的点）、`last`（最近一个练习手）、`types`（每个打过的起手类型：`count`、`avgFieldScore`、`avgDurationMs`，按平均场面从高到低）、`tip`（打过至少 `TIP_MIN_HANDS`(3) 手的类型里平均场面最低且不到 100 的那类，没有是 null）、`progress`（基准手按打的先后：`points`[`index`、`total`…]、`average`）。0 手时都是空的。
 - 页面：散点横轴用时（到 5:00，更慢的手把轴拉长）、纵轴场面分；速度加成区画在场面 ≥ 90% 的一条带里，颜色从 60 秒到 5:00 线性变淡，写「60 秒内 +20，到 5:00 线性降为 0」，不画 1:30 / 2:30 / 3:30 分档（那是设计稿自己画的，规格 #1 说不用）。到期记卡数来自 `GET /quiz`。
 
