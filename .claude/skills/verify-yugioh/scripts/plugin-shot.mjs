@@ -177,7 +177,7 @@ async function main() {
   // 并排对照：设计稿 PNG 在左、这张在右，用 data: 地址在一个页面里拼好再截一张
   if (opts.compare) {
     const design = (await readFile(opts.compare)).toString('base64');
-    const html = `<body style="margin:0;background:#222;display:flex;gap:16px;padding:16px;font:14px sans-serif;color:#ddd"><div><div style="margin-bottom:6px">设计稿 design-r3</div><img style="width:1280px;display:block" src="data:image/png;base64,${design}"></div><div><div style="margin-bottom:6px">真 Hermes 里的页面</div><img style="width:1280px;display:block" src="data:image/png;base64,${shot.data}"></div></body>`;
+    const html = `<meta charset="utf-8"><body style="margin:0;background:#222;display:flex;gap:16px;padding:16px;font:14px sans-serif;color:#ddd"><div><div style="margin-bottom:6px">设计稿 design-r3</div><img style="width:1280px;display:block" src="data:image/png;base64,${design}"></div><div><div style="margin-bottom:6px">真 Hermes 里的页面</div><img style="width:1280px;display:block" src="data:image/png;base64,${shot.data}"></div></body>`;
     await send('Emulation.setDeviceMetricsOverride', { width: 2608, height: 940, deviceScaleFactor: 1, mobile: false });
     await send('Page.navigate', { url: `data:text/html;base64,${Buffer.from(html).toString('base64')}` });
     await sleep(1500);
