@@ -1,1 +1,0 @@
-INSERT OR REPLACE INTO cards (id, name, name_cn, name_jp, type, race, attribute, level, atk, def, desc_cn) VALUES
