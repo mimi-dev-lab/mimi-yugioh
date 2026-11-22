@@ -16,6 +16,12 @@
 - 「提示」按钮写明「分数 ×0.8」；现在是灰的：提示要等最好场面搜索（#5）做好。
 - ✔ 「结束回合」：`--end`，出小结算（总分、场面分、速度加成、提示系数）；完整的结算屏是另一张票。
 
+## 记卡（对照 design-r3/clock-cards.png）
+- ✔ 记卡页签：「N 张卡到期」、「开始记卡」；没有到期的卡时按钮是灰的。
+- ✔ 一道题：本题已用（计时条、5 秒标记、上次用时）、这张卡的答题用时、「n / 总数 · 还剩」、「结束」。三种题 `--quiz-start --quiz-kind identify|fill|find`。
+- ✔ 答题：`--quiz-answer N` 用数字键 1（和 identify 的 5）选、回车提交；反馈写对错、评分、下次多久后再考、三件事；回车下一题。
+- 并排对照：`shot NAME --design --tab 记卡 --quiz-start --quiz-kind identify --compare ~/work/.preview/yugioh/design-r3/clock-cards.png`（给用户看的用 `up --images` 的真卡图）。
+
 ## 卡图
 - 页面经 `GET /card-image?code=` 拿 JSON(base64)，拼成 data: 地址；没有这张图时在卡图位置写卡名。
 - 冒烟用编的单色小图；给用户看的截图用真卡图（`up --images`）。

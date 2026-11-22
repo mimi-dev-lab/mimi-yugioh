@@ -8,6 +8,8 @@ POST /hand/<sub>         → POST /hand/<sub>            (every write, one route
                                                          start: deal a new hand; choose: answer the prompt; end: end the turn
 GET  /cards              → GET  /cards                 (every card of the deck: Master Duel name, role, the three things)
 GET  /card-image?code=N  → GET  /card-image?code=N     (one card picture, as JSON with base64; the code has to be digits)
+GET  /quiz               → GET  /quiz                  (记卡: how many cards are due)
+POST /quiz/<sub>         → POST /quiz/<sub>            (only the paths in QUIZ_WRITES go through; next: the next question, answer: answer it)
 
 YUGIOH_URL (default http://127.0.0.1:4519) says where the service is; it has to be on this machine.
 """
@@ -30,6 +32,7 @@ DEFAULT_URL = "http://127.0.0.1:4519"
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 # The writes this plugin lets through. Adding one here needs a gateway restart.
 HAND_WRITES = ("start", "choose", "end")
+QUIZ_WRITES = ("next", "answer")
 TIMEOUT_S = 30  # the service only plays one hand in memory and reads its own data folder on this machine
 
 
@@ -88,4 +91,18 @@ async def card_image(code: str):
     if not code.isdigit() or len(code) > 10:
         return JSONResponse({"error": "卡号要是数字"}, status_code=400)
     status, body = await asyncio.to_thread(forward, "GET", f"/card-image?code={code}")
+    return JSONResponse(body, status_code=status)
+
+
+@router.get("/quiz")
+async def quiz():
+    status, body = await asyncio.to_thread(forward, "GET", "/quiz")
+    return JSONResponse(body, status_code=status)
+
+
+@router.post("/quiz/{sub}")
+async def quiz_write(sub: str, request: Request):
+    if sub not in QUIZ_WRITES:
+        return JSONResponse({"error": f"没有这个接口：/quiz/{sub}"}, status_code=404)
+    status, body = await asyncio.to_thread(forward, "POST", f"/quiz/{sub}", await request.body())
     return JSONResponse(body, status_code=status)

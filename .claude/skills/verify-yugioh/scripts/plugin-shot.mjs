@@ -156,6 +156,32 @@ async function main() {
     }
     await until(() => !document.querySelector('.yg-modal [aria-label="引擎的选择"]'), null, 20000, '引擎的提示都答完了').catch(fail);
   }
+  // 记卡页签：--quiz-start 点「开始记卡」出第一题（--quiz-kind 指定题型就一直换到出这种）；--quiz-answer N 像用户那样答 N 题：按数字键 1 选第一项、
+  // identify 再按 5 选第一个角色、回车提交、等反馈出来，还有下一题就回车翻页。最后停在答完的反馈上
+  if (opts.quizStart || opts.quizAnswer) {
+    const kind = () => evaluate(() => document.querySelector('.yg-quiz')?.dataset.kind ?? null);
+    const startQuiz = async () => {
+      await until(() => [...document.querySelectorAll('button')].some((b) => b.innerText.trim() === '开始记卡' && !b.disabled), null, 20000, '「开始记卡」能点了（没有到期的卡时它是灰的）');
+      await clickButton('开始记卡');
+      await until(() => !!document.querySelector('.yg-qopt'), null, 20000, '题出来');
+    };
+    await startQuiz();
+    for (let i = 0; opts.quizKind && (await kind()) !== opts.quizKind; i++) {
+      if (i > 40) throw new Error(`换了 40 次也没出 ${opts.quizKind} 题`);
+      await clickButton('结束');
+      await until(() => !document.querySelector('.yg-qopt'), null, 10000, '回到记卡首页');
+      await startQuiz();
+    }
+    const press = (key) => evaluate((k) => { window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); return true; }, key);
+    for (let i = 0; i < (opts.quizAnswer ?? 0); i++) {
+      await press('1');
+      if ((await kind()) === 'identify') await press('5');
+      await sleep(300);
+      await press('Enter');
+      await until(() => !!document.querySelector('.yg-feedback') || !!document.querySelector('.yg-error'), null, 20000, '答题的反馈出来（或报错）').catch(fail);
+      if (i + 1 < opts.quizAnswer) { await press('Enter'); await until(() => !document.querySelector('.yg-feedback') && !!document.querySelector('.yg-qopt'), null, 20000, '下一题出来'); }
+    }
+  }
   if (opts.end) {
     if (!(await clickButton('结束回合'))) throw new Error('页面上没有「结束回合」');
     await until(() => !!document.querySelector('[aria-label="结算"]') || !!document.querySelector('.yg-error'), null, 30000, '结算出来（或报错）').catch(fail);

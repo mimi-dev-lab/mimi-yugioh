@@ -8,6 +8,7 @@
 src/server.js        本地服务（Node 22 内置 http，只监听 127.0.0.1:4519）：/health 和打一手的接口；环境变量、「现在」只在这里取
 src/hand.js          一手：发牌（种子可注入）、记操作和时间、结算（挑基准、算分、每一步之后的场面）；纯逻辑，引擎、卡组、「现在」、历史记录由调用方传入
 src/scoring.js       评分：场面值、场面分、速度加成、提示系数、总分；纯函数，常量和下面「评分」一节同名
+src/quiz.js          记卡：出题（三种）、批改、评分换算、到期的卡、FSRS 状态（ts-fsrs）；纯函数，卡组、日志行、「现在」、种子由调用方传入
 src/store.js         数据目录的读写（日志、进行中的一手、卡图）；唯一读写数据目录的地方
 src/ledger.js        一步的「花了什么 → 换来什么」：比较这一步前后我方各区域的卡；纯函数
 src/duel-session.js  决斗会话：包住规则引擎 ocgcore-wasm，一手牌一个会话；开局（卡组、起手、种子）、当前提示和合法选项、提交选择、查场面、存档回滚；纯逻辑，卡库和脚本由调用方注入
@@ -100,9 +101,22 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 | `POST /hand/choose` `{ indices }` | 对当前提示选选项下标数组（单选放一个）。非法选择 400，局面不变。返回当前一手 |
 | `GET /cards` | 卡组里每张卡：`md`（Master Duel 简中名）、`role`、`does / cost / limit`（三件事）；页面点卡时显示 |
 | `GET /card-image?code=N` | 一张卡图，`{ code, type, base64 }`（插件经 `ctx.rest` 只读 JSON，页面拼成 data: 地址）；数据目录 `images/` 里没有就 404；`code` 只收纯数字 |
+| `GET /quiz` | 记卡：`{ due, reviewing, fresh }`，到期的张数（答过的到期了的 + 没答过的） |
+| `POST /quiz/next` | 出下一题并开始计时；没有到期的卡返回 `{ done: true, due: 0 }`。题面：`kind`、`prompt`、`image`（卡号或 null）、`options[{text}]`、`roles`（identify）、`given` / `name` / `missing`（fill）、`due`、`fresh`、`lastMs`、`history`（这张卡以往的用时）；不含对错。再调一次换一题（上一题作废） |
+| `POST /quiz/answer` `{ option, roles? }` | 批改上一题：400 选项或角色不合法，404 没有在答的题；记一行日志，返回 `correct`、`ms`、`rating`、`dueInMs`、`answerIndex`、`answerRoles`、`card`（名字角色三件事） |
 | `POST /hand/end` | 结束回合并结算：还停在主阶段就进结束阶段，之后放行连锁、不发动可选效果；遇到要选的东西返回 409，用户选完再结束。返回结算（分数各项、`benchmark`、终场和最好终场、`steps`、`curve`、`divergeStep`），并往日志追加一行 |
 
 `restrictions` 是按卡写死的（`src/decks/branded.js` 的 `RESTRICTIONS`）：这张卡发动过效果，就列出它带来的当回合限制，只收卡面写着「发动回合」的几条；引擎不对外报限制。`normalSummonUsed` 来自引擎的召唤、盖放怪兽消息。
+
+## 记卡
+
+每张卡（卡组数据里的每个密码）是一张 FSRS 卡（`ts-fsrs` 默认参数，不开 fuzz）。常量在 `src/quiz.js`，名字和这里一致。**没有每日题量**：到期的卡（答过的卡到期时间 ≤ 现在，按到期早晚排；没答过的新卡排在后面、顺序随机）都算，用户想停就点「结束」。
+
+- 评分换算（`rate`）：错 = Again；对且用时 ≤ `EASY_MS`(5000 ms) = Easy；对且 ≤ `HARD_MS`(10000 ms) = Good；对但更慢 = Hard。例（新卡）：快且对 8 天后到期、对 10 分钟后、慢 5.5 分钟后、错 1 分钟后
+- 用时由服务从出题那一刻算起（`POST /quiz/next`），页面不报用时
+- 三种题，每题 4 个选项，文字互不相同，干扰项取自同一卡组：`identify` 看卡图选 Master Duel 卡名**和**角色（名字、角色都对才算对）；`fill` 给卡名和「干什么 / 条件代价 / 限制」里的两件，补第三件；`find` 给一张卡的「干什么」，选出是哪张卡。题型随机；这张卡凑不齐互不相同的干扰项就换一种
+- 批改（`grade`）：`{ option: 选项下标, roles: [角色] }`；`identify` 角色集合要和卡的角色一致，别的题型 `roles` 要是空的
+- 页面：数字键 1–4 选答案，5–0 选角色（identify），回车提交、再回车下一题；本题已用的计时条在 10 秒处满，5 秒处标「5 秒内答对 → 间隔加长」，有上次用时时标上次；右上「n / 到期张数」；答完显示对错、评分、下次多久后再考和这张卡的三件事
 
 ## 数据目录
 
@@ -110,8 +124,9 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 |---|---|
 | `hands.jsonl` | 只追加，一行一个 JSON。结算一行（`type: "hand"`）：`id`、`seed`、`hand`（起手 5 个密码）、`handType`、`benchmarkHand`（是不是基准手，现在恒为 false）、`startedAt`（毫秒）、`durationMs`、`hints`、`actions`（每个选择一条：`step`、`atMs`、`kind`、`text`、`indices`、`value` 是这个选择之后的场面值）、`endBoard`（终场的手牌、怪兽区、魔陷区密码）、`userValue`、`bestValue`、`benchmark`（`source`、`routeId`、`provisional`）、`fieldScore`、`speedBonus`、`speedCounted`、`hintFactor`、`total`。作废一行（`type: "void"`）：`id`、`seed`、`hand`、`startedAt`、`reason` |
 | `images/<卡号>.webp` | 卡图，`scripts/sync-card-images.js` 从 NAS 复制来，只放卡组用到的几十张；不进仓。cn 卡图上印的是另一套译名，页面一律把 `md_name` 写在图下方；NAS 上没有的卡（现在是 82344137 原初之神 法拉）页面在图的位置写卡名 |
+| `quiz.jsonl` | 只追加，一行一次答题：`type: "answer"`、`at`（毫秒）、`code`、`kind`、`correct`、`ms`、`rating`（Again/Hard/Good/Easy）、`picked`（`option`、`roles`）、`card`（答完之后这张卡的 FSRS 状态，JSON）。一张卡现在的状态 = 它最后一行的 `card`，没有单独的状态文件，所以不会和答题记录对不上 |
 | `active.json` | 进行中的一手的开局信息（`id`、`seed`、`hand`、`startedAt`）；结算时删。服务启动时发现它还在，说明上次没打完，记一行 `void`（原因：服务重启）再删 |
 
 ## 插件
 
-`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /hand`、`POST /hand/{start,choose,end}`（白名单 `HAND_WRITES`，别的路径 404 不到服务）、`GET /cards`、`GET /card-image?code=`（只收数字）。服务没应答是 502。页面 `plugin/webapp/plugin.js`：首页（开始一手 / 继续这一手）、记卡和记录（占位）、展开中屏（照设计稿 clock-play：计时、提示次数、操作记录、场地、手牌、点卡的详情和合法操作、引擎提示的浮层、提示按钮、结束回合）、小结算（总分、场面分、速度加成、提示系数；完整结算屏另一张票）。提示按钮写着「分数 ×0.8」但现在是灰的：提示接口属于 #5（最好场面搜索）。展开中页面拿不到场面值：服务不发，页面上也不许出现百分比、「还差」、估值（`./ci` 的 plugin 检查查源码，plugin-smoke 查渲染出来的文字）。
+`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /hand`、`POST /hand/{start,choose,end}`（白名单 `HAND_WRITES`，别的路径 404 不到服务）、`GET /cards`、`GET /card-image?code=`（只收数字）、`GET /quiz`、`POST /quiz/{next,answer}`（白名单 `QUIZ_WRITES`）。服务没应答是 502。页面 `plugin/webapp/plugin.js`：首页（开始一手 / 继续这一手）、记卡（快答，见「记卡」一节）和记录（占位）、展开中屏（照设计稿 clock-play：计时、提示次数、操作记录、场地、手牌、点卡的详情和合法操作、引擎提示的浮层、提示按钮、结束回合）、小结算（总分、场面分、速度加成、提示系数；完整结算屏另一张票）。提示按钮写着「分数 ×0.8」但现在是灰的：提示接口属于 #5（最好场面搜索）。展开中页面拿不到场面值：服务不发，页面上也不许出现百分比、「还差」、估值（`./ci` 的 plugin 检查查源码，plugin-smoke 查渲染出来的文字）。

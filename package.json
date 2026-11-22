@@ -12,6 +12,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "ocgcore-wasm": "0.1.7"
+    "ocgcore-wasm": "0.1.7",
+    "ts-fsrs": "6.0.1"
   }
 }

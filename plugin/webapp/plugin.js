@@ -3,8 +3,9 @@
    (../dashboard/plugin_api.py) and ctx.rest, which adds /api/plugins/yugioh and the web workspace's own login and path prefix;
    this file only draws the hand in progress and sends the choices the user makes:
    GET /hand (prompt with legal options, board, step log, clock), POST /hand/start, /hand/choose, /hand/end,
-   GET /cards (names, roles, the three things), GET /card-image?code= (JSON with base64; drawn as a data: address).
-   Tabs: 首页 (start a hand), 记卡, 记录 (placeholders until their tickets). The hand itself is a full-screen state entered from 首页.
+   GET /cards (names, roles, the three things), GET /card-image?code= (JSON with base64; drawn as a data: address),
+   GET /quiz, POST /quiz/next, /quiz/answer (记卡: the next question, answer it; the service times it and does the FSRS scheduling).
+   Tabs: 首页 (start a hand), 记卡 (quick-answer quiz), 记录 (placeholder until its ticket). The hand itself is a full-screen state entered from 首页.
    While a hand is on, nothing here shows how far the board is from the best one: the service does not send it.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -232,6 +233,149 @@ function Settled({ result, onAgain, onHome }) {
     h("div", { className: "yg-row" }, h("button", { className: "yg-btn primary", onClick: onAgain }, "再来一手"), h("button", { className: "yg-btn", onClick: onHome }, "回首页")));
 }
 
+// ---- 记卡: one question at a time, timed by the service from the moment it is handed out ----
+const BAR_MS = 10000; // the bar's full length; 5 s is where a right answer counts as Easy (EASY_MS / HARD_MS in src/quiz.js)
+const EASY_S = 5;
+const seconds = (ms) => (ms / 1000).toFixed(1);
+const dueText = (ms) => {
+  const m = ms / 60000;
+  if (m < 60) return `${Math.max(1, Math.round(m))} 分钟后`;
+  if (m < 60 * 24) return `${Math.round(m / 60)} 小时后`;
+  return `${Math.round(m / 60 / 24)} 天后`;
+};
+const KIND_TEXT = { identify: "看卡图", fill: "补缺项", find: "按需求找卡" };
+
+function Spark({ history }) {
+  if (!history.length) return h("span", { className: "yg-lab" }, "这张卡还没答过");
+  const top = Math.max(...history, 1);
+  const pts = history.map((v, i) => `${history.length === 1 ? 100 : (i / (history.length - 1)) * 190 + 5},${44 - (v / top) * 38}`);
+  return h("div", { className: "yg-spark", "aria-label": "这张卡的答题用时" },
+    h("svg", { viewBox: "0 0 200 50", width: 200, height: 50 }, h("polyline", { points: pts.join(" "), fill: "none", stroke: "#bdbdbd", strokeWidth: 2 })),
+    h("span", { className: "yg-mono yg-lab first" }, seconds(history[0])),
+    h("span", { className: "yg-mono last" }, seconds(history.at(-1))));
+}
+
+function Quiz({ rest }) {
+  const [summary, setSummary] = useState(null);
+  const [q, setQ] = useState(null); // the question in hand; null = on the start screen
+  const [option, setOption] = useState(null);
+  const [roles, setRoles] = useState([]);
+  const [result, setResult] = useState(null); // the answer's outcome; the question stays up behind it
+  const [answered, setAnswered] = useState(0);
+  const [done, setDone] = useState(false);
+  const [now, setNow] = useState(0);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const base = useRef(0);
+  const guard = useCallback(async (fn) => {
+    setBusy(true); setError("");
+    try { return await fn(); } catch (e) { setError(message(e)); return null; } finally { setBusy(false); }
+  }, []);
+  const refresh = useCallback(() => guard(async () => setSummary(await rest("/quiz"))), [rest, guard]);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const next = useCallback((count) => guard(async () => {
+    const r = await rest("/quiz/next", { method: "POST", body: {} });
+    setOption(null); setRoles([]); setResult(null); setNow(0);
+    if (r.done) { setQ(null); setDone(true); return; }
+    base.current = performance.now();
+    setDone(false); setAnswered(count); setQ(r);
+  }), [rest, guard]);
+  const finish = () => { setQ(null); setDone(false); setAnswered(0); refresh(); };
+
+  const asking = q && !result;
+  useEffect(() => {
+    if (!asking) return undefined;
+    const t = setInterval(() => setNow(performance.now() - base.current), 100);
+    return () => clearInterval(t);
+  }, [asking, q]);
+
+  const submit = useCallback(() => guard(async () => {
+    if (option === null) return;
+    setResult(await rest("/quiz/answer", { method: "POST", body: { option, roles } }));
+  }), [rest, guard, option, roles]);
+  const toggleRole = (r) => setRoles((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]));
+
+  // number keys: 1-4 pick the answer, 5-9 and 0 toggle the roles (identify), Enter submits, then goes on to the next question
+  useEffect(() => {
+    if (!q) return undefined;
+    const onKey = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || busy) return;
+      if (e.key === "Enter") { e.preventDefault(); if (result) next(answered + 1); else submit(); return; }
+      if (result || !/^[0-9]$/.test(e.key)) return;
+      const n = e.key === "0" ? 10 : Number(e.key);
+      if (n <= q.options.length) setOption(n - 1);
+      else if (q.roles && n - q.options.length - 1 < q.roles.length) toggleRole(q.roles[n - q.options.length - 1]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [q, result, busy, answered, next, submit]);
+
+  const head = (right) => h("div", { className: "yg-qhead" },
+    h("div", { className: "yg-line" }, h("strong", { className: "yg-qtitle" }, "记卡 · 快答"), h("span", { className: "yg-lab" }, "看卡图 · 补三件事 · 按需求找卡 混合出题")), right);
+  const err = error ? h("div", { className: "yg-error", role: "alert" }, error) : null;
+
+  if (!q) {
+    const due = summary?.due ?? 0;
+    return h("div", { className: "yg-quiz", "aria-label": "记卡" }, head(null), err,
+      h("div", { className: "yg-home" },
+        h("h2", null, done || (summary && due === 0) ? "现在没有到期的卡" : `${due} 张卡到期`),
+        h("p", { className: "yg-lab" }, done ? "这一轮到期的都答完了。答得又快又对的卡过几天再来，答错或很慢的卡很快会再出现。没有每日题量，有空再来。" : "按功能记卡：每张卡的名字、角色，和「干什么、条件或代价、限制」三件事。快答的卡间隔变长，答错或很慢的卡很快再考。"),
+        h("div", { className: "yg-row" }, h("button", { className: "yg-btn primary big", disabled: busy || !summary || due === 0, onClick: () => next(0) }, "开始记卡"))));
+  }
+
+  const barFull = Math.min(1, (result ? result.ms : now) / BAR_MS);
+  const ms = result ? result.ms : now;
+  const right = h("div", { className: "yg-line" },
+    h("span", { className: "yg-mono yg-qcount" }, `${answered + 1} / ${answered + q.due}`),
+    h("span", { className: "yg-lab" }, `还剩 ${q.due - 1} 张到期`),
+    h("button", { className: "yg-btn small", onClick: finish }, "结束"));
+  const timer = h("section", { className: "yg-qtimer" },
+    h("div", { className: "yg-qused" }, h("div", { className: "yg-lab" }, "本题已用"), h("div", { className: "yg-time small", "aria-label": "本题已用" }, seconds(ms), h("span", { className: "yg-unit" }, "秒"))),
+    h("div", { className: "yg-bar" },
+      h("div", { className: "yg-track" }, h("div", { className: "yg-fill-bar", style: { width: `${barFull * 100}%` } })),
+      q.lastMs != null ? h("div", { className: "yg-mark", style: { left: `${(q.lastMs / BAR_MS) * 100}%` } }, h("span", { className: "yg-lab" }, `上次 ${seconds(q.lastMs)} 秒`)) : null,
+      h("div", { className: "yg-mark mid", style: { left: `${(EASY_S * 1000 / BAR_MS) * 100}%` } }, h("span", null, `${EASY_S} 秒内答对 → 间隔加长`)),
+      h("span", { className: "yg-lab end" }, `${BAR_MS / 1000} 秒`)),
+    h("div", { className: "yg-qhist" }, h("span", { className: "yg-lab" }, "这张卡的答题用时"), h(Spark, { history: q.history })));
+
+  const shownCode = result ? result.card.code : q.image;
+  const caption = result ? `Master Duel 卡名：${result.card.md}`
+    : q.kind === "identify" ? "Master Duel 卡名：？（卡图上是另一套译名）" : q.kind === "fill" ? `Master Duel 卡名：${q.name}` : "按需求找卡：卡图答完再翻开";
+  const art = h("section", { className: "yg-qart" },
+    shownCode ? h(CardArt, { rest, code: shownCode, md: result ? result.card.md : q.name ?? "", className: "yg-qimg" }) : h("div", { className: "yg-art yg-noart yg-qimg" }, "？"),
+    h("span", { className: "yg-lab" }, caption));
+
+  const optionBtn = (o, i) => {
+    const state = result ? (i === result.answerIndex ? " ok" : i === option ? " bad" : "") : option === i ? " on" : "";
+    return h("button", { key: i, className: `yg-qopt${state}`, disabled: busy || !!result, onClick: () => setOption(i), "aria-pressed": option === i }, h("b", { className: "yg-mono" }, i + 1), h("span", null, o.text));
+  };
+  const roleChips = q.roles ? h("div", { className: "yg-qroles" },
+    h("div", { className: "yg-lab" }, "角色（可多选）"),
+    h("div", { className: "yg-row wrap" }, q.roles.map((r) => {
+      const state = result ? (result.answerRoles.includes(r) ? " ok" : roles.includes(r) ? " bad" : "") : roles.includes(r) ? " on" : "";
+      return h("button", { key: r, className: `yg-role${state}`, disabled: busy || !!result, onClick: () => toggleRole(r), "aria-pressed": roles.includes(r) }, r);
+    }))) : null;
+  const given = q.given ? h("div", { className: "yg-facts yg-qgiven" }, q.given.map((g) => h("div", { key: g.label, className: "yg-fact" }, h("span", { className: "yg-lab" }, g.label), h("span", null, g.text)))) : null;
+  const feedback = result ? h("div", { className: `yg-feedback ${result.correct ? "right" : "wrong"}`, role: "status" },
+    h("div", { className: "yg-line" }, h("strong", null, result.correct ? "答对了" : "答错了"),
+      h("span", { className: "yg-mono" }, `${seconds(result.ms)} 秒 · ${result.rating}`), h("span", { className: "yg-lab" }, `下次 ${dueText(result.dueInMs)}再考`)),
+    h("div", { className: "yg-line" }, h("span", { className: "yg-title" }, result.card.md), h("span", { className: "yg-chip on" }, result.card.role)),
+    h("div", { className: "yg-facts" }, [["干什么", result.card.does], ["条件代价", result.card.cost], ["限制", result.card.limit]].map(([k, v]) => h("div", { key: k, className: "yg-fact" }, h("span", { className: "yg-lab" }, k), h("span", null, v))))) : null;
+  const hint = q.kind === "identify" ? "数字键 1–4 选名字，5–0 选角色，回车提交 · 名字和角色都对才算对" : "数字键 1–4 选答案，回车提交";
+
+  return h("div", { className: "yg-quiz", "aria-label": "记卡", "data-kind": q.kind }, head(right), err, timer,
+    h("div", { className: "yg-qbody" }, art,
+      h("section", { className: "yg-qmain" },
+        h("div", { className: "yg-line" }, h("h2", { className: "yg-qprompt" }, q.prompt), h("span", { className: "yg-chip" }, KIND_TEXT[q.kind])),
+        given,
+        h("div", { className: "yg-qopts" }, q.options.map(optionBtn)),
+        roleChips, feedback,
+        h("div", { className: "yg-qfoot" }, h("span", { className: "yg-lab" }, result ? "回车下一题" : hint),
+          result ? h("button", { className: "yg-btn solid big", disabled: busy, onClick: () => next(answered + 1) }, "下一题")
+            : h("button", { className: "yg-btn solid big", disabled: busy || option === null, onClick: submit }, "提交")))));
+}
+
 function YugiohApp({ rest }) {
   const [tab, setTab] = useState("首页");
   const [hand, setHand] = useState(null);
@@ -264,6 +408,7 @@ function YugiohApp({ rest }) {
   let main;
   if (screen === "play" && hand) main = h(Play, { rest, hand, cards, busy, send, end });
   else if (screen === "settled" && result) main = h(Settled, { result, onAgain: start, onHome: () => setScreen("home") });
+  else if (tab === "记卡") main = h(Quiz, { rest });
   else if (tab !== "首页") main = h("div", { className: "yg-home" }, h("h2", null, tab), h("p", { className: "yg-lab" }, `「${tab}」还没做，在后面的票里。`));
   else main = h("div", { className: "yg-home", "aria-label": "首页" },
     h("h2", null, "计时赛"),
@@ -363,6 +508,38 @@ const CSS = `
 .yg-opt .yg-sub { position: absolute; left: 0; right: 0; top: 168px; font-size: 10px; color: #c8ff3d; text-align: center; }
 .yg-count { position: absolute; right: 2px; top: 2px; min-width: 22px; padding: 1px 5px; border-radius: 9px; background: #c8ff3d; color: #000; font-size: 11px; font-weight: 600; }
 .yg-big { width: 120px; height: 175px; }
+.yg-quiz { display: flex; flex-direction: column; gap: 14px; }
+.yg-qhead { display: flex; align-items: center; justify-content: space-between; }
+.yg-qtitle { font-size: 16px; } .yg-qcount { font-size: 16px; }
+.yg-btn.small { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.yg-qtimer { border: 1px solid #1f1f1f; border-radius: 8px; padding: 20px 26px; display: flex; align-items: center; gap: 36px; min-height: 120px; }
+.yg-qused { width: 190px; flex: none; }
+.yg-time.small { font-size: 64px; } .yg-unit { font-size: 20px; margin-left: 4px; letter-spacing: 0; }
+.yg-bar { flex: 1; position: relative; padding-bottom: 36px; }
+.yg-track { height: 16px; background: #161616; border-radius: 2px; overflow: hidden; }
+.yg-fill-bar { height: 100%; background: #c8ff3d; }
+.yg-mark { position: absolute; top: -6px; width: 2px; height: 28px; background: #ececec; }
+.yg-mark span { position: absolute; top: 34px; left: 0; transform: translateX(-50%); white-space: nowrap; font-size: 12px; color: #bdbdbd; }
+.yg-mark.mid span { color: #ececec; font-weight: 600; }
+.yg-bar .end { position: absolute; right: 0; top: 26px; }
+.yg-qhist { width: 210px; flex: none; display: flex; flex-direction: column; gap: 4px; }
+.yg-spark { position: relative; width: 200px; height: 50px; }
+.yg-spark .first { position: absolute; left: 0; bottom: -4px; } .yg-spark .last { position: absolute; right: 0; top: 0; color: #c8ff3d; font-size: 11px; }
+.yg-qbody { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 14px; }
+.yg-qart { border: 1px solid #1f1f1f; border-radius: 8px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 420px; }
+.yg-qimg { width: 250px; height: 365px; flex: none; object-fit: cover; }
+.yg-qmain { display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 0; min-width: 0; }
+.yg-qprompt { font-size: 20px; font-weight: 600; }
+.yg-qopts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.yg-qopt { min-height: 52px; border: 1px solid #333; border-radius: 6px; background: none; display: flex; align-items: center; gap: 12px; padding: 8px 16px; text-align: left; font-size: 15px; line-height: 1.4; }
+.yg-qopt b { font-weight: 400; color: #c8ff3d; font-size: 13px; }
+.yg-qopt.on, .yg-role.on { border-color: #c8ff3d; } .yg-qopt.ok, .yg-role.ok { border-color: #c8ff3d; background: #14200a; } .yg-qopt.bad, .yg-role.bad { border-color: #ff9a6b; background: #25140c; }
+.yg-qroles { display: flex; flex-direction: column; gap: 10px; }
+.yg-role { height: 40px; padding: 0 16px; border: 1px solid #333; border-radius: 20px; background: none; font-size: 13px; }
+.yg-qgiven { border-bottom: 1px solid #1c1c1c; }
+.yg-feedback { border: 1px solid #333; border-radius: 8px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+.yg-feedback.right { border-color: #c8ff3d; } .yg-feedback.wrong { border-color: #ff9a6b; }
+.yg-qfoot { margin-top: auto; border-top: 1px solid #1c1c1c; padding-top: 14px; display: flex; align-items: center; justify-content: space-between; }
 @media (max-width: 900px) { .yg-bottom { grid-template-columns: 1fr; } .yg-grid4 { grid-template-columns: repeat(2, 1fr); } }
 `;
 
