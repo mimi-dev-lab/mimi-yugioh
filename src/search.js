@@ -1,6 +1,7 @@
 // 最好场面搜索：在决斗会话里做有限偏离的深度优先搜索（存档回滚），按场面值评估我方回合结束时的场面。算法、剪枝、上限见 DESIGN.md「最好场面搜索」。
 // 纯逻辑：会话、卡组、「现在」（毫秒的函数）、时间上限都由调用方传进来（见 AGENTS.md「边界」）。
 // 搜出的路线用 route.js 的语义回应写（{ idle, code }、{ chain }、{ pick }…），不用选项下标：下标随起手顺序和种子变，缓存按排序后的起手存。
+import { createHash } from 'node:crypto';
 import { openHandSession, stateKey } from './duel-session.js';
 import { descOf, indicesFor, labelFor, sameResponse, startsStep } from './route.js';
 import { boardValue } from './scoring.js';
@@ -14,8 +15,10 @@ export const MAX_COMBOS = 4; // 一次选多张时最多试几种组合
 export const GUIDE_WINDOW = 6; // 照 Game8 路线排先后时，往后看几个回应找能对上的
 export const MAX_RESPONSES = 250; // 一条路线最多这么多个回应
 
-// 搜索结果的版本：卡组名加上决定搜索范围的常量。缓存里记着它，改了常量或换了卡组，旧缓存的版本对不上，就当没有
-export const searchVersion = (deck) => [deck.name, MAX_DISCREPANCY, MAX_BRANCH, MAX_COMBOS, GUIDE_WINDOW, MAX_RESPONSES].join('/');
+// 搜索结果的版本：卡组名、卡组数据的指纹（卡表的打断数和角色、主额外卡组、起手类型、展开路线：它们改了，场面值或搜索的排序就变）加上决定搜索范围的常量。
+// 缓存里记着它，改了卡组数据或常量、换了卡组，旧缓存的版本对不上，就当没有
+export const deckFingerprint = (deck) => createHash('sha1').update(JSON.stringify([deck.cards, deck.main, deck.extra, deck.handTypes, deck.routes], (_k, v) => (typeof v === 'function' ? undefined : v))).digest('hex').slice(0, 12);
+export const searchVersion = (deck) => [deck.name, deckFingerprint(deck), MAX_DISCREPANCY, MAX_BRANCH, MAX_COMBOS, GUIDE_WINDOW, MAX_RESPONSES].join('/');
 
 class Timeout extends Error {}
 const yieldLoop = () => new Promise((resolve) => setImmediate(resolve));

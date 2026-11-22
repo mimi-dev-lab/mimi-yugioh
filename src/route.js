@@ -80,6 +80,13 @@ export function labelFor(deck, prompt, indices) {
   }
 }
 
+// 一步的文字：发起的动作 + 选了哪些卡；「不发动」「放在第几格」「选第几项」「选完」这类机械确认折叠掉。labels 是这一步每个选择的 labelFor
+export function summarizeLabels(labels) {
+  const picks = [...new Set(labels.slice(1).filter((t) => /^选 /.test(t)).flatMap((t) => t.slice(2).split('、')))];
+  const shown = picks.length > 3 ? `${picks.slice(0, 3).join('、')} 等 ${picks.length} 张` : picks.join('、');
+  return `${labels[0]}${shown ? ` · 选 ${shown}` : ''}`;
+}
+
 const describeOptions = (prompt) => prompt.options.map((o) => [o.action, o.code].filter((x) => x !== undefined).join(' ')).join(' | ');
 
 // 默认用路线自己写的起手；传 hand 就换成别的起手（结算时拿用户真实的起手重放，起手里没有的卡对不上就抛错）；seed 是发牌的种子（不给用 1）。boards 是按 startsStep 切的每一步之后的场面
@@ -87,10 +94,14 @@ export async function playRoute(engine, deck, route, { seed, hand = route.hand }
   const session = await openHandSession(engine, deck, hand, seed);
   try {
     const boards = [];
+    const labels = []; // 每一步每个选择的文字
+    const startBoard = session.board();
     const choose = (prompt, indices) => {
+      const text = labelFor(deck, prompt, indices);
       session.choose(indices);
-      if (startsStep(prompt, indices) || !boards.length) boards.push(null);
+      if (startsStep(prompt, indices) || !boards.length) { boards.push(null); labels.push([]); }
       boards[boards.length - 1] = session.board();
+      labels.at(-1).push(text);
     };
     route.steps.forEach((step, stepIndex) => {
       for (const response of step.do) {
@@ -113,7 +124,7 @@ export async function playRoute(engine, deck, route, { seed, hand = route.hand }
       }
     });
     if (!session.endBoard) throw new Error('步骤走完了，我方回合还没结束（最后一步应该是 finish）');
-    return { endBoard: session.endBoard, boards, scriptErrors: [...session.scriptErrors] };
+    return { endBoard: session.endBoard, startBoard, boards, steps: labels.map((l) => summarizeLabels(l)), scriptErrors: [...session.scriptErrors] };
   } finally {
     session.close();
   }

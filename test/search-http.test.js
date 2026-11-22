@@ -66,7 +66,7 @@ describe('搜索与提示：HTTP 接口', () => {
     assert.equal(s.fieldScore, 100);
     assert.equal(s.divergeStep, null);
     assert.deepEqual(s.curve.best, s.curve.user);
-    assert.deepEqual(s.bestBoard.monsters.sort(), ['冰剑龙 镜翠幻种', '引导之圣女 库妸㽗', '赫之圣女 卡尔塔西亚', '黑衣龙之艾克利西亚'].sort());
+    assert.deepEqual(s.bestBoard.monsters.map((c) => c.md).sort(), ['冰剑龙 镜翠幻种', '引导之圣女 库妸㽗', '赫之圣女 卡尔塔西亚', '黑衣龙之艾克利西亚'].sort());
     assert.equal((await readCache(data, WHITE_ALBAZ_SEED)).nodes, 0); // 缓存没被改
     const line = (await readFile(join(data, 'hands.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l)).at(-1);
     assert.equal(line.benchmark.source, 'search');
@@ -113,6 +113,8 @@ describe('搜索与提示：HTTP 接口', () => {
     await playFlat(call, 2);
     const ended = (await call('POST', '/hand/end')).body;
     assert.ok(Math.abs(ended.hintFactor - 0.64) < 1e-9, String(ended.hintFactor));
+    assert.equal(ended.steps[0].hinted, true); // 两次提示给的都是第 1 步里的选择；结算屏据此标「用提示」
+    assert.ok(ended.steps.slice(1).every((x) => !x.hinted));
     const line = (await readFile(join(data, 'hands.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l)).at(-1);
     assert.equal(line.hints, 2);
   }));

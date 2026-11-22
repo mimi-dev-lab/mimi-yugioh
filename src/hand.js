@@ -3,8 +3,8 @@
 import { openHandSession, stateKey } from './duel-session.js';
 import { classifyHand, expand } from './deck.js';
 import { stepLedger } from './ledger.js';
-import { ACTION_NAMES, indicesFor, labelFor, playRoute, responseFor, sameChoice, startsStep } from './route.js';
-import { boardValue, curve, score } from './scoring.js';
+import { ACTION_NAMES, indicesFor, labelFor, playRoute, responseFor, sameChoice, startsStep, summarizeLabels } from './route.js';
+import { boardValue, curve, interruptsOf, score } from './scoring.js';
 import { searchSession } from './search.js';
 
 export const HAND_SIZE = 5;
@@ -39,6 +39,7 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
   const md = (code) => deck.cards[code]?.md ?? String(code);
   const actions = []; // { step, at（距开局毫秒）, kind, text, indices, response（语义回应）, valueAfter, state }
   let hints = 0;
+  const hintedSteps = new Set(); // 用了提示的步（提示给的下一个选择落在哪一步）
   let source = null; // 当前这一步是哪张卡的哪个动作发起的（浮层标题用）
   const stepBefore = new Map(); // 每一步开始前的场面，算「花了 → 换来」用
   let step = 0;
@@ -77,10 +78,7 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
 
   // 一步在操作记录里的一行：发起的动作 + 选了哪些卡；「不发动」「放在第几格」「选第几项」「选完」这类机械确认折叠掉（完整的在 text 里）
   function summarize(n) {
-    const mine = actions.filter((a) => a.step === n);
-    const picks = [...new Set(mine.slice(1).filter((a) => /^选 /.test(a.text)).flatMap((a) => a.text.slice(2).split('、')))];
-    const shown = picks.length > 3 ? `${picks.slice(0, 3).join('、')} 等 ${picks.length} 张` : picks.join('、');
-    return `${mine[0].text}${shown ? ` · 选 ${shown}` : ''}`;
+    return summarizeLabels(actions.filter((a) => a.step === n).map((a) => a.text));
   }
 
   function view(at) {
@@ -129,13 +127,13 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
     if (searchStatus === 'done') {
       try {
         const replay = await playRoute(engine, deck, { id: 'search', name: '搜索', steps: searched.steps }, { seed, hand });
-        searchLine = { source: 'search', value: boardValue(deck, replay.endBoard), boards: replay.boards, endBoard: replay.endBoard };
+        searchLine = { source: 'search', value: boardValue(deck, replay.endBoard), boards: replay.boards, startBoard: replay.startBoard, steps: replay.steps, endBoard: replay.endBoard };
       } catch { searchStatus = 'replay-failed'; }
     }
     let game8Line = null;
     for (const { route, replay } of await game8Lines()) {
       const value = boardValue(deck, replay.endBoard);
-      if (!game8Line || value > game8Line.value) game8Line = { source: 'game8', value, routeId: route.id, name: route.name, boards: replay.boards, endBoard: replay.endBoard };
+      if (!game8Line || value > game8Line.value) game8Line = { source: 'game8', value, routeId: route.id, name: route.name, boards: replay.boards, startBoard: replay.startBoard, steps: replay.steps, endBoard: replay.endBoard };
     }
     const line = searchLine && (!game8Line || searchLine.value >= game8Line.value) ? searchLine : game8Line;
     const key = handKey(hand);
@@ -174,6 +172,7 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
     if (!indices || indices.some((i) => i < 0)) throw new HandError('没算出提示', 409);
     if (actions.length !== made || session.endBoard) throw new HandError('提示算的时候局面变了，再要一次', 409);
     hints++;
+    hintedSteps.add(startsStep(prompt, indices) || step === 0 ? step + 1 : step);
     return { indices, text: `建议：${label(prompt, indices)}`, hints };
   }
 
@@ -185,13 +184,22 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
     const userValue = boardValue(deck, endBoard);
     const base = await benchmark(userValue, history, searched);
     const result = score({ userValue, bestValue: base.value, seconds, hints });
-    const benchmarkInfo = { source: base.source, ...(base.line?.routeId ? { routeId: base.line.routeId } : {}), provisional: !base.line, search: base.search };
+    const benchmarkInfo = { source: base.source, ...(base.line?.routeId ? { routeId: base.line.routeId, name: base.line.name } : {}), provisional: !base.line, search: base.search };
     const codes = (list) => list.map((c) => c.code);
     const final = { hand: codes(endBoard.hand), monsters: codes(endBoard.monsters), spellTraps: codes(endBoard.spellTraps) };
     const last = new Map(actions.map((a) => [a.step, a])); // 每步取最后一个操作之后的场面
-    const userSteps = [...last.values()].map((a) => ({ step: a.step, text: actions.filter((x) => x.step === a.step).map((x) => x.text).join(' → '), value: a.valueAfter, state: a.state }));
+    const rows = new Map(stepRows().map((r) => [r.step, r]));
+    const userSteps = [...last.values()].map((a) => { const r = rows.get(a.step); return { step: a.step, text: actions.filter((x) => x.step === a.step).map((x) => x.text).join(' → '), summary: r.summary, spent: r.spent, gained: r.gained, hinted: hintedSteps.has(a.step), value: a.valueAfter, state: a.state }; });
+    // 最好路线每一步做了什么、花了什么换来什么：和用户的一步对一步
+    const line = base.line;
+    const bestSteps = line ? line.boards.map((b, i) => ({ step: i + 1, summary: line.steps[i], ...stepLedger(i === 0 ? line.startBoard : line.boards[i - 1], b, md) })) : null;
+    const cardsOf = (list) => list.map((c) => ({ code: c.code, md: md(c.code) }));
+    // 这类起手（日志里同一个起手类型的）的平均总分，含这一手
+    const handType = classifyHand(deck, hand);
+    const typeTotals = [...history.filter((r) => r.type === 'hand' && r.handType === handType).map((r) => r.total), result.total];
+    const typeName = deck.handTypes.find((t) => t.id === handType)?.name ?? (handType === 'brick' ? '烂手' : '其他起手');
     const record = {
-      type: 'hand', v: 1, id, seed, hand: [...hand], handType: classifyHand(deck, hand), benchmarkHand: false, startedAt, durationMs: at - startedAt, hints,
+      type: 'hand', v: 1, id, seed, hand: [...hand], handType, benchmarkHand: false, startedAt, durationMs: at - startedAt, hints,
       actions: actions.map(({ step: s, at: t, kind, text, indices, valueAfter }) => ({ step: s, atMs: t, kind, text, indices, value: valueAfter })),
       endBoard: final, userValue, bestValue: base.value, benchmark: benchmarkInfo, ...result,
     };
@@ -199,8 +207,12 @@ export async function startHand(engine, deck, { id, seed, now, number = 1 }) {
     const settlement = {
       ...shown,
       finalBoard: { hand: endBoard.hand.map((c) => ({ ...c, md: md(c.code) })), monsters: endBoard.monsters.map((c) => ({ ...c, md: md(c.code) })), spellTraps: endBoard.spellTraps.map((c) => ({ ...c, md: md(c.code) })) },
-      bestBoard: base.line && base.source !== 'personal' ? { hand: base.line.endBoard.hand.map((c) => md(c.code)), monsters: base.line.endBoard.monsters.map((c) => md(c.code)), spellTraps: base.line.endBoard.spellTraps.map((c) => md(c.code)) } : null,
+      bestBoard: base.line && base.source !== 'personal' ? { hand: cardsOf(base.line.endBoard.hand), monsters: cardsOf(base.line.endBoard.monsters), spellTraps: cardsOf(base.line.endBoard.spellTraps) } : null,
+      // 终场的组成：打断数和手牌数，用户和最好各一份（最好只在基准是搜索或 Game8 时有）
+      parts: { user: { interrupts: interruptsOf(deck, endBoard), hand: endBoard.hand.length }, best: base.line && base.source !== 'personal' ? { interrupts: interruptsOf(deck, base.line.endBoard), hand: base.line.endBoard.hand.length } : null },
       steps: userSteps.map(({ state: _state, ...step }) => step),
+      bestSteps,
+      handTypeStats: { type: handType, name: typeName, average: Math.round(typeTotals.reduce((a, b) => a + b, 0) / typeTotals.length), count: typeTotals.length },
       curve: { user: userSteps.map((s) => (base.value > 0 ? s.value / base.value : 1)), best: base.line ? curve(deck, base.line.boards, base.value) : null },
     };
     // 走偏的那一步：用户第 i 步之后的局面和最好路线第 i 步之后的不一样（两边都按 startsStep 切步）；一直一样就是 null
