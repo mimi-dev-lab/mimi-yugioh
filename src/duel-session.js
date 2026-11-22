@@ -20,6 +20,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   let message = null; // 引擎停在哪个提示上
   let finished = false;
   let endBoard = null; // 我方回合结束（对手回合开始）时的场面，没到那一刻是 null
+  let normalSummonUsed = false; // 我方这回合的召唤权（通常召唤或盖放怪兽）用掉了没有
+  const activated = []; // 我方发动过效果的卡的密码，按发动顺序
 
   function build() {
     if (handle) core.destroyDuel(handle);
@@ -41,6 +43,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     finished = false;
     message = null;
     endBoard = null;
+    normalSummonUsed = false;
+    activated.length = 0;
   }
 
   // 我方的场面：每个区域里的卡（编号、名字、格子）
@@ -55,6 +59,11 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     for (let guard = 0; guard < MAX_STEPS; guard++) {
       const status = core.duelProcess(handle);
       const messages = core.duelGetMessage(handle);
+      for (const m of messages) {
+        if (m.type === M.SUMMONING && m.controller === 0) normalSummonUsed = true;
+        if (m.type === M.SET && m.controller === 0 && m.location === L.MZONE) normalSummonUsed = true;
+        if (m.type === M.CHAINING && m.triggering_controller === 0) activated.push(m.code);
+      }
       if (!endBoard && messages.some((m) => m.type === M.NEW_TURN && m.player === 1)) endBoard = snapshot();
       if (status === OcgProcessResult.END) { finished = true; message = null; return; }
       if (status !== OcgProcessResult.WAITING) continue;
@@ -175,6 +184,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
       advance();
     },
     board() { return snapshot(); },
+    get normalSummonUsed() { return normalSummonUsed; },
+    get activated() { return [...activated]; },
     // 我方回合结束那一刻的场面（对手回合开始时记下），没结束是 null；回合结束后的抽牌不算在里面
     get endBoard() { return endBoard; },
     // 存档：记下现在走到第几个选择；回滚：同样的种子重放到那里，合法选项和存档时一致
