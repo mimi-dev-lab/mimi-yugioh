@@ -101,7 +101,7 @@ describe('打一手：HTTP 接口', () => {
     assert.equal(s.speedBonus, 0);
     assert.equal(s.speedCounted, false);
     assert.equal(s.total, s.fieldScore);
-    assert.equal(s.divergeStep, 2); // 第 1 步照路线走，第 2 步没接着发动、直接结束回合
+    assert.equal(s.divergeStep, 1); // 白之落胤发动之后，路线接着发动②叫白之圣女；这里只交了前几个选择，结束回合时可选效果一律不发动，第 1 步的局面就和路线不同
     assert.ok(s.curve.best.length > s.curve.user.length);
   }));
 
