@@ -40,7 +40,6 @@ export async function startHand(engine, deck, { id, seed, now }) {
   const md = (code) => deck.cards[code]?.md ?? String(code);
   const actions = []; // { step, at（距开局毫秒）, kind, text, indices, valueAfter, state }
   let step = 0;
-  let settled = false;
   const startedAt = now;
   const info = { id, seed, hand: [...hand], startedAt };
 
@@ -114,7 +113,6 @@ export async function startHand(engine, deck, { id, seed, now }) {
 
   // 结算。history 是日志里已有的记录（找这手牌的个人最好）；返回 { settlement, record }，record 是追加进日志的那一行
   async function end(at, history = []) {
-    if (settled) throw new HandError('这一手已经结算了', 409);
     finishTurn(at);
     const endBoard = session.endBoard;
     const seconds = (at - startedAt) / 1000;
@@ -122,7 +120,6 @@ export async function startHand(engine, deck, { id, seed, now }) {
     const base = await benchmark(userValue, history);
     const result = score({ userValue, bestValue: base.value, seconds, hints: 0 });
     const benchmarkInfo = { source: base.source, ...(base.game8 ? { routeId: base.game8.routeId } : {}), provisional: !base.game8 };
-    settled = true;
     const codes = (list) => list.map((c) => c.code);
     const final = { hand: codes(endBoard.hand), monsters: codes(endBoard.monsters), spellTraps: codes(endBoard.spellTraps) };
     const last = new Map(actions.map((a) => [a.step, a])); // 每步取最后一个操作之后的场面

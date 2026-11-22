@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 import { BRANDED } from '../src/decks/branded.js';
 import { classifyHand, expand } from '../src/deck.js';
 import { deal, handKey, rngFrom } from '../src/hand.js';
+import { startsStep } from '../src/route.js';
 
 describe('发牌', () => {
   test('同一个种子同一手，起手是主卡组里的 5 张，剩下 35 张', () => {
@@ -27,4 +28,15 @@ describe('发牌', () => {
     for (let i = 0; i < 20; i++) { const v = a(); assert.equal(v, b()); assert.ok(v >= 0 && v < 1); }
   });
   test('handKey 与顺序无关', () => assert.equal(handKey([3, 1, 2]), handKey([2, 3, 1])));
+});
+
+describe('一步怎么切', () => {
+  const chain = { kind: 'chain', options: [{ action: 'chain' }, { action: 'pass' }] };
+  test('主阶段的命令和连锁窗口里发动一个效果开新的一步；放行、选卡、选格子不开', () => {
+    assert.equal(startsStep({ kind: 'idle', options: [{ action: 'summon' }] }, [0]), true);
+    assert.equal(startsStep(chain, [0]), true);
+    assert.equal(startsStep(chain, [1]), false);
+    assert.equal(startsStep({ kind: 'cards', options: [{}] }, [0]), false);
+    assert.equal(startsStep({ kind: 'place', options: [{}] }, [0]), false);
+  });
 });

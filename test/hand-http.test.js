@@ -105,6 +105,18 @@ describe('打一手：HTTP 接口', () => {
     assert.ok(s.curve.best.length > s.curve.user.length);
   }));
 
+  test('还停在选卡的提示上就结束回合：409，这一手不结算、局面不变，选完再结束才行', () => withServer(async (call, data) => {
+    await call('POST', '/hand/start', { seed: WHITE_ALBAZ_SEED });
+    const idle = (await call('GET', '/hand')).body;
+    const albaz = idle.prompt.options.findIndex((o) => o.action === 'activate' && o.md === '白之落胤');
+    const mid = (await call('POST', '/hand/choose', { indices: [albaz] })).body;
+    assert.equal(mid.prompt.kind, 'cards');
+    const refused = await call('POST', '/hand/end');
+    assert.equal(refused.status, 409);
+    assert.deepEqual({ ...(await call('GET', '/hand')).body, elapsedMs: 0 }, { ...mid, elapsedMs: 0 });
+    assert.deepEqual(await logLines(data), []);
+  }));
+
   test('展开中不给场面值或离最好的差距；操作记录有第几步、时间和文字', () => withServer(async (call) => {
     await call('POST', '/hand/start', { seed: WHITE_ALBAZ_SEED });
     const state = (await call('GET', '/hand')).body;
