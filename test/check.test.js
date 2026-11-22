@@ -75,6 +75,14 @@ test('plugin：页面 import 别的东西、自己发请求、写外部网址、
   for (const want of [/import 了 lodash/, /不自己发请求/, /写了网址/, /百分比、场面估值或「还差」/, /起子进程或另开网络连接/, /读文件/, /写了不是本机的地址/, /YUGIOH_URL/]) assert.match(problems, want);
 });
 
+test('plugin：结算屏那一段可以写百分比，段外照旧不许', () => {
+  const api = { 'plugin/dashboard/plugin_api.py': GOOD_API };
+  const inside = `${GOOD_JS}// ---- settlement (x)\nconst a = "你 78%";\n// ---- end of settlement ----\n`;
+  assert.deepEqual(run('plugin', repo({ 'plugin/webapp/plugin.js': inside, ...api })), []);
+  const outside = `${inside}const b = "还差 80%";\n`;
+  assert.match(run('plugin', repo({ 'plugin/webapp/plugin.js': outside, ...api })).join('\n'), /百分比、场面估值或「还差」/);
+});
+
 test('plugin：缺文件时说明缺哪个', () => {
   assert.match(run('plugin', repo({}))[0], /没有 plugin\/webapp\/plugin\.js/);
 });

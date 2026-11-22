@@ -2,10 +2,11 @@
    A shell. Rules, dealing, scoring and the engine live in the yugioh service (src/), reached through this plugin's backend
    (../dashboard/plugin_api.py) and ctx.rest, which adds /api/plugins/yugioh and the web workspace's own login and path prefix;
    this file only draws the hand in progress and sends the choices the user makes:
-   GET /hand (prompt with legal options, board, step log, clock), POST /hand/start, /hand/choose, /hand/end,
+   GET /hand (prompt with legal options, board, step log, clock), POST /hand/start (a seed replays the same hand), /hand/choose, /hand/hint, /hand/end,
    GET /cards (names, roles, the three things), GET /card-image?code= (JSON with base64; drawn as a data: address),
    GET /quiz, POST /quiz/next, /quiz/answer (记卡: the next question, answer it; the service times it and does the FSRS scheduling).
-   Tabs: 首页 (start a hand), 记卡 (quick-answer quiz), 记录 (placeholder until its ticket). The hand itself is a full-screen state entered from 首页.
+   Tabs: 首页 (start a hand), 记卡 (quick-answer quiz), 记录 (placeholder until its ticket). The hand itself is a full-screen state entered from 首页;
+   when it ends the settlement screen (design-r3/clock-result) shows the score broken down, the curve, both final boards and the step-by-step comparison.
    While a hand is on, nothing here shows how far the board is from the best one: the service does not send it.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -137,7 +138,7 @@ function PromptPanel({ rest, prompt, busy, send }) {
 }
 
 // ---- the hand in progress ----
-function Play({ rest, hand, cards, busy, send, end }) {
+function Play({ rest, hand, cards, busy, send, end, hint }) {
   const [sel, setSel] = useState(null); // { zone, code, sequence }
   const [graveOpen, setGraveOpen] = useState(false);
   const [now, setNow] = useState(0);
@@ -213,7 +214,7 @@ function Play({ rest, hand, cards, busy, send, end }) {
             [["干什么", info.does], ["条件代价", info.cost], ["限制", info.limit, true]].map(([k, v, warn]) => h("div", { key: k, className: "yg-fact" }, h("span", { className: "yg-lab" }, k), h("span", { className: warn ? "yg-warn" : "" }, v)))),
         ] : h("p", { className: "yg-lab pad" }, "点手牌、场上或墓地的一张卡，看它现在能做什么，和它的角色、三件事。"),
         h("div", { className: "yg-final" },
-          h("button", { className: "yg-btn ghost", disabled: true, title: "提示要等「最好场面搜索」做好才有（另一张票）；做好以后每用一次分数 ×0.8" }, "提示", h("span", { className: "yg-mono yg-lab" }, `分数 ×${HINT_FACTOR}`)),
+          h("button", { className: "yg-btn ghost", disabled: busy || hand.status !== "playing", onClick: hint, title: "照提示走下一步；每用一次分数 ×0.8" }, "提示", h("span", { className: "yg-mono yg-lab" }, `分数 ×${HINT_FACTOR}`)),
           h("button", { className: "yg-btn solid", disabled: busy, onClick: end }, "结束回合"))),
     ),
     graveOpen ? h("div", { className: "yg-modal", role: "dialog", "aria-label": "墓地" },
@@ -223,15 +224,120 @@ function Play({ rest, hand, cards, busy, send, end }) {
     prompt && prompt.kind !== "idle" && hand.status === "playing" ? h("div", { className: "yg-modal" }, h(PromptPanel, { rest, prompt, busy, send })) : null);
 }
 
-// ---- the small settlement shown for now: the full settlement screen is its own ticket ----
-function Settled({ result, onAgain, onHome }) {
-  return h("div", { className: "yg-home", "aria-label": "结算" },
-    h("h2", null, "这一手结束了"),
-    h("div", { className: "yg-grid4" }, [["总分", result.total], ["场面分", result.fieldScore], ["速度加成", result.speedCounted ? `+${result.speedBonus}` : "不计"], ["提示系数", `×${result.hintFactor}`]]
-      .map(([k, v]) => h("div", { key: k, className: "yg-stat" }, h("span", { className: "yg-lab" }, k), h("span", { className: "yg-big-num yg-mono" }, v)))),
-    h("p", { className: "yg-lab" }, "完整的结算屏（曲线、逐步对照）在另一张票里做。"),
-    h("div", { className: "yg-row" }, h("button", { className: "yg-btn primary", onClick: onAgain }, "再来一手"), h("button", { className: "yg-btn", onClick: onHome }, "回首页")));
+// ---- settlement (design-r3/clock-result): score broken into its parts, the curve, both final boards, the step-by-step comparison ----
+const SEARCH_NOTE = { pending: "搜索还没搜完", "timed-out": "搜索超时", failed: "搜索失败", none: "这手没有搜索结果", "replay-failed": "缓存的搜索路线在这手的种子下走不通，已重搜" };
+function benchmarkText(b) {
+  if (b.source === "search") return "基准：最好场面搜索搜出的路线（用你的起手和种子重放得到）";
+  const note = b.search !== "done" && SEARCH_NOTE[b.search] ? `（${SEARCH_NOTE[b.search]}）` : "";
+  if (b.source === "game8") return `基准：Game8 路线「${b.name ?? b.routeId}」${note}`;
+  return `基准：你在这手牌上的最好成绩${note}。没有搜索和 Game8 路线可比，场面分偏高`;
 }
+
+function Stat({ label, value, sub, tone }) {
+  return h("div", { className: "yg-rstat" },
+    h("div", { className: "yg-lab" }, label),
+    h("div", { className: `yg-rnum yg-mono ${tone ?? ""}` }, value),
+    h("div", { className: "yg-lab sub" }, sub));
+}
+
+// the value after each step, drawn as steps: white = you, green dashed = the best route; the stretch where the step you diverged on sits is shaded
+function Curve({ result }) {
+  const user = result.curve.user;
+  const best = result.curve.best;
+  const n = Math.max(user.length, best?.length ?? 0, 1);
+  const W = 880, H = 200, L = 56, R = 70, T = 14, B = 28;
+  const x = (k) => L + (k / n) * (W - L - R);
+  const y = (v) => T + (1 - Math.min(1, Math.max(0, v))) * (H - T - B);
+  const path = (list) => [`M${x(0)},${y(0)}`, ...list.map((v, i) => `H${x(i + 1)}V${y(v)}`), `H${W - R + 24}`].join("");
+  const d = result.divergeStep;
+  return h("svg", { className: "yg-curve", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "每一步之后的场面曲线" },
+    d ? h("rect", { x: x(d - 1), y: T, width: x(d) - x(d - 1), height: H - T - B, fill: "#1a120d" }) : null,
+    h("line", { x1: L, x2: W - R + 24, y1: y(0.9), y2: y(0.9), stroke: "#6f8f2a", strokeDasharray: "3 4" }),
+    [[1, "100%"], [0.9, "90%"], [0, "0"]].map(([v, t]) => h("text", { key: t, x: L - 8, y: y(v) + 4, textAnchor: "end", fontSize: 11, fill: v === 0.9 ? "#c8ff3d" : "#bdbdbd", className: "yg-mono" }, t)),
+    Array.from({ length: n }, (_, i) => h("text", { key: i, x: x(i + 1), y: H - 8, textAnchor: "middle", fontSize: 11, fill: "#bdbdbd", className: "yg-mono" }, i + 1)),
+    d ? h("text", { x: (x(d - 1) + x(d)) / 2, y: H - 8, textAnchor: "middle", fontSize: 11, fill: "#ff9a6b" }, "走偏") : null,
+    best ? h("path", { d: path(best), fill: "none", stroke: "#c8ff3d", strokeWidth: 2, strokeDasharray: "5 4" }) : null,
+    h("path", { d: path(user), fill: "none", stroke: "#ececec", strokeWidth: 2.5 }),
+    best ? h("text", { x: W - 2, y: y(best.at(-1)) - 6, textAnchor: "end", fontSize: 12, fill: "#c8ff3d", fontWeight: 600 }, `最好 ${Math.round(best.at(-1) * 100)}%`) : null,
+    h("text", { x: W - 2, y: y(user.at(-1)) + 16, textAnchor: "end", fontSize: 12, fill: "#ececec" }, `你 ${Math.round(user.at(-1) * 100)}%`));
+}
+
+function MiniCard({ rest, card, missing }) {
+  if (missing) return h("div", { className: "yg-mini" }, h("div", { className: "yg-mini-art gap" }), h("span", { className: "yg-mini-name warn" }, `少 ${card.md}`));
+  return h("div", { className: "yg-mini" }, h("div", { className: "yg-mini-art" }, h(CardArt, { rest, code: card.code, md: card.md })), h("span", { className: "yg-mini-name" }, card.md));
+}
+
+// the user's field cards, with a dashed slot for each card the best field has and the user's does not
+function Finals({ rest, result }) {
+  const mine = [...result.finalBoard.monsters, ...result.finalBoard.spellTraps];
+  const best = result.bestBoard ? [...result.bestBoard.monsters, ...result.bestBoard.spellTraps] : null;
+  const left = [...mine];
+  const missing = [];
+  for (const c of best ?? []) {
+    const i = left.findIndex((m) => m.code === c.code);
+    if (i >= 0) left.splice(i, 1); else missing.push(c);
+  }
+  const head = (p) => (p ? `打断 ${p.interrupts} · 手牌 ${p.hand}` : "");
+  return h("div", { className: "yg-finals" },
+    best ? h("div", { className: "yg-final-block", "aria-label": "最好终场" },
+      h("div", { className: "yg-line" }, h("strong", null, "最好终场"), h("span", { className: "yg-fill" }), h("span", { className: "yg-mono yg-lab" }, head(result.parts.best))),
+      h("div", { className: "yg-minis" }, best.map((c, i) => h(MiniCard, { key: i, rest, card: c })))) : h("p", { className: "yg-lab" }, "没有最好终场可画：基准是你自己以前的成绩"),
+    h("div", { className: "yg-final-block", "aria-label": "你的终场" },
+      h("div", { className: "yg-line" }, h("strong", null, "你的终场"), h("span", { className: "yg-fill" }), h("span", { className: "yg-mono yg-lab" }, head(result.parts.user))),
+      h("div", { className: "yg-minis" }, mine.map((c, i) => h(MiniCard, { key: i, rest, card: c })), missing.map((c, i) => h(MiniCard, { key: `m${i}`, rest, card: c, missing: true })))));
+}
+
+function StepCompare({ result }) {
+  const { steps, bestSteps, divergeStep: d } = result;
+  const n = Math.max(steps.length, bestSteps?.length ?? 0);
+  const spend = (s) => `花 ${s.spent} → ${s.gained}`;
+  const cols = Array.from({ length: n }, (_, i) => {
+    const u = steps[i];
+    const b = bestSteps?.[i];
+    const same = !bestSteps || !d || i + 1 < d;
+    return h("div", { key: i, className: `yg-sc${d === i + 1 ? " diverge" : ""}`, "data-step": i + 1 },
+      h("div", { className: `yg-mono yg-lab${d === i + 1 ? " warn" : ""}` }, d === i + 1 ? `${i + 1} · 走偏` : i + 1),
+      same && u ? [h("strong", { key: "t", title: u.summary }, u.summary), h("span", { key: "s", className: "soft", title: spend(u) }, spend(u)), h("span", { key: "x", className: "yg-lab" }, bestSteps ? "两边相同" : ""), u.hinted ? h("span", { key: "h", className: "yg-warn hinted" }, "用提示") : null]
+        : [
+          b ? h("strong", { key: "bt", className: "best", title: b.summary }, `最好：${b.summary}`) : h("span", { key: "bt", className: "yg-lab" }, "最好：已经结束"),
+          b ? h("span", { key: "bs", className: "soft", title: spend(b) }, spend(b)) : null,
+          u ? h("strong", { key: "ut", title: u.summary }, `你：${u.summary}`) : h("span", { key: "ut", className: "yg-lab" }, "你：已经结束"),
+          u ? h("span", { key: "us", className: "soft", title: spend(u) }, spend(u)) : null,
+          u?.hinted ? h("span", { key: "h", className: "yg-warn hinted" }, "用提示") : null,
+        ]);
+  });
+  return h("section", { className: "yg-steps", "aria-label": "逐步对照" }, h("div", { className: "yg-lab yg-stephead" }, "逐步对照"), h("div", { className: "yg-scs" }, cols));
+}
+
+function Settled({ rest, result, busy, onAgain, onReplay, onHome }) {
+  const hintedSteps = result.steps.filter((s) => s.hinted).map((s) => s.step);
+  const time = clock(result.durationMs);
+  const speedSub = !result.speedCounted ? `场面未达 90%，${time} 不计` : result.speedBonus === 0 ? `用时 ${time}，超过 5:00 不加` : `用时 ${time}，60 秒内满 +20，5:00 降到 0`;
+  const parts = result.parts;
+  const typeText = `${result.handTypeStats.name}起手平均 ${result.handTypeStats.average}`;
+  return h("div", { className: "yg-result", "aria-label": "结算" },
+    h("section", { className: "yg-rtop" },
+      h(Stat, { label: "场面分", value: result.fieldScore, sub: parts.best ? `打断 ${parts.user.interrupts}/${parts.best.interrupts} · 手牌 ${parts.user.hand}/${parts.best.hand}` : `打断 ${parts.user.interrupts} · 手牌 ${parts.user.hand}` }),
+      h("span", { className: "yg-op" }, "+"),
+      h(Stat, { label: "速度加成", value: result.speedCounted ? `+${result.speedBonus}` : "0", sub: speedSub, tone: result.speedBonus ? "" : "dim" }),
+      h("span", { className: "yg-op" }, "×"),
+      h(Stat, { label: result.hints ? `提示 ${result.hints} 次` : "提示 0 次", value: result.hintFactor.toFixed(result.hints > 1 ? 2 : 1), sub: hintedSteps.length ? `第 ${hintedSteps.join("、")} 步用的` : "没用提示", tone: result.hints ? "warn" : "" }),
+      h("span", { className: "yg-op" }, "="),
+      h(Stat, { label: "总分", value: result.total, sub: typeText, tone: "total" }),
+      h("div", { className: "yg-rbtns" },
+        h("button", { className: "yg-btn primary big", disabled: busy, onClick: onAgain }, "再来一手"),
+        h("button", { className: "yg-btn big", disabled: busy, onClick: onReplay }, "重打这一手"),
+        h("button", { className: "yg-btn small", onClick: onHome }, "回首页"))),
+    h("section", { className: "yg-rmid" },
+      h("div", { className: "yg-rcurve" },
+        h("div", { className: "yg-line" }, h("strong", null, "每一步之后的场面"), h("span", { className: "yg-lab" }, `白 = 你${result.curve.best ? " · 绿虚线 = 最好路线" : ""}${result.divergeStep ? ` · 第 ${result.divergeStep} 步开始分开` : result.curve.best ? " · 一直没分开" : ""}`)),
+        h(Curve, { result })),
+      h(Finals, { rest, result })),
+    h(StepCompare, { result }),
+    h("p", { className: "yg-lab yg-bench", "data-source": result.benchmark.source }, benchmarkText(result.benchmark)));
+}
+
+// ---- end of settlement ----
 
 // ---- 记卡: one question at a time, timed by the service from the moment it is handed out ----
 const BAR_MS = 10000; // the bar's full length; 5 s is where a right answer counts as Easy (EASY_MS / HARD_MS in src/quiz.js)
@@ -399,25 +505,26 @@ function YugiohApp({ rest }) {
     })();
   }, [rest, call]);
 
-  const start = () => call(async () => { const v = await rest("/hand/start", { method: "POST", body: {} }); setHand(v); setResult(null); setScreen("play"); });
+  const start = (seed) => call(async () => { const v = await rest("/hand/start", { method: "POST", body: seed === undefined ? {} : { seed } }); setHand(v); setResult(null); setScreen("play"); });
   const send = (indices) => call(async () => setHand(await rest("/hand/choose", { method: "POST", body: { indices } })));
+  const hint = () => call(async () => { const t = await rest("/hand/hint", { method: "POST", body: {} }); setHand(await rest("/hand/choose", { method: "POST", body: { indices: t.indices } })); });
   const end = () => call(async () => { const r = await rest("/hand/end", { method: "POST", body: {} }); setResult(r); setHand(null); setScreen("settled"); });
 
   const header = h("header", { className: "yg-head" }, h("h1", null, "游戏王"),
     h("nav", { className: "yg-tabs" }, TABS.map((t) => h("button", { key: t, className: `yg-tab${tab === t ? " on" : ""}`, onClick: () => { setTab(t); setScreen("home"); } }, t))));
   let main;
-  if (screen === "play" && hand) main = h(Play, { rest, hand, cards, busy, send, end });
-  else if (screen === "settled" && result) main = h(Settled, { result, onAgain: start, onHome: () => setScreen("home") });
+  if (screen === "play" && hand) main = h(Play, { rest, hand, cards, busy, send, end, hint });
+  else if (screen === "settled" && result) main = h(Settled, { rest, result, busy, onAgain: () => start(), onReplay: () => start(result.seed), onHome: () => setScreen("home") });
   else if (tab === "记卡") main = h(Quiz, { rest });
   else if (tab !== "首页") main = h("div", { className: "yg-home" }, h("h2", null, tab), h("p", { className: "yg-lab" }, `「${tab}」还没做，在后面的票里。`));
   else main = h("div", { className: "yg-home", "aria-label": "首页" },
     h("h2", null, "计时赛"),
     h("p", { className: "yg-lab" }, "从烙印卡组随机发 5 张，先攻，自由展开；计时从发牌开始。"),
     h("div", { className: "yg-row" },
-      h("button", { className: "yg-btn primary big", disabled: busy || !ready, onClick: start }, "开始一手"),
+      h("button", { className: "yg-btn primary big", disabled: busy || !ready, onClick: () => start() }, "开始一手"),
       hand ? h("button", { className: "yg-btn big", onClick: () => setScreen("play") }, "继续这一手") : null));
   return h("div", { className: "yg", "data-ready": ready ? "true" : "false" },
-    screen === "play" ? null : header,
+    screen === "play" || (screen === "settled" && result) ? null : header,
     error ? h("div", { className: "yg-error", role: "alert" }, error) : null,
     main);
 }
@@ -439,9 +546,6 @@ const CSS = `
 .yg-error { border: 1px solid #ff9a6b; color: #ff9a6b; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
 .yg-home { display: flex; flex-direction: column; gap: 16px; padding: 24px 4px; max-width: 640px; }
 .yg-home h2 { font-size: 20px; }
-.yg-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.yg-stat { border: 1px solid #1f1f1f; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
-.yg-big-num { font-size: 28px; color: #c8ff3d; }
 .yg-row { display: flex; gap: 8px; align-items: center; } .yg-row.wrap { flex-wrap: wrap; }
 .yg-col { display: flex; flex-direction: column; gap: 8px; } .yg-col.tight { gap: 6px; }
 .yg-line { display: flex; align-items: baseline; gap: 16px; }
@@ -540,7 +644,32 @@ const CSS = `
 .yg-feedback { border: 1px solid #333; border-radius: 8px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
 .yg-feedback.right { border-color: #c8ff3d; } .yg-feedback.wrong { border-color: #ff9a6b; }
 .yg-qfoot { margin-top: auto; border-top: 1px solid #1c1c1c; padding-top: 14px; display: flex; align-items: center; justify-content: space-between; }
-@media (max-width: 900px) { .yg-bottom { grid-template-columns: 1fr; } .yg-grid4 { grid-template-columns: repeat(2, 1fr); } }
+.yg-result { display: flex; flex-direction: column; gap: 14px; }
+.yg-rtop { display: flex; align-items: flex-start; gap: 22px; padding: 0 4px 10px; border-bottom: 1px solid #1c1c1c; }
+.yg-rstat { display: flex; flex-direction: column; gap: 6px; min-width: 150px; }
+.yg-rstat .sub { letter-spacing: 0; }
+.yg-rnum { font-size: 60px; line-height: 1; color: #ececec; letter-spacing: -.04em; }
+.yg-rnum.dim { color: #8a8a8a; } .yg-rnum.warn { color: #ff9a6b; } .yg-rnum.total { color: #c8ff3d; font-size: 80px; }
+.yg-op { font-size: 32px; color: #8a8a8a; align-self: center; margin-top: 14px; }
+.yg-rbtns { margin-left: auto; display: flex; flex-direction: column; gap: 6px; width: 170px; }
+.yg-rmid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 24px; }
+.yg-rcurve { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.yg-curve { width: 100%; height: auto; display: block; }
+.yg-finals { display: flex; flex-direction: column; gap: 16px; }
+.yg-final-block { display: flex; flex-direction: column; gap: 8px; }
+.yg-minis { display: flex; flex-wrap: wrap; gap: 8px; }
+.yg-mini { width: 56px; display: flex; flex-direction: column; gap: 4px; }
+.yg-mini-art { width: 56px; height: 80px; position: relative; } .yg-mini-art .yg-art { height: 80px; }
+.yg-mini-art.gap { border: 1px dashed #ff9a6b; border-radius: 3px; }
+.yg-mini-name { font-size: 10px; line-height: 1.3; text-align: center; color: #d6d6d6; } .yg-mini-name.warn { color: #ff9a6b; }
+.yg-steps { display: flex; border: 1px solid #1f1f1f; border-radius: 8px; overflow: hidden; }
+.yg-stephead { width: 56px; padding: 0 12px; letter-spacing: 0; word-break: break-all; flex: none; display: flex; align-items: center; justify-content: center; text-align: center; border-right: 1px solid #1c1c1c; }
+.yg-scs { display: flex; overflow-x: auto; flex: 1; }
+.yg-sc { flex: 1 0 190px; max-width: 260px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; border-right: 1px solid #1c1c1c; font-size: 12px; line-height: 1.45; }
+.yg-sc strong, .yg-sc .soft { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.yg-sc.diverge { background: #120d0a; } .yg-sc .warn { color: #ff9a6b; } .yg-sc .best { color: #c8ff3d; } .yg-sc .soft { color: #bdbdbd; }
+.yg-bench { padding: 0 4px; }
+@media (max-width: 900px) { .yg-bottom { grid-template-columns: 1fr; } .yg-rmid { grid-template-columns: 1fr; } }
 `;
 
 export default {
