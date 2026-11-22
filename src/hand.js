@@ -36,7 +36,8 @@ export class HandError extends Error { constructor(message, status = 400) { supe
 
 export async function startHand(engine, deck, { id, seed, now }) {
   const { hand, rest } = deal(deck, seed);
-  const session = await startSession(engine, { hand, deck: rest, extra: expand(deck.extra), seed: [0, 1, 2, 3].map((i) => BigInt((seed + i) >>> 0)) });
+  const engineSeed = [0, 1, 2, 3].map((i) => BigInt((seed + i) >>> 0));
+  const session = await startSession(engine, { hand, deck: rest, extra: expand(deck.extra), seed: engineSeed });
   const md = (code) => deck.cards[code]?.md ?? String(code);
   const actions = []; // { step, at（距开局毫秒）, kind, text, indices, valueAfter, state }
   let step = 0;
@@ -100,7 +101,7 @@ export async function startHand(engine, deck, { id, seed, now }) {
     for (const route of deck.routes ?? []) {
       if (!hand.includes(route.needs)) continue;
       try {
-        const replay = await playRoute(engine, deck, route, { seed: [0, 1, 2, 3].map((i) => BigInt((seed + i) >>> 0)), hand });
+        const replay = await playRoute(engine, deck, route, { seed: engineSeed, hand });
         const value = boardValue(deck, replay.endBoard);
         if (!game8 || value > game8.value) game8 = { value, routeId: route.id, name: route.name, boards: replay.boards, endBoard: replay.endBoard };
       } catch { /* 这个起手重放不了这条路线（别的牌改了提示）：不当基准 */ }
@@ -135,10 +136,10 @@ export async function startHand(engine, deck, { id, seed, now }) {
       finalBoard: { hand: endBoard.hand.map((c) => ({ ...c, md: md(c.code) })), monsters: endBoard.monsters.map((c) => ({ ...c, md: md(c.code) })), spellTraps: endBoard.spellTraps.map((c) => ({ ...c, md: md(c.code) })) },
       bestBoard: base.game8 && base.source === 'game8' ? { hand: base.game8.endBoard.hand.map((c) => md(c.code)), monsters: base.game8.endBoard.monsters.map((c) => md(c.code)), spellTraps: base.game8.endBoard.spellTraps.map((c) => md(c.code)) } : null,
       steps: userSteps.map(({ state: _state, ...step }) => step),
-      curve: { user: userSteps.map((s) => (base.value > 0 ? s.value / base.value : 1)), best: base.source === 'game8' ? curve(deck, base.game8.boards, base.value) : null },
+      curve: { user: userSteps.map((s) => (base.value > 0 ? s.value / base.value : 1)), best: base.game8 ? curve(deck, base.game8.boards, base.value) : null },
     };
     // 走偏的那一步：用户第 i 步之后的局面和最好路线第 i 步之后的不一样（两边都按 startsStep 切步）；一直一样就是 null
-    const bestStates = base.source === 'game8' ? base.game8.boards.map(stateKey) : null;
+    const bestStates = base.game8 ? base.game8.boards.map(stateKey) : null;
     settlement.divergeStep = bestStates ? (userSteps.findIndex((s, i) => s.state !== bestStates[i]) + 1 || null) : null;
     session.close();
     return { settlement, record };
