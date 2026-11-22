@@ -111,7 +111,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 - **提示和后台搜索抢 CPU**：服务只有一个线程。提示（`/hand/hint`）进行时后台搜索停在原地等着（`isPaused`，每个节点查一次），等的时间不计进它的时间上限和 `elapsedMs`，提示完了接着搜；所以提示不会被后台搜索拖慢，后台搜索也不会因为用户要了提示就超时。
 - **时间上限**：`SEARCH_BUDGET_MS`(60000) 是一手的上限，`server.js` 读环境变量 `YUGIOH_SEARCH_MS` 覆盖（`0` = 不搜索）。`HINT_BUDGET_MS`(5000) 是提示里「从当前局面再搜」的上限。实测数字见 PR 描述里的 `scripts/search-bench.js` 输出（20 个随机种子）。每次回滚要重建决斗，约 8 毫秒起，是耗时的大头。测试用的搜索上限就是 `SEARCH_BUDGET_MS`，等缓存出现最多等 `SEARCH_BUDGET_MS` 再加 30 秒。
 - **缓存**（`src/search-cache.js`）：`POST /hand/start` 时这手（排序后的 5 张）需要搜就在后台开始搜（不 await，同一手只搜一次，已在搜的不重开），搜完由 `store.js` 写进数据目录的 `search/`（格式见「数据目录」）。超时的搜索也写一条（`timedOut: true`，存超时前找到的最好值，供参考）。需要搜的是：
-  - 没有条目，或条目的版本 `v` 对不上现行的 `searchVersion(deck)`（卡组名加 `MAX_DISCREPANCY`、`MAX_BRANCH`、`MAX_COMBOS`、`GUIDE_WINDOW`、`MAX_RESPONSES`）：版本对不上的条目当没有，搜完覆盖；改了这些常量或换了卡组，旧结果就这样作废。卡组数据本身（打断数、路线）改了不会自动作废，要手动删 `search/`；
+  - 没有条目，或条目的版本 `v` 对不上现行的 `searchVersion(deck)`（卡组名、卡组数据指纹加 `MAX_DISCREPANCY`、`MAX_BRANCH`、`MAX_COMBOS`、`GUIDE_WINDOW`、`MAX_RESPONSES`）：版本对不上的条目当没有，搜完覆盖；改了这些常量或换了卡组，旧结果就这样作废。卡组数据（卡表的打断数和角色、主额外卡组、起手类型、展开路线）改了也作废：`searchVersion` 带一个这些数据的指纹（`deckFingerprint`）；
   - 条目是超时的，并且现在的上限比它跑时的 `budgetMs` 大：重搜。上限一样或更小不重搜；超时的条目永远不当基准；
   - 上次搜崩了（异常）：不黏住，下次开这手重搜。崩了之后到重搜之前，这手的状态是 `failed`；没有条目也没在搜（比如 `YUGIOH_SEARCH_MS=0`）是 `none`；
   - 结算时发现缓存的路线在这手的种子下重放不了（搜它用的种子和这手的不同，同样 5 张牌洗牌不同）：这次结算按另外两种基准算，`benchmark.search` 记 `replay-failed`，并用这手的种子重搜、覆盖缓存，以后这个种子不再卡在暂定。
@@ -134,7 +134,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 | `GET /quiz` | 记卡：`{ due, reviewing, fresh }`，到期的张数（答过的到期了的 + 没答过的） |
 | `POST /quiz/next` | 出下一题并开始计时；没有到期的卡返回 `{ done: true, due: 0 }`。题面：`kind`、`prompt`、`image`（卡号或 null）、`options[{text}]`、`roles`（identify）、`given` / `name` / `missing`（fill）、`due`、`fresh`、`lastMs`、`history`（这张卡以往的用时）；不含对错。再调一次换一题（上一题作废） |
 | `POST /quiz/answer` `{ option, roles? }` | 批改上一题：400 选项或角色不合法，404 没有在答的题；记一行日志，返回 `correct`、`ms`、`rating`、`dueInMs`、`answerIndex`、`answerRoles`、`card`（名字角色三件事） |
-| `POST /hand/end` | 结束回合并结算：还停在主阶段就进结束阶段，之后放行连锁、不发动可选效果；遇到要选的东西返回 409，用户选完再结束。不等搜索：搜完了就用，没搜完或超时就用另外两种基准。返回结算（分数各项、`benchmark`、终场和最好终场、`steps`、`curve`、`divergeStep`），并往日志追加一行 |
+| `POST /hand/end` | 结束回合并结算：还停在主阶段就进结束阶段，之后放行连锁、不发动可选效果；遇到要选的东西返回 409，用户选完再结束。不等搜索：搜完了就用，没搜完或超时就用另外两种基准。返回结算（分数各项、`benchmark`（带 `name`：Game8 路线名）、`finalBoard` / `bestBoard`（卡带 `code` 和 `md`）、`parts`（终场的打断数和手牌数，用户和最好各一份）、`steps`（用户每步：`summary`、`spent`、`gained`、`hinted`）、`bestSteps`（最好路线每步：`summary`、`spent`、`gained`，没有最好路线是 null）、`handTypeStats`（这类起手的平均总分，含这一手）、`curve`、`divergeStep`、`seed`），并往日志追加一行。页面的「重打这一手」用结算里的 `seed` 再 `POST /hand/start`，同一个种子发同样的 5 张牌；「再来一手」不带种子 |
 
 `restrictions` 是按卡写死的（`src/decks/branded.js` 的 `RESTRICTIONS`）：这张卡发动过效果，就列出它带来的当回合限制，只收卡面写着「发动回合」的几条；引擎不对外报限制。`normalSummonUsed` 来自引擎的召唤、盖放怪兽消息。
 

@@ -66,7 +66,7 @@ describe('搜索与提示：HTTP 接口', () => {
     assert.equal(s.fieldScore, 100);
     assert.equal(s.divergeStep, null);
     assert.deepEqual(s.curve.best, s.curve.user);
-    assert.deepEqual(s.bestBoard.monsters.sort(), ['冰剑龙 镜翠幻种', '引导之圣女 库妸㽗', '赫之圣女 卡尔塔西亚', '黑衣龙之艾克利西亚'].sort());
+    assert.deepEqual(s.bestBoard.monsters.map((c) => c.md).sort(), ['冰剑龙 镜翠幻种', '引导之圣女 库妸㽗', '赫之圣女 卡尔塔西亚', '黑衣龙之艾克利西亚'].sort());
     assert.equal((await readCache(data, WHITE_ALBAZ_SEED)).nodes, 0); // 缓存没被改
     const line = (await readFile(join(data, 'hands.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l)).at(-1);
     assert.equal(line.benchmark.source, 'search');
@@ -113,8 +113,25 @@ describe('搜索与提示：HTTP 接口', () => {
     await playFlat(call, 2);
     const ended = (await call('POST', '/hand/end')).body;
     assert.ok(Math.abs(ended.hintFactor - 0.64) < 1e-9, String(ended.hintFactor));
+    assert.equal(ended.steps[0].hinted, true); // 两次提示给的都是第 1 步里的选择；结算屏据此标「用提示」
+    assert.ok(ended.steps.slice(1).every((x) => !x.hinted));
     const line = (await readFile(join(data, 'hands.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l)).at(-1);
     assert.equal(line.hints, 2);
+  }));
+
+  test('提示：用在后面的步上，结算只标那一步', () => withServer(async (call, data) => {
+    await seedCache(data, WHITE_ALBAZ_SEED);
+    await call('POST', '/hand/start', { seed: WHITE_ALBAZ_SEED });
+    let state = (await call('GET', '/hand')).body;
+    for (const response of FLAT.slice(0, -3)) state = (await call('POST', '/hand/choose', { indices: indicesFor(state.prompt, response) })).body;
+    const hint = await call('POST', '/hand/hint');
+    assert.equal(hint.status, 200, JSON.stringify(hint.body));
+    await call('POST', '/hand/choose', { indices: hint.body.indices });
+    await playFlat(call, FLAT.length - 2);
+    const ended = (await call('POST', '/hand/end')).body;
+    const marked = ended.steps.filter((x) => x.hinted).map((x) => x.step);
+    assert.equal(marked.length, 1);
+    assert.ok(marked[0] > 1, `提示是在后面才要的，标在第 ${marked[0]} 步`);
   }));
 
   test('提示：走偏之后从当前局面再搜，不照路线的下一个回应（那个回应在当前提示里碰巧也合法）', () => withServer(async (call, data) => {

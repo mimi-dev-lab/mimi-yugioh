@@ -53,6 +53,14 @@ describe('打一手：HTTP 接口', () => {
     assert.deepEqual(s.curve.best, s.curve.user); // 用户走的就是最好路线，两条曲线重合
     assert.equal(s.curve.user.at(-1), 1);
     assert.equal(s.divergeStep, null);
+    // 结算屏要的：逐步对照（每步两边的文字和花了什么换来什么）、终场的组成、这类起手的平均分
+    assert.equal(s.bestSteps.length, s.steps.length);
+    assert.ok(s.steps.every((u, i) => u.summary === s.bestSteps[i].summary && u.spent === s.bestSteps[i].spent && u.gained === s.bestSteps[i].gained && u.hinted === false));
+    assert.match(s.bestSteps[0].summary, /白之落胤/);
+    assert.deepEqual(s.parts, { user: { interrupts: 1, hand: 4 }, best: { interrupts: 1, hand: 4 } });
+    assert.equal(s.bestBoard.monsters.length, 4);
+    assert.deepEqual(s.handTypeStats, { type: 'white-albaz', name: '白之落胤 1 卡初动', average: s.total, count: 1 });
+    assert.equal(s.benchmark.name, route.name);
 
     const lines = await logLines(data);
     assert.equal(lines.length, 1);

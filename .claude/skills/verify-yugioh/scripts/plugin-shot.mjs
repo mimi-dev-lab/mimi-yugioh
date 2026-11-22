@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // plugin-verify 的 shot 用的浏览器脚本：用本机的无头 Chromium（不装依赖）打开临时网页工作区，像用户一样从侧栏点「游戏王」（默认是「总览」页签），
 // 可选地切页签、开始 / 继续一手、点一张卡、点它的操作、回答引擎的提示、结束回合，写 <name>.png / .txt / .json（网络记录）。
-// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, tab, start, resume, select, do, answer, end, compare }>'
+// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, tab, start, resume, select, do, answer, prefer, hint, end, replay, compare }>'
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -135,11 +135,15 @@ async function main() {
     for (let i = 0; i < opts.answer; i++) {
       const has = await evaluate(() => !!document.querySelector('.yg-modal [role=dialog][aria-label="引擎的选择"]'));
       if (!has) break;
-      const done = await evaluate(() => {
+      const done = await evaluate((prefer) => {
         const box = document.querySelector('.yg-modal [role=dialog][aria-label="引擎的选择"]');
         const title = box.querySelector('.yg-prompt-title').innerText;
         const confirm = [...box.querySelectorAll('button')].find((b) => /^确定/.test(b.innerText) && !b.disabled);
         if (confirm) { confirm.click(); return title; }
+        // --prefer：优先点名字（卡名或按钮文字）在这个列表里的选项，用来照着一条路线走
+        const isChain = title.startsWith('连锁'); // 连锁窗口不照 prefer 点（卡名会让它连锁发动），一律「不发动」
+        const wanted = isChain ? null : [...box.querySelectorAll('button')].find((b) => !b.disabled && !b.classList.contains('sel') && prefer.includes((b.querySelector('.yg-name')?.innerText ?? b.innerText).trim()));
+        if (wanted) { wanted.click(); return `${title}（点 ${wanted.innerText.trim()}）`; }
         const finish = [...box.querySelectorAll('button')].find((b) => b.innerText === '选完');
         const opt = box.querySelector('button.yg-opt:not(.sel)');
         const need = title.match(/选 (\d+)/);
@@ -150,7 +154,7 @@ async function main() {
         if (!first) return null;
         first.click();
         return title;
-      });
+      }, opts.prefer ?? []);
       if (!done) break;
       await sleep(500);
     }
@@ -182,6 +186,12 @@ async function main() {
       if (i + 1 < opts.quizAnswer) { await press('Enter'); await until(() => !document.querySelector('.yg-feedback') && !!document.querySelector('.yg-qopt'), null, 20000, '下一题出来'); }
     }
   }
+  // 提示：点「提示」按钮 N 次，每次等页面上的提示次数加一（点了照提示走，可能出引擎的提示浮层）
+  for (let i = 0; i < (opts.hint ?? 0); i++) {
+    const clicked = await evaluate(() => { const b = [...document.querySelectorAll('.yg-final button')].find((x) => x.innerText.trim().startsWith('提示')); if (!b || b.disabled) return false; b.click(); return true; });
+    if (!clicked) throw new Error('页面上没有能点的「提示」按钮');
+    await until((n) => document.querySelector('.yg-clock')?.innerText.includes(`${n} 次 · ×`), i + 1, 30000, `提示次数变成 ${i + 1}`).catch(fail);
+  }
   if (opts.end) {
     if (!(await clickButton('结束回合'))) throw new Error('页面上没有「结束回合」');
     await until(() => !!document.querySelector('[aria-label="结算"]') || !!document.querySelector('.yg-error'), null, 30000, '结算出来（或报错）').catch(fail);
@@ -200,6 +210,15 @@ async function main() {
   const foreign = urls.filter((u) => !u.startsWith(`${opts.base}/`));
   const hostLoad = all.filter(([u, after]) => !after && !u.startsWith(`${opts.base}/`)).map(([u]) => u);
   await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, requests: urls.length, foreign, hostLoad, urls }, null, 1));
+  // 重打这一手：在结算屏上点它，等回到展开中屏，另存一张（同样的 5 张牌）
+  if (opts.replay) {
+    if (!(await clickButton('重打这一手'))) throw new Error('结算屏上没有「重打这一手」');
+    await playing('重打这一手进入展开中屏');
+    await sleep(600);
+    const again = await send('Page.captureScreenshot', { format: 'png' });
+    await writeFile(`${opts.evidence}/${opts.name}-replay.png`, Buffer.from(again.data, 'base64'));
+    await writeFile(`${opts.evidence}/${opts.name}-replay.txt`, await evaluate(() => document.querySelector('.yg').innerText));
+  }
   // 并排对照：设计稿 PNG 在左、这张在右，用 data: 地址在一个页面里拼好再截一张
   if (opts.compare) {
     const design = (await readFile(opts.compare)).toString('base64');

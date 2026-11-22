@@ -62,6 +62,19 @@ describe('搜索缓存', () => {
     assert.notEqual(searchVersion({ name: 'a' }), searchVersion({ name: 'b' }));
   });
 
+  test('版本随卡组数据变：打断数、路线、起手类型、卡组张数改了，旧缓存就作废', () => {
+    const deck = { name: 'a', cards: { 1: { interrupts: 1, role: '起手' } }, main: [{ code: 1, count: 3 }], extra: [], handTypes: [{ id: 'x', has: [1] }], routes: [{ id: 'r', steps: [{ text: 't', do: ['finish'] }] }] };
+    const same = JSON.parse(JSON.stringify(deck));
+    assert.equal(searchVersion(deck), searchVersion(same));
+    const changed = [
+      { ...same, cards: { 1: { interrupts: 2, role: '起手' } } },
+      { ...same, routes: [{ id: 'r', steps: [{ text: 't', do: [] }] }] },
+      { ...same, handTypes: [{ id: 'x', has: [2] }] },
+      { ...same, main: [{ code: 1, count: 2 }] },
+    ];
+    for (const d of changed) assert.notEqual(searchVersion(d), searchVersion(deck));
+  });
+
   test('搜崩了不黏住：这手记 failed，下次开这手重搜', async () => {
     const { cache, calls } = setup({ results: [new Error('引擎崩了')] });
     cache.ensure(HAND, 1);

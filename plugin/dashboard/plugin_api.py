@@ -5,7 +5,8 @@ starts no process.
 GET  /hand               → GET  /hand                  (the hand in progress: prompt and legal options, board, step log, clock)
 POST /hand/<sub>         → POST /hand/<sub>            (every write, one route; only the paths in HAND_WRITES go through, any other
                                                          is a 404 here and never reaches the service; the body goes through as it is)
-                                                         start: deal a new hand; choose: answer the prompt; end: end the turn
+                                                         start: deal a new hand (a seed in the body replays that hand); choose: answer the prompt;
+                                                         hint: ask for the next step (counts against the score); end: end the turn
 GET  /cards              → GET  /cards                 (every card of the deck: Master Duel name, role, the three things)
 GET  /card-image?code=N  → GET  /card-image?code=N     (one card picture, as JSON with base64; the code has to be digits)
 GET  /quiz               → GET  /quiz                  (记卡: how many cards are due)
@@ -31,7 +32,7 @@ router = APIRouter()
 DEFAULT_URL = "http://127.0.0.1:4519"
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 # The writes this plugin lets through. Adding one here needs a gateway restart.
-HAND_WRITES = ("start", "choose", "end")
+HAND_WRITES = ("start", "choose", "hint", "end")
 QUIZ_WRITES = ("next", "answer")
 TIMEOUT_S = 30  # the service only plays one hand in memory and reads its own data folder on this machine
 

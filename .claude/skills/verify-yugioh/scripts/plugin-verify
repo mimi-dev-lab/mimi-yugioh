@@ -6,13 +6,13 @@
                                          serves only its Webapp with this checkout's plugin/ (YUGIOH_URL = that instance);
                                          prints run.json, then runs doctor. A failed `up` stops what it started.
   plugin-verify doctor                   is this run worth driving? (read-only; exit 0 = yes)
-  plugin-verify shot NAME [--design] [--tab 首页|记卡|记录] [--start] [--resume] [--select 卡名] [--do 操作] [--answer N] [--end]
+  plugin-verify shot NAME [--design] [--tab 首页|记卡|记录] [--start] [--resume] [--select 卡名] [--do 操作] [--answer N] [--prefer 名字,名字] [--hint N] [--end] [--replay]
                           [--quiz-start [--quiz-kind identify|fill|find]] [--quiz-answer N] [--compare PNG]
                                          open the web workspace (headless Chromium, plugin-shot.mjs), click 游戏王 in the sidebar like a user (the tab is 首页),
                                          wait until it has drawn; then optionally: --start presses 开始一手 (a random hand), --resume presses 继续这一手 (the hand
                                          dealt by `up --hand-seed`), --select clicks a card by its name on the table, --do presses one of its operations
                                          (发动, 召唤 …), --answer N answers up to N engine prompts by taking the first option, --end presses 结束回合 and waits for
-                                         the settlement; on the 记卡 tab --quiz-start opens the first question and --quiz-answer N answers N of them with the keys; --design uses the design's 1280x860 and hides the sidebar; --compare puts the screenshot beside that
+                                         the settlement; --hint N presses 提示 N times (follows the hint; hints count 1, factor 0.8) before that, --replay presses 重打这一手 on the settlement and writes NAME-replay.png / .txt; on the 记卡 tab --quiz-start opens the first question and --quiz-answer N answers N of them with the keys; --design uses the design's 1280x860 and hides the sidebar; --compare puts the screenshot beside that
                                          design PNG (NAME-compare.png); writes NAME.png, NAME.txt and NAME.json (every request the tab made, and the ones not
                                          to this origin)
   plugin-verify down                     stop the gateway and the yugioh service, delete the run; evidence stays
@@ -314,7 +314,7 @@ def cmd_shot(a) -> int:
     if not evidence:
         sys.exit("no evidence folder in run.json")
     opts = {"name": a.name, "design": a.design, "tab": a.tab, "start": a.start, "resume": a.resume, "select": a.select, "do": a.do,
-            "answer": a.answer, "quizStart": a.quiz_start, "quizAnswer": a.quiz_answer, "quizKind": a.quiz_kind, "end": a.end, "compare": a.compare}
+            "answer": a.answer, "prefer": [x for x in (a.prefer or "").split(",") if x], "quizStart": a.quiz_start, "quizAnswer": a.quiz_answer, "quizKind": a.quiz_kind, "hint": a.hint, "end": a.end, "replay": a.replay, "compare": a.compare}
     pub = {"id": run["id"], "base": run["base"], "evidence": evidence, "cookies": [kv.split("=", 1) for kv in cookie(run).split("; ")]}
     r = subprocess.run([node(), str(YV.parent / "plugin-shot.mjs"), json.dumps({**pub, **opts}, ensure_ascii=False)],
                        capture_output=True, text=True, timeout=300)
@@ -360,7 +360,10 @@ def main() -> int:
     s.add_argument("--quiz-start", action="store_true", help="on the 记卡 tab press 开始记卡 (the first question comes up)")
     s.add_argument("--quiz-kind", choices=["identify", "fill", "find"], help="with --quiz-start: restart until this kind of question comes up")
     s.add_argument("--quiz-answer", type=int, metavar="N", help="on the 记卡 tab answer N questions with the number keys (1, and 5 for the first role) and Enter")
+    s.add_argument("--prefer", metavar="名字,名字", help="with --answer: take the option whose card name or button text is in this list before the first option (to follow a route)")
+    s.add_argument("--hint", type=int, metavar="N", help="press 提示 N times (each follows the hint; the hint count on the page goes up by one)")
     s.add_argument("--end", action="store_true", help="press 结束回合 and wait for the settlement")
+    s.add_argument("--replay", action="store_true", help="after the settlement shot, press 重打这一手 and write NAME-replay.png / .txt (the same five cards come again)")
     s.add_argument("--compare", metavar="PNG", help="also write NAME-compare.png: the design PNG on the left, this screenshot on the right")
     s.set_defaults(f=cmd_shot)
     sub.add_parser("down").set_defaults(f=cmd_down)
