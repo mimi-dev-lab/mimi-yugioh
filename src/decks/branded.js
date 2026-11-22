@@ -102,4 +102,12 @@ export const HAND_TYPES = [
   { id: 'branded-fusion', name: '烙印融合 1 卡初动', has: [44362883] },
 ];
 
-export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, handTypes: HAND_TYPES, routes: ROUTES };
+// 已生效限制：这张卡发动过效果之后，当回合有的限制（引擎不对外报限制，所以按卡写死，只收卡面写着「发动回合」的几条）
+export const RESTRICTIONS = [
+  { code: 73819701, text: '本回合额外卡组只能特殊召唤 8 星融合 / 同调怪兽（白之落胤）' },
+  { code: 44362883, text: '本回合额外卡组只能特殊召唤融合怪兽（烙印融合）' },
+  { code: 36637374, text: '本回合额外卡组只能特殊召唤融合怪兽（烙印开幕）' },
+  { code: 1984618, text: '本回合额外卡组不能特殊召唤（天底的使徒）' },
+];
+
+export const BRANDED = { restrictions: RESTRICTIONS, name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, handTypes: HAND_TYPES, routes: ROUTES };

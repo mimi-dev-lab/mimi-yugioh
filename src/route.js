@@ -9,7 +9,7 @@
 import { startSession } from './duel-session.js';
 import { expand } from './deck.js';
 
-function indicesFor(prompt, response) {
+export function indicesFor(prompt, response) {
   const { options } = prompt;
   const named = (action) => options.findIndex((o) => o.action === action);
   if (typeof response === 'string') return [named(response)];
@@ -27,18 +27,28 @@ function indicesFor(prompt, response) {
   throw new Error(`看不懂的回应 ${JSON.stringify(response)}`);
 }
 
+// 一步 = 主阶段的一个命令，或连锁窗口里发动一个效果；它后面的选卡、选格子、放行都算在这一步里。用户的操作记录和路线的「每一步之后的场面」都按这个切
+export const startsStep = (prompt, indices) => prompt.kind === 'idle' || (prompt.kind === 'chain' && prompt.options[indices[0]]?.action === 'chain');
+
 const describeOptions = (prompt) => prompt.options.map((o) => [o.action, o.code].filter((x) => x !== undefined).join(' ')).join(' | ');
 
 // 起手以外的主卡组 = 主卡组 − 起手；种子固定，所以重放结果不随洗牌变
-export async function playRoute(engine, deck, route, { seed } = {}) {
+// 默认用路线自己写的起手；传 hand 就换成别的起手（结算时拿用户真实的起手重放，起手里没有的卡对不上就抛错）。boards 是按 startsStep 切的每一步之后的场面
+export async function playRoute(engine, deck, route, { seed, hand = route.hand } = {}) {
   const rest = expand(deck.main);
-  for (const code of route.hand) {
+  for (const code of hand) {
     const i = rest.indexOf(code);
     if (i < 0) throw new Error(`起手里的 ${code} 不在主卡组里`);
     rest.splice(i, 1);
   }
-  const session = await startSession(engine, { hand: route.hand, deck: rest, extra: expand(deck.extra), ...(seed ? { seed } : {}) });
+  const session = await startSession(engine, { hand, deck: rest, extra: expand(deck.extra), ...(seed ? { seed } : {}) });
   try {
+    const boards = [];
+    const choose = (prompt, indices) => {
+      session.choose(indices);
+      if (startsStep(prompt, indices) || !boards.length) boards.push(null);
+      boards[boards.length - 1] = session.board();
+    };
     route.steps.forEach((step, stepIndex) => {
       for (const response of step.do) {
         const where = `第 ${stepIndex + 1} 步「${step.text}」的回应 ${JSON.stringify(response)}`;
@@ -47,7 +57,7 @@ export async function playRoute(engine, deck, route, { seed } = {}) {
             const prompt = session.prompt();
             const pass = prompt?.kind === 'chain' ? prompt.options.findIndex((o) => o.action === 'pass') : -1;
             if (pass < 0) throw new Error(`${where}：回合还没结束，却遇到了放行不了的提示 ${prompt?.kind} [${prompt ? describeOptions(prompt) : ''}]`);
-            session.choose([pass]);
+            choose(prompt, [pass]);
           }
           if (!session.endBoard) throw new Error(`${where}：放行了 100 次回合还没结束`);
           continue;
@@ -56,11 +66,11 @@ export async function playRoute(engine, deck, route, { seed } = {}) {
         if (!prompt) throw new Error(`${where}：决斗已经结束`);
         const indices = indicesFor(prompt, response);
         if (indices.some((i) => i < 0)) throw new Error(`${where}：当前提示是 ${prompt.kind}，合法项里没有它 [${describeOptions(prompt)}]`);
-        session.choose(indices);
+        choose(prompt, indices);
       }
     });
     if (!session.endBoard) throw new Error('步骤走完了，我方回合还没结束（最后一步应该是 finish）');
-    return { endBoard: session.endBoard, scriptErrors: [...session.scriptErrors] };
+    return { endBoard: session.endBoard, boards, scriptErrors: [...session.scriptErrors] };
   } finally {
     session.close();
   }
