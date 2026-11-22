@@ -83,6 +83,9 @@ describe('起手分类', () => {
     assert.equal(classifyHand(BRANDED, hand(ALUBER, ASH, LOCK_BIRD, SUPER_POLY, SARCOPHAGUS)), 'other');
     assert.equal(classifyHand(BRANDED, hand(ALBAZ_PLAIN, ASH, ASH, MAXX_C, FUWALOS)), 'other');
   });
+  test('只有赫之烙印（要墓地有目标才能用）算烂手', () => {
+    assert.equal(classifyHand(BRANDED, hand(82738008, ASH, ASH, MAXX_C, FUWALOS)), 'brick');
+  });
   test('一张起手卡都没有（手坑、超融合、黄金柜）→ 烂手', () => {
     assert.equal(classifyHand(BRANDED, hand(ASH, ASH, MAXX_C, LOCK_BIRD, FUWALOS)), 'brick');
     assert.equal(classifyHand(BRANDED, hand(SUPER_POLY, SUPER_POLY, SARCOPHAGUS, ASH, LOCK_BIRD)), 'brick');

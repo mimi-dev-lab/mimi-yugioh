@@ -30,7 +30,7 @@
 
 **禁用的写法**
 - 依赖（机械：deps-whitelist）：`package.json` 的 dependencies 只有 `ocgcore-wasm`（用到间隔复习时加 `ts-fsrs`，改 `scripts/check.js` 的 `ALLOWED_DEPS` 并在那张票里说明）；没有 devDependencies、不加构建；旧应用（Next.js / Supabase / Cloudflare）的包和文件不许回来。
-- 对外地址（机械：outbound、boundary）：`src/` 的代码里写的地址只许本机，服务不往外发请求（`src/decks/` 的卡组数据里写出处链接不算，那是引用，不是请求）。联网只有 `scripts/prepare-engine.js`（下载固定版本的公开引擎数据）和 `./ci` 的 `engine` 那一项（调用它）。回头看：要接外部服务（例如查 ygocdb 的卡名）时，先开票定，数据下载做成准备脚本，不放进服务。
+- 对外地址（机械：outbound、boundary）：`src/` 的代码里写的地址只许本机，服务不往外发请求（`src/decks/` 的卡组数据里写出处链接不算，那是引用，不是请求）。联网只有 `scripts/prepare-engine.js`（下载固定版本的公开引擎数据）、`./ci` 的 `engine` 那一项（调用它）和 `scripts/fetch-card-names.js`（整理卡组数据时手动查 ygocdb 的卡名，不进 `./ci`）。回头看：要接外部服务（例如查 ygocdb 的卡名）时，先开票定，数据下载做成准备脚本，不放进服务。
 - 测试碰线上（机械：test-isolation）：`test/` 里不写常驻服务的端口（4519）、tailnet 地址、`~/.mimi-yugioh`；起服务用 `test/helpers.js`（`PORT=0`、临时数据目录）。引擎数据（公开的卡库和脚本）在复用的缓存目录 `~/.cache/mimi-yugioh/engine`，不是用户数据，`./ci` 的 `engine` 负责下载。回头看：这条拦了正当的测试时，把那个值放进 helpers 换个写法，不放宽规则。
 - 引擎的约定（查不了，靠读）：必须先加载 `constant.lua`、`utility.lua`；开局用固定种子，存档回滚靠同种子重放已提交的选择，所以会话里不许引入不可重放的随机或「现在」。
 
