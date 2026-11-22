@@ -122,9 +122,25 @@ describe('打一手：HTTP 接口', () => {
     const state = (await call('GET', '/hand')).body;
     assert.equal(state.prompt.kind, 'idle');
     const albaz = state.prompt.options.findIndex((o) => o.action === 'activate' && o.md === '白之落胤');
+    assert.equal(state.number, 1); // 第几手：日志里结算过的手数 + 1
     const res = await call('POST', '/hand/choose', { indices: [albaz] });
+    // 引擎在问：哪张卡的动作发起的、选来干什么（HINTMSG_TOGRAVE = 504）、选项在额外卡组（0x40）
+    assert.equal(res.body.prompt.kind, 'cards');
+    assert.deepEqual([res.body.prompt.source.md, res.body.prompt.source.action, res.body.prompt.hint], ['白之落胤', '发动', 504]);
+    assert.ok(res.body.prompt.options.every((o) => o.location === 0x40));
     assert.deepEqual(res.body.actions.map((a) => [a.step, a.text]), [[1, '发动 白之落胤']]);
     assert.equal(typeof res.body.actions[0].atMs, 'number');
+    // 操作记录按「步」一行：白之落胤发动后选额外卡送墓、特召自己和一只圣女，都算第 1 步
+    let state2 = res.body;
+    for (let guard = 0; guard < 10 && state2.prompt?.kind !== 'idle'; guard++) state2 = (await call('POST', '/hand/choose', { indices: [0] })).body;
+    assert.ok(state2.steps.length >= 1);
+    assert.equal(state2.steps[0].step, 1);
+    assert.match(state2.steps[0].text, /^发动 白之落胤/);
+    // 操作记录那一行：动作 + 选了哪些卡，「不发动」「放在第几格」「选第几项」折叠掉
+    assert.equal(state2.steps[0].summary, '发动 白之落胤 · 选 三英的相剑师、白之圣女 艾克利西亚');
+    assert.ok(!/不发动|放在|选第/.test(state2.steps[0].summary));
+    assert.match(state2.steps[0].spent, /手牌 −1（白之落胤），额外 −1/);
+    assert.match(state2.steps[0].gained, /场上 \+2（白之落胤、白之圣女 艾克利西亚）/);
     const text = JSON.stringify(res.body);
     for (const leak of ['value', 'bestValue', 'fieldScore', 'curve']) assert.ok(!text.includes(`"${leak}`), leak);
     assert.deepEqual(res.body.restrictions, ['本回合额外卡组只能特殊召唤 8 星融合 / 同调怪兽（白之落胤）']);

@@ -1,0 +1,7 @@
+{
+  "name": "yugioh",
+  "label": "游戏王",
+  "description": "游戏王 shell: forwards to the yugioh service",
+  "version": "0.1.0",
+  "api": "plugin_api.py"
+}

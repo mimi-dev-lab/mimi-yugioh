@@ -1,0 +1,369 @@
+#!/usr/bin/python3
+"""Drive the 游戏王 plugin in a throwaway web workspace on made-up data. Nothing here reaches the user's web workspace
+(9120), panel (9119), the live yugioh service (4519) or ~/.mimi-yugioh.
+
+  plugin-verify up [--hand-seed N]      start a yugioh service on made-up data (yv launch), then a Hermes gateway that
+                                         serves only its Webapp with this checkout's plugin/ (YUGIOH_URL = that instance);
+                                         prints run.json, then runs doctor. A failed `up` stops what it started.
+  plugin-verify doctor                   is this run worth driving? (read-only; exit 0 = yes)
+  plugin-verify shot NAME [--design] [--tab 首页|记卡|记录] [--start] [--resume] [--select 卡名] [--do 操作] [--answer N] [--end]
+                          [--compare PNG]
+                                         open the web workspace (headless Chromium, plugin-shot.mjs), click 游戏王 in the sidebar like a user (the tab is 首页),
+                                         wait until it has drawn; then optionally: --start presses 开始一手 (a random hand), --resume presses 继续这一手 (the hand
+                                         dealt by `up --hand-seed`), --select clicks a card by its name on the table, --do presses one of its operations
+                                         (发动, 召唤 …), --answer N answers up to N engine prompts by taking the first option, --end presses 结束回合 and waits for
+                                         the settlement; --design uses the design's 1280x860 and hides the sidebar; --compare puts the screenshot beside that
+                                         design PNG (NAME-compare.png); writes NAME.png, NAME.txt and NAME.json (every request the tab made, and the ones not
+                                         to this origin)
+  plugin-verify down                     stop the gateway and the yugioh service, delete the run; evidence stays
+
+Run folder: $TMPDIR/yugioh-plugin-verify/<run-id>/ (the web workspace's HERMES_HOME, logs, run.json).
+Evidence:   the yv run's evidence folder (~/work/personal/.verify/yugioh/<yv-run-id>/, YV_EVIDENCE overrides).
+Runtime:    Hermes' runtime (~640 MB) is installed once and linked into every run's home; YUGIOH_VERIFY_RUNTIME says where
+            (default: this skill's own cache, or the one tv-theater's verification already installed).
+Login:      mac-mini's bin/panel-login --webapp signs the cookies with the run home's own made-up secret.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import fcntl
+import hashlib
+import json
+import os
+import re
+import secrets
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[4]
+YV = REPO / ".claude/skills/verify-yugioh/scripts/yv.mjs"
+KEY = hashlib.sha256(str(REPO).encode()).hexdigest()[:8]  # each checkout lists its own runs
+RUNS = Path(os.environ.get("TMPDIR", "/tmp")) / "yugioh-plugin-verify"
+CACHE = Path.home() / "Library/Caches/yugioh-verify"
+_THEATER = Path.home() / "Library/Caches/tv-theater-verify/runtime"
+RUNTIME = Path(os.environ["YUGIOH_VERIFY_RUNTIME"]) if os.environ.get("YUGIOH_VERIFY_RUNTIME") else (
+    _THEATER if any((_THEATER / "installs").glob("*/facts.json")) and not (CACHE / "runtime").exists() else CACHE / "runtime")
+SHARED = ("installs", "cache")
+MAC_MINI = Path(os.environ.get("MAC_MINI_REPO") or Path.home() / "work/personal/repos/mac-mini")
+PANEL_LOGIN = MAC_MINI / "bin" / "panel-login"
+LIVE_PORTS = (9119, 9120, 4519)  # the user's panel, web workspace, and the live yugioh service
+# The login gate opens only when the public URL is not a loopback address; a name that never resolves opens it without
+# pointing anywhere real. The sandbox is reached at localhost, not 127.0.0.1: cookies ignore the port, so another host
+# name keeps the browser's live login (127.0.0.1:9130) apart from the sandbox's.
+PUBLIC_URL = "https://yugioh-verify.invalid"
+# scrypt hash (Hermes' basic login format) of a random password nobody kept; drivers sign cookies with the run's own secret
+PASSWORD_HASH = "scrypt$16384$8$1$3sBxb8tQ5C47S+sboY4GtQ==$ynRYy70v4JdQ9vBfKY6eDOi1DswBGLMsyX0txki1N7c="
+CONFIG_VERSION = 52
+READY_S = 300
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def runs() -> list:
+    return sorted(RUNS.glob(f"{KEY}-*/run.json"), key=lambda p: p.stat().st_mtime)
+
+
+def load(run_arg) -> dict:
+    path = Path(run_arg) / "run.json" if run_arg else (runs()[-1] if runs() else None)
+    if not path or not path.exists():
+        sys.exit("no run of this checkout; start one with: plugin-verify up")
+    return json.loads(path.read_text())
+
+
+def alive(pid) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def listener(port: int):
+    r = subprocess.run(["/usr/sbin/lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"], capture_output=True, text=True)
+    return int(r.stdout.split()[0]) if r.stdout.strip() else None
+
+
+def http(url: str, cookies: str = "", method: str = "GET", body: bytes | None = None) -> tuple:
+    headers = {"Cookie": cookies} if cookies else {}
+    if body is not None:
+        headers["content-type"] = "application/json"
+    req = urllib.request.Request(url, data=body, method=method, headers=headers)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=30) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+    except OSError as e:
+        return 0, str(e)
+
+
+def tool(name: str) -> str:
+    found = shutil.which(name) or shutil.which(name, path=str(Path.home() / ".local/bin"))
+    if not found:
+        sys.exit(f"{name} not found on PATH or in ~/.local/bin")
+    return found
+
+
+def node() -> str:
+    import glob
+    return shutil.which("node") or next(iter(sorted(glob.glob(str(Path.home() / ".local/share/mise/installs/node/*/bin/node")))), None) or sys.exit("node not found")
+
+
+def yv(*args) -> subprocess.CompletedProcess:
+    return subprocess.run([node(), str(YV), *args], capture_output=True, text=True, check=False)
+
+
+def cookie(run: dict, minutes: int = 15) -> str:
+    if not PANEL_LOGIN.is_file():
+        sys.exit(f"{PANEL_LOGIN} not found: the mac-mini checkout signs the sandbox's login (MAC_MINI_REPO)")
+    env = dict(os.environ, PANEL_ENV=str(Path(run["home"]) / ".env"), PANEL_URL=run["base"])
+    p = subprocess.run([sys.executable, str(PANEL_LOGIN), "--webapp", str(minutes)], env=env, capture_output=True, text=True)
+    if p.returncode:
+        sys.exit(f"panel-login failed: {p.stderr.strip()}")
+    return p.stdout.strip()
+
+
+def stop(pid, port=None) -> str:
+    """Stop a process this run started, with its process group, by pid only (the sandbox gateway has the same command
+    line as the live one, so nothing here looks processes up by name)."""
+    if not pid or not alive(pid):
+        return "not running"
+    if port is not None and listener(port) not in (pid, None):
+        return f"left alone: port {port} now belongs to pid {listener(port)}"
+    with contextlib.suppress(OSError):
+        os.killpg(pid, signal.SIGTERM)
+    for _ in range(100):
+        if not alive(pid):
+            return "stopped"
+        time.sleep(0.1)
+    with contextlib.suppress(OSError):
+        os.killpg(pid, signal.SIGKILL)
+    return "killed"
+
+
+def prime() -> None:
+    """Install Hermes' runtime once, with RUNTIME as its home: start a panel there and stop it once it is ready."""
+    if any((RUNTIME / "installs").glob("*/facts.json")):
+        return
+    RUNTIME.mkdir(parents=True, exist_ok=True)
+    (RUNTIME / "lock").mkdir(mode=0o700, exist_ok=True)
+    print("plugin-verify: installing Hermes' runtime for verification (about 640 MB, a few minutes)…", file=sys.stderr)
+    log_path = CACHE / "runtime-install.log"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HERMES_DASHBOARD_")}
+    env.update(HERMES_HOME=str(RUNTIME), HERMES_GATEWAY_LOCK_DIR=str(RUNTIME / "lock"))
+    with open(log_path, "w") as log:
+        p = subprocess.Popen([tool("hermes"), "dashboard", "--isolated", "--skip-build", "--no-open", "--host", "127.0.0.1",
+                              "--port", str(free_port())], env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        deadline = time.time() + READY_S
+        while time.time() < deadline and p.poll() is None and "HERMES_DASHBOARD_READY" not in log_path.read_text(errors="replace"):
+            time.sleep(2)
+    finally:
+        stop(p.pid)
+    if not any((RUNTIME / "installs").glob("*/facts.json")):
+        sys.exit(f"Hermes' runtime did not install; see {log_path}")
+
+
+def make_home(run: dict) -> None:
+    home = Path(run["home"])
+    home.mkdir(parents=True)
+    for name in SHARED:
+        (home / name).symlink_to(RUNTIME / name)
+    # the install command itself, into this run's own home (never --live): the sandbox exercises what goes live
+    r = subprocess.run([str(REPO / "scripts" / "plugin-setup"), "--home", str(home)], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit(f"plugin-setup failed: {r.stderr.strip()}")
+    (home / "config.yaml").write_text(
+        f"_config_version: {CONFIG_VERSION}\nplugins:\n  enabled:\n    - yugioh\n"
+        f"webapp:\n  enabled: true\n  host: 127.0.0.1\n  port: {run['port']}\n  public_url: \"{PUBLIC_URL}\"\n")
+    env = home / ".env"
+    env.write_text(f"HERMES_DASHBOARD_PUBLIC_URL={PUBLIC_URL}\nHERMES_DASHBOARD_BASIC_AUTH_USERNAME=verify\n"
+                   f"HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH={PASSWORD_HASH}\n"
+                   f"HERMES_DASHBOARD_BASIC_AUTH_SECRET={secrets.token_hex(32)}\n")
+    env.chmod(0o600)
+
+
+def ready(run: dict) -> bool:
+    if not (Path(run["home"]) / "webapp" / "session-token").is_file():
+        return False
+    try:
+        return http(run["base"] + "/api/auth/me", cookie(run, 2))[0] == 200
+    except SystemExit:
+        return False
+
+
+def cmd_up(a) -> int:
+    seed = a.hand_seed
+    started = yv("launch", *(["--hand-seed", str(seed)] if seed is not None else []), *(["--images", a.images] if a.images else []))
+    sys.stderr.write(started.stderr)
+    m_run, m_url = re.search(r"^run: (\S+)", started.stdout, re.M), re.search(r"就绪：(http://127\.0\.0\.1:\d+)", started.stdout)
+    if started.returncode or not m_run or not m_url:
+        sys.exit(f"yv launch failed: {started.stdout}{started.stderr}")
+    yv_id, service = m_run.group(1), m_url.group(1)
+    run_id = f"{KEY}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+    run = RUNS / run_id
+    run.mkdir(parents=True)
+    evidence = next(iter(re.findall(r"证据目录：(\S+)", started.stdout)), "")
+    port = free_port()
+    base = f"http://localhost:{port}"
+    info = {"id": run_id, "repo": str(REPO), "dir": str(run), "home": str(run / "home"), "port": port, "base": base,
+            "yv_run": yv_id, "service": service, "seed": seed, "evidence": evidence}
+    (run / "run.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
+    try:
+        return start(info)
+    except SystemExit:
+        if (run / "gateway.log").is_file():
+            shutil.copy(run / "gateway.log", Path(evidence) / "gateway.log")
+            print("".join((run / "gateway.log").read_text(errors="replace").splitlines(True)[-25:]), file=sys.stderr)
+        with contextlib.redirect_stdout(sys.stderr):
+            cmd_down(argparse.Namespace(run=str(run)))
+        raise
+
+
+def start(info: dict) -> int:
+    run = Path(info["dir"])
+    hermes = tool("hermes")
+    CACHE.mkdir(parents=True, exist_ok=True)
+    with open(CACHE / "runtime.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        prime()
+    make_home(info)
+    (run / "lock").mkdir(mode=0o700)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HERMES_DASHBOARD_")}
+    env.update(HERMES_HOME=info["home"], HERMES_GATEWAY_LOCK_DIR=str(run / "lock"), YUGIOH_URL=info["service"])
+    glog = open(run / "gateway.log", "w")
+    gw = subprocess.Popen([hermes, "gateway", "run", "--external-supervisor"], env=env, stdout=glog, stderr=subprocess.STDOUT,
+                          cwd=run, start_new_session=True)
+    info["gateway_pid"] = gw.pid
+    (run / "run.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
+    deadline = time.time() + READY_S
+    while time.time() < deadline and gw.poll() is None and not ready(info):
+        time.sleep(1)
+    if gw.poll() is not None:
+        sys.exit(f"the web workspace's gateway exited ({gw.returncode}); see {run}/gateway.log")
+    if not ready(info):
+        sys.exit(f"the web workspace was not ready within {READY_S} s")
+    print(json.dumps(info, indent=1, ensure_ascii=False))
+    return cmd_doctor(argparse.Namespace(run=str(run)))
+
+
+def cmd_doctor(a) -> int:
+    run = load(a.run)
+    checks = []
+
+    def check(name, ok, detail=""):
+        checks.append(ok)
+        print(f"{'ok  ' if ok else 'FAIL'} {name}{' · ' + detail if detail else ''}")
+
+    check("run folder", Path(run["dir"]).is_dir(), run["dir"])
+    check("checkout", run["repo"] == str(REPO), run["repo"])
+    x = yv("doctor", "--run", run["yv_run"])
+    check("yugioh instance is healthy (yv doctor, made-up data)", x.returncode == 0, x.stdout.strip().splitlines()[-1] if x.stdout.strip() else x.stderr.strip())
+    check("gateway process up", alive(run.get("gateway_pid")), str(run.get("gateway_pid")))
+    check(f"port {run['port']} is ours", listener(run["port"]) == run.get("gateway_pid"), f"listener pid {listener(run['port'])}")
+    check("not the user's web workspace, panel or live yugioh service", run["port"] not in LIVE_PORTS and int(run["service"].rsplit(":", 1)[1]) not in LIVE_PORTS)
+    home = Path(run["home"])
+    for rel, target in (("plugins/yugioh", REPO / "plugin"), ("desktop-plugins/yugioh", REPO / "plugin/webapp")):
+        link = home / rel
+        check(f"{rel} is this checkout's", link.is_symlink() and link.resolve() == target.resolve(), str(link.resolve()) if link.exists() else "missing")
+    if not (home / "webapp" / "session-token").is_file():
+        check("web workspace started", False, f"no webapp/session-token yet; see {run['dir']}/gateway.log")
+        print("doctor: NOT drivable")
+        return 1
+    base, c = run["base"], cookie(run, 2)
+    me, anon = http(base + "/api/auth/me", c)[0], http(base + "/api/auth/me")[0]
+    check("login gate", (me, anon) == (200, 401), f"/api/auth/me {me} with the cookies, {anon} without")
+    code, _ = http(base + "/api/plugins/yugioh/cards")
+    check("yugioh API needs the login", code == 401, f"HTTP {code} without it")
+    code, body = http(base + "/api/plugins/yugioh/cards", c)
+    got = json.loads(body).get("cards", {}) if code == 200 else {}
+    check("cards served by the made-up instance", code == 200 and got.get("73819701", {}).get("md") == "白之落胤", f"HTTP {code}, {len(got)} cards")
+    code, body = http(base + "/api/plugins/yugioh/hand", c)
+    check("hand: " + ("dealt (seed " + str(run["seed"]) + ")" if run["seed"] is not None else "none yet (404)"), code == (200 if run["seed"] is not None else 404), f"HTTP {code}")
+    code, body = http(base + "/api/desktop-plugins/root", c)
+    root = json.loads(body)["root"] if code == 200 else ""
+    from urllib.parse import quote
+    code, body = http(base + "/api/desktop-plugins/list?path=" + quote(root), c)
+    names = [e["name"] for e in json.loads(body).get("entries", [])] if code == 200 else []
+    check("web workspace lists the yugioh page", "yugioh" in names, f"desktop plugins {names}")
+    code, body = http(base + "/api/desktop-plugins/read?path=" + quote(f"{root}/yugioh/plugin.js"), c)
+    check("web workspace reads this checkout's plugin.js", code == 200 and json.loads(body).get("text") == (REPO / "plugin/webapp/plugin.js").read_text(), f"HTTP {code}")
+    print("doctor: " + ("drivable" if all(checks) else "NOT drivable"))
+    return 0 if all(checks) else 1
+
+
+def cmd_shot(a) -> int:
+    run = load(a.run)
+    evidence = run["evidence"]
+    if not evidence:
+        sys.exit("no evidence folder in run.json")
+    opts = {"name": a.name, "design": a.design, "tab": a.tab, "start": a.start, "resume": a.resume, "select": a.select, "do": a.do,
+            "answer": a.answer, "end": a.end, "compare": a.compare}
+    pub = {"id": run["id"], "base": run["base"], "evidence": evidence, "cookies": [kv.split("=", 1) for kv in cookie(run).split("; ")]}
+    r = subprocess.run([node(), str(YV.parent / "plugin-shot.mjs"), json.dumps({**pub, **opts}, ensure_ascii=False)],
+                       capture_output=True, text=True, timeout=300)
+    sys.stderr.write(r.stdout + r.stderr)
+    if r.returncode != 0:
+        return r.returncode
+    ev = Path(evidence)
+    got = json.loads((ev / f"{a.name}.json").read_text())
+    print(json.dumps({"screenshot": str(ev / f"{a.name}.png"), "text": str(ev / f"{a.name}.txt"), "requests": got["requests"],
+                      "foreign_requests": got["foreign"], "web_workspace_own_foreign": got["hostLoad"], "horizontal_scroll": got["overflowX"]}, ensure_ascii=False))
+    return 1 if got["foreign"] else 0
+
+
+def cmd_down(a) -> int:
+    run = load(a.run)
+    print(f"gateway pid {run.get('gateway_pid')}: {stop(run.get('gateway_pid'), run['port'])}")
+    x = yv("cleanup", "--run", run["yv_run"])
+    print((x.stdout or x.stderr).strip())
+    shutil.rmtree(run["dir"], ignore_errors=True)  # the home's installs/ and cache/ are links; rmtree doesn't follow them
+    print(f"removed {run['dir']}")
+    print(f"evidence kept in {run['evidence']}")
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--run", help="a run folder (default: this checkout's newest run)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    u = sub.add_parser("up")
+    u.add_argument("--hand-seed", type=int, default=None, help="deal this seed through the service before the browser opens (same hand every time)")
+    u.add_argument("--images", default=None, help="a folder of real card pictures (<code>.webp) to copy in instead of the made-up ones")
+    u.set_defaults(f=cmd_up)
+    sub.add_parser("doctor").set_defaults(f=cmd_doctor)
+    s = sub.add_parser("shot")
+    s.add_argument("name")
+    s.add_argument("--design", action="store_true", help="1280x860 with the sidebar hidden, the size of design-r3's PNGs")
+    s.add_argument("--tab", choices=["首页", "记卡", "记录"], help="open this tab (the default is 首页)")
+    s.add_argument("--start", action="store_true", help="press 开始一手")
+    s.add_argument("--resume", action="store_true", help="press 继续这一手")
+    s.add_argument("--select", metavar="卡名", help="click the card with this name on the table (after --start / --resume)")
+    s.add_argument("--do", metavar="操作", help="press this operation button in the card's panel (发动, 召唤, 特殊召唤, 盖放 …)")
+    s.add_argument("--answer", type=int, metavar="N", help="answer up to N engine prompts, each time with the first option (and 确定 when it asks for it)")
+    s.add_argument("--end", action="store_true", help="press 结束回合 and wait for the settlement")
+    s.add_argument("--compare", metavar="PNG", help="also write NAME-compare.png: the design PNG on the left, this screenshot on the right")
+    s.set_defaults(f=cmd_shot)
+    sub.add_parser("down").set_defaults(f=cmd_down)
+    a = p.parse_args()
+    return a.f(a)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

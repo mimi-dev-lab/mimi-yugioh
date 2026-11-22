@@ -1,0 +1,38 @@
+#!/bin/sh
+# 把游戏王插件链进 Hermes 的插件目录（装的第一步；上线 = launchd 常驻 + 装进线上 Hermes，是单独一张票，要用户点头）。
+#   scripts/plugin-setup --home <目录>   链进这个 HERMES_HOME（沙盒、验证用）
+#   scripts/plugin-setup --live          链进线上的 ~/.hermes（上线那一步，要用户点头；功能票里不跑）
+#   scripts/plugin-setup --home <目录> --remove   拆掉这两条链接
+# 只做两条软链：<home>/plugins/yugioh → 本仓 plugin/（后端），<home>/desktop-plugins/yugioh → 本仓 plugin/webapp（页面，
+# 链整个文件夹，网页工作区不跟随 plugin.js 本身的链接）。不改任何配置、不重启任何服务；重跑不出错；
+# 目标处已有别的东西（不是指向本仓的链接）就停下报告，不覆盖。
+root=$(cd "$(dirname "$0")/.." && pwd) || exit 1
+home="" remove=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --home) [ $# -ge 2 ] || { echo "plugin-setup: --home 要带目录" >&2; exit 2; }; home=$2; shift 2 ;;
+    --live) home="$HOME/.hermes"; shift ;;
+    --remove) remove=1; shift ;;
+    *) echo "用法：plugin-setup (--home <目录> | --live) [--remove]" >&2; exit 2 ;;
+  esac
+done
+[ -n "$home" ] || { echo "用法：plugin-setup (--home <目录> | --live) [--remove]" >&2; exit 2; }
+status=0
+link() { # link <目标位置> <指向>
+  dest=$1 want=$2
+  if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$want" ]; then
+    if [ "$remove" = 1 ]; then rm "$dest"; echo "拆了 $dest"; else echo "已有 $dest → $want"; fi
+  elif [ -e "$dest" ] || [ -L "$dest" ]; then
+    echo "plugin-setup: $dest 已经有别的东西，不动它" >&2; status=1
+  elif [ "$remove" = 1 ]; then
+    echo "没有 $dest"
+  else
+    mkdir -p "$(dirname "$dest")" && ln -s "$want" "$dest" && echo "链了 $dest → $want"
+  fi
+}
+link "$home/plugins/yugioh" "$root/plugin"
+link "$home/desktop-plugins/yugioh" "$root/plugin/webapp"
+if [ "$remove" = 0 ] && [ "$status" = 0 ]; then
+  echo "还差（单独的步骤，这里不做）：mac-mini 的 hermes/config.yaml 里 plugins.enabled 加 yugioh；游戏王服务不在默认的 http://127.0.0.1:4519 时，网关的环境里 YUGIOH_URL 指到它；重启网关"
+fi
+exit $status

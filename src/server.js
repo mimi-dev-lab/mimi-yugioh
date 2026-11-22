@@ -26,7 +26,7 @@ const voidHand = (info, reason) => { store.appendHand({ type: 'void', ...info, r
 const stale = store.readActive();
 if (stale) voidHand(stale, '服务重启，进行中的一手作废');
 
-const json = (res, status, value) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value));
+const json = (res, status, value) => { const text = JSON.stringify(value); res.writeHead(status, { 'content-type': 'application/json' }).end(text); }; // 先序列化再写头：序列化出错时还能回 500
 const readBody = async (req) => {
   let text = '';
   for await (const chunk of req) text += chunk;
@@ -35,7 +35,7 @@ const readBody = async (req) => {
 };
 const needActive = () => { if (!active) throw new HandError('没有进行中的一手', 404); return active; };
 
-async function route(req, pathname) {
+async function route(req, pathname, query) {
   const key = `${req.method} ${pathname}`;
   const now = Date.now();
   switch (key) {
@@ -46,7 +46,8 @@ async function route(req, pathname) {
       if (body.seed !== undefined && !(Number.isInteger(body.seed) && body.seed >= 0 && body.seed < 2 ** 32)) throw new HandError('seed 要是 0 到 2^32-1 的整数');
       if (active) { active.close(); voidHand(active.info, '开了新的一手，这一手作废'); active = null; }
       const seed = body.seed ?? (now % 2 ** 32);
-      active = await startHand(await engine(), DECK, { id: `${now}-${++handCount}`, seed, now });
+      const number = store.readHands().filter((r) => r.type === 'hand').length + 1; // 第几手：日志里结算过的手数 + 1
+      active = await startHand(await engine(), DECK, { id: `${now}-${++handCount}`, seed, now, number });
       store.setActive(active.info);
       return [200, active.view(now)];
     }
@@ -65,14 +66,22 @@ async function route(req, pathname) {
       active = null;
       return [200, settlement];
     }
+    // 卡组里每张卡的卡名（Master Duel 简中）、角色和三件事：页面点卡时显示。不含卡图
+    case 'GET /cards': return [200, { cards: Object.fromEntries(Object.entries(DECK.cards).map(([code, c]) => [code, { md: c.md, role: c.role, does: c.does, cost: c.cost, limit: c.limit }])) }];
+    // 卡图：JSON 里放 base64，插件后端原样转发、页面拼成 data: 地址（ctx.rest 只会读 JSON）。没有这张图是 404，页面改写卡名
+    case 'GET /card-image': {
+      const bytes = store.readImage(query.get('code'));
+      if (!bytes) return [404, { error: '没有这张卡图（先跑 scripts/sync-card-images.js）' }];
+      return [200, { code: Number(query.get('code')), type: 'image/webp', base64: bytes.toString('base64') }];
+    }
     default: return [404, { error: '没有这个接口' }];
   }
 }
 
 const server = http.createServer(async (req, res) => {
-  const { pathname } = new URL(req.url, 'http://127.0.0.1');
+  const { pathname, searchParams } = new URL(req.url, 'http://127.0.0.1');
   try {
-    const [status, body] = await route(req, pathname);
+    const [status, body] = await route(req, pathname, searchParams);
     json(res, status, body);
   } catch (e) {
     if (e instanceof HandError) return json(res, e.status, { error: e.message });
