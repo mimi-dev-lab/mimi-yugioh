@@ -6,7 +6,7 @@
                                          serves only its Webapp with this checkout's plugin/ (YUGIOH_URL = that instance);
                                          prints run.json, then runs doctor. A failed `up` stops what it started.
   plugin-verify doctor                   is this run worth driving? (read-only; exit 0 = yes)
-  plugin-verify shot NAME [--design] [--tab 首页|记卡|记录] [--start] [--resume] [--select 卡名] [--do 操作] [--answer N] [--prefer 名字,名字] [--hint N] [--end] [--replay]
+  plugin-verify shot NAME [--design] [--tab 首页|记卡|记录] [--start] [--resume] [--select 卡名] [--do 操作] [--answer N] [--prefer 名字,名字] [--route 路线id [--route-from N] [--route-steps N]] [--open 区域 [--pick-in 卡名]] [--hint N] [--end] [--replay]
                           [--quiz-start [--quiz-kind identify|fill|find]] [--quiz-answer N] [--compare PNG]
                                          open the web workspace (headless Chromium, plugin-shot.mjs), click 游戏王 in the sidebar like a user (the tab is 首页),
                                          wait until it has drawn; then optionally: --start presses 开始一手 (a random hand), --resume presses 继续这一手 (the hand
@@ -315,7 +315,7 @@ def cmd_shot(a) -> int:
     if not evidence:
         sys.exit("no evidence folder in run.json")
     opts = {"name": a.name, "design": a.design, "tab": a.tab, "start": a.start, "resume": a.resume, "select": a.select, "do": a.do,
-            "answer": a.answer, "prefer": [x for x in (a.prefer or "").split(",") if x], "quizStart": a.quiz_start, "quizAnswer": a.quiz_answer, "quizKind": a.quiz_kind, "hint": a.hint, "end": a.end, "replay": a.replay, "compare": a.compare}
+            "answer": a.answer, "prefer": [x for x in (a.prefer or "").split(",") if x], "route": a.route, "routeFrom": a.route_from, "routeSteps": a.route_steps, "open": a.open, "pickIn": a.pick_in, "quizStart": a.quiz_start, "quizAnswer": a.quiz_answer, "quizKind": a.quiz_kind, "hint": a.hint, "end": a.end, "replay": a.replay, "compare": a.compare}
     pub = {"id": run["id"], "base": run["base"], "evidence": evidence, "cookies": [kv.split("=", 1) for kv in cookie(run).split("; ")]}
     r = subprocess.run([node(), str(YV.parent / "plugin-shot.mjs"), json.dumps({**pub, **opts}, ensure_ascii=False)],
                        capture_output=True, text=True, timeout=300)
@@ -362,6 +362,11 @@ def main() -> int:
     s.add_argument("--quiz-start", action="store_true", help="on the 记卡 tab press 开始记卡 (the first question comes up)")
     s.add_argument("--quiz-kind", choices=["identify", "fill", "find"], help="with --quiz-start: restart until this kind of question comes up")
     s.add_argument("--quiz-answer", type=int, metavar="N", help="on the 记卡 tab answer N questions with the number keys (1, and 5 for the first role) and Enter")
+    s.add_argument("--route", metavar="ID", help="play a deck route (white-albaz, branded-fusion) using only page clicks: cards, operation buttons, prompt options, 进结束阶段; extra deck / grave / banished cards through their card lists")
+    s.add_argument("--route-from", type=int, metavar="N", help="with --route: start at step N (after an earlier --route-steps)")
+    s.add_argument("--route-steps", type=int, metavar="N", help="with --route: only the first N steps (stop mid-route; the hand stays in the service for --resume)")
+    s.add_argument("--open", metavar="额外卡组|墓地|除外区", help="open that zone's card list (green dot = a card in it has a legal action); the shot is taken with the list open")
+    s.add_argument("--pick-in", metavar="卡名", help="click that card in the open card list: the list closes and the detail panel shows its legal operations")
     s.add_argument("--prefer", metavar="名字,名字", help="with --answer: take the option whose card name or button text is in this list before the first option (to follow a route)")
     s.add_argument("--hint", type=int, metavar="N", help="press 提示 N times (each follows the hint; the hint count on the page goes up by one)")
     s.add_argument("--end", action="store_true", help="press 结束回合 and wait for the settlement")
