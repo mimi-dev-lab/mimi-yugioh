@@ -1,0 +1,148 @@
+#!/bin/sh
+# 仓的检查入口（各仓共用的运行器）：跑 checks/list 里的每一项，有一项没过就退出 1。
+# land（lifaninjp/mac-mini 的 bin/land）合并前在干净的 worktree 里跑它，非 0 就不合。
+#
+#   ./ci              在仓根或任意子目录跑都行
+#   ./ci --selftest   只在临时目录里测这个运行器自己
+#
+# 清单 checks/list：一行一项「名字 命令」，命令在仓根用 sh -c 跑，stdin 接 /dev/null，退出码非 0 就算没过。
+#   - 空行和 # 开头的行跳过；一行只有一个词时，它既是名字也是命令（比如只写 true）
+#   - 名字前带 ! 的是前提：没过就停，后面的不跑（比如没生成工程，后面的测试跑了也白跑）
+#   - 一项都没有算没过：没有检查不等于检查通过
+# 输出：过了只打一行（检查自己打的 `ci: skip …` 行照样转出来）；没过把它的全部输出缩进打出来。
+#
+# 增删检查只改 checks/list，不改这个文件。原件在 lifaninjp/mac-mini 的 ./ci，各仓的是拷贝，
+# 用 mac-mini 的 bin/ci-sync 同步与核对；要改运行器先改原件。
+LIST=checks/list
+
+# 检查跑在什么环境里由 ./ci 自己定，不看是谁调的（Hermes 的终端 PATH 里 /usr/bin 在前，python3 是 Xcode 的 3.9；
+# git 钩子里起的 land 带着 GIT_DIR 等，git -C 会落到正在推的仓上）：
+# - 去掉所有 GIT_* 变量
+# - PATH 前面放 CI_PATH_FIRST（空格隔开；默认 ~/.local/bin、Homebrew），只放存在的目录
+# - 不是 UTF-8 的 locale 换成 en_US.UTF-8（网关没设 locale，ruby 读不了 pre-commit 里的中文）
+# - python3 低于 3.11 就停（tomllib 要 3.11）
+# 来源：mac-mini#123（Hermes 11-07：./ci 在 Hermes 的终端里跑不过，push 和 land --push 一直推不上去）。
+# 回头看：检查要用别的解释器（node 等）时也在这里定；某台机器的 Homebrew 不在 /opt/homebrew 时改默认值。
+setup_env() {
+  for v in $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+  first=
+  for d in ${CI_PATH_FIRST:-$HOME/.local/bin /opt/homebrew/bin /opt/homebrew/sbin}; do
+    [ -d "$d" ] && first="$first$d:"
+  done
+  PATH="$first$PATH"
+  export PATH
+  [ "$(locale charmap 2>/dev/null)" = UTF-8 ] || { LC_ALL=en_US.UTF-8; export LC_ALL; }
+  python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null || {
+    echo "ci: python3 要 3.11 以上（现在是 $(command -v python3)：$(python3 --version 2>&1)）；装 Homebrew 的 python 或改 CI_PATH_FIRST" >&2
+    exit 1
+  }
+}
+
+run() {
+  setup_env
+  root=$(cd "$(dirname "$0")" && pwd) || exit 1
+  cd "$root" || exit 1
+  [ -f "$LIST" ] || { echo "ci: 没有 $LIST" >&2; exit 1; }
+  out=$(mktemp) || exit 1
+  trap 'rm -f "$out"' EXIT
+  n=0
+  failed=
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line#"${line%%[![:space:]]*}"}
+    case $line in ''|'#'*) continue ;; esac
+    name=${line%%[[:space:]]*}
+    cmd=${line#"$name"}
+    stop=
+    case $name in '!'*) stop=1 name=${name#!} ;; esac
+    case $cmd in *[![:space:]]*) ;; *) cmd=$name ;; esac
+    n=$((n + 1))
+    start=$(date +%s)
+    if sh -c "$cmd" </dev/null >"$out" 2>&1; then
+      echo "ci: ok   $name ($(($(date +%s) - start))s)"
+      grep '^ci: skip' "$out" >&2
+    else
+      code=$?
+      echo "ci: FAIL ${name}（退出码 ${code}，$(($(date +%s) - start))s）：$cmd" >&2
+      sed 's/^/    /' "$out" >&2
+      failed="$failed $name"
+      if [ -n "$stop" ]; then
+        echo "ci: $name 是前提，后面的检查不跑了" >&2
+        break
+      fi
+    fi
+  done <"$LIST"
+  [ $n -gt 0 ] || { echo "ci: $LIST 里一项检查都没有：没有检查不等于检查通过" >&2; exit 1; }
+  if [ -n "$failed" ]; then
+    echo "ci: 有检查没过：${failed# }" >&2
+    exit 1
+  fi
+  echo "ci: 全部通过（$n 项）"
+}
+
+selftest() {
+  setup_env
+  self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+  t=$(mktemp -d) || exit 1
+  trap 'rm -rf "$t"' EXIT
+  bad=0
+  miss() { echo "FAIL ${cname}：$1"; echo "$got" | sed 's/^/    /'; bad=1; }
+  # expect_case 名字 期望退出码 期望出现的文字…（! 开头的是不该出现的）；清单是变量 L（\n 换行，最后一行可以不带换行）
+  expect_case() {
+    cname=$1 want=$2
+    shift 2
+    d=$t/$cname
+    mkdir -p "$d/checks" "$d/sub"
+    cp "$self" "$d/ci"
+    if [ "$cname" = 没有清单 ]; then rm -r "$d/checks"; else printf '%b' "$L" >"$d/checks/list"; fi
+    got=$(cd "$d/sub" && ../ci 2>&1)
+    code=$?
+    [ "$code" = "$want" ] || { miss "退出码 ${code}，要 $want"; return; }
+    for needle in "$@"; do
+      case $needle in
+        '!'*) case $got in *"${needle#!}"*) miss "不该有「${needle#!}」" ;; esac ;;
+        *) case $got in *"$needle"*) ;; *) miss "没有「${needle}」" ;; esac ;;
+      esac
+    done
+  }
+  L='# 注释\n\n  # 缩进的注释\ntrue\nroot   test -f checks/list\nlast echo 没换行'; expect_case 全过 0 \
+    "ci: ok   true" "ci: ok   root" "ci: ok   last" "全部通过（3 项）" "!没换行"
+  L='a true\nb echo 坏了的说明; exit 3\nc true\n'; expect_case 中间一项没过 1 \
+    "ci: ok   a" "ci: FAIL b（退出码 3" "    坏了的说明" "ci: ok   c" "有检查没过：b"
+  L='quiet echo 唠叨\nskipper echo "ci: skip 没装 xcodegen"\n'; expect_case 过了的输出不打 0 \
+    "!唠叨" "ci: skip 没装 xcodegen"
+  L='!true\npct test "$(date +%Y)" -gt 2000\n'; expect_case 一个词的前提和带百分号的命令 0 "ci: ok   true" "ci: ok   pct"
+  L='!gen false\nlater true\n'; expect_case 前提没过就停 1 \
+    "ci: FAIL gen" "gen 是前提" "!ci: ok   later"
+  L='eats cat\nafter true\n'; expect_case 检查读不走清单 0 "ci: ok   after"
+  L='# 只有注释\n'; expect_case 空清单 1 "一项检查都没有"
+  expect_case 没有清单 1 "没有 checks/list"
+  # 环境由 ./ci 自己定：调用方（Hermes 的终端、git 钩子里的 land）带来的 PATH 和 GIT_* 不算数
+  mkdir -p "$t/first"
+  L='gitenv test -z "$(env | grep ^GIT_)"\npathfirst test "${PATH%%:*}" = "$CI_PATH_FIRST"\nutf8 test "$(locale charmap)" = UTF-8\n'
+  # 网关（Hermes 的钩子、skill-autocommit 起的 land）没设 locale：ruby 读不了脚本里的中文
+  for v in LANG LC_ALL LC_CTYPE; do eval "saved_$v=\${$v-<unset>}"; unset $v; done
+  export GIT_DIR=/nonexistent GIT_INDEX_FILE=/nonexistent CI_PATH_FIRST="$t/first"
+  expect_case 定环境 0 "ci: ok   gitenv" "ci: ok   pathfirst" "ci: ok   utf8"
+  for v in LANG LC_ALL LC_CTYPE; do
+    eval "x=\$saved_$v"
+    if [ "$x" = "<unset>" ]; then unset $v; else eval "$v=\$x; export $v"; fi
+  done
+  # 假的旧 python3：真的解释器，只是报 3.9（-c 的代码照跑），所以查版本和不查版本分得出来
+  real_py=$(command -v python3)
+  printf '#!/bin/sh\n[ "$1" = -c ] && exec %s -c "import sys; sys.version_info = (3, 9, 6); exec(sys.argv[1])" "$2"\necho "Python 3.9.6"\n' "$real_py" >"$t/first/python3"
+  chmod +x "$t/first/python3"
+  L='never true\n'
+  expect_case 旧的python3 1 "python3 要 3.11 以上" "!ci: ok   never"
+  rm "$t/first/python3"
+  unset GIT_DIR GIT_INDEX_FILE CI_PATH_FIRST
+  (cd "$t" && "$self" --bogus >/dev/null 2>&1)
+  [ $? = 2 ] || { echo "FAIL 不认识的参数要退出 2"; bad=1; }
+  [ $bad = 0 ] && echo "ci selftest ok" || echo "ci selftest FAIL"
+  return $bad
+}
+
+case $# in
+  0) run ;;
+  *) case $1 in --selftest) [ $# = 1 ] && { selftest; exit; } ;; esac
+     echo "用法：./ci [--selftest]" >&2; exit 2 ;;
+esac
