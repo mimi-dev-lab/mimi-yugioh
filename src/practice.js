@@ -47,14 +47,18 @@ export function typeWeights(deck, history) {
   }));
 }
 
-// 发一手练习手：返回 { seed, hand }，hand 就是 deal(deck, seed)，所以「重打这一手」用 seed 发同样的牌。不发基准手的起手牌
-export function pickPractice(deck, history, { seed, benchmarkKeys = new Set() }) {
+// 候选种子的来源：默认是任意 32 位种子（完全随机发牌）。模拟（src/simulation.js）换成从预先搜好的一组种子里抽，见 DESIGN.md「效果验证」
+const anySeed = (rng) => Math.floor(rng() * 2 ** 32);
+
+// 发一手练习手：返回 { seed, hand }，hand 就是 deal(deck, seed)，所以「重打这一手」用 seed 发同样的牌。不发基准手的起手牌。
+// weakDealing 为 false 时每类权重都是 1（不按弱点多发，模拟里去掉这个功能时用）
+export function pickPractice(deck, history, { seed, benchmarkKeys = new Set(), candidateSeed = anySeed, weakDealing = true }) {
   const rng = rngFrom(seed);
-  const weights = typeWeights(deck, history);
+  const weights = weakDealing ? typeWeights(deck, history) : new Map(typeIds(deck).map((id) => [id, 1]));
   const top = Math.max(...weights.values());
   let picked = null;
   for (let tries = 0; tries < MAX_REDRAWS || !picked; tries++) {
-    const candidate = Math.floor(rng() * 2 ** 32);
+    const candidate = candidateSeed(rng);
     const { hand } = deal(deck, candidate);
     if (benchmarkKeys.has(handKey(hand))) continue;
     picked = { seed: candidate, hand };
@@ -63,14 +67,14 @@ export function pickPractice(deck, history, { seed, benchmarkKeys = new Set() })
   return picked;
 }
 
-// 下一手发什么：到了基准手的位置发基准手，否则按弱点发练习手。返回 { seed, benchmark }
-export function nextDeal(deck, history, { seed, benchmarks }) {
+// 下一手发什么：到了基准手的位置发基准手，否则按弱点发练习手。返回 { seed, benchmark }；candidateSeed、weakDealing 原样交给 pickPractice
+export function nextDeal(deck, history, { seed, benchmarks, candidateSeed, weakDealing }) {
   const rows = settled(history);
   const sinceBenchmark = rows.length - 1 - rows.findLastIndex((r) => r.benchmarkHand);
   if (benchmarks.length && sinceBenchmark >= BENCHMARK_EVERY - 1) {
     return { seed: benchmarks[rows.filter((r) => r.benchmarkHand).length % benchmarks.length].seed, benchmark: true };
   }
-  return { seed: pickPractice(deck, history, { seed, benchmarkKeys: new Set(benchmarks.map((b) => handKey(b.hand))) }).seed, benchmark: false };
+  return { seed: pickPractice(deck, history, { seed, benchmarkKeys: new Set(benchmarks.map((b) => handKey(b.hand))), candidateSeed, weakDealing }).seed, benchmark: false };
 }
 
 // 首页的数据。点是练习手（第几手按日志里所有结算过的手数，基准手也占一个号、但不画在散点里）；基准手只出现在 progress

@@ -3,6 +3,7 @@
 # 不碰线上：测试用临时目录、PORT=0、编的数据，不读 ~/.mimi-yugioh，不连常驻的服务（4519）。
 # 唯一联网的是 engine：把固定版本的公开引擎数据（卡库和卡牌脚本）下载到复用的缓存目录 ~/.cache/mimi-yugioh/engine，已经是这个版本就不下载。
 # plugin-smoke：在临时的 Hermes 网页工作区里打开游戏王插件、开始一手、做一步、结束回合（编的数据、编的卡图，不连 NAS）；CI_SKIP_PLUGIN_SMOKE=1 跳过（没有 Hermes 的机器）。
+# sim-smoke：模拟学习者实验的冒烟（每种画像 2 个学习者、2 天、只跑主实验，临时目录，跑完删掉）；完整实验手动跑，见 docs/simulation-report.md。
 # 架构约定的几条（AGENTS.md「架构约定」）各一行，规则写在 scripts/check.js。
 
 !engine          node scripts/prepare-engine.js "$HOME/.cache/mimi-yugioh/engine"
@@ -15,4 +16,5 @@ test-isolation   node scripts/check.js test-isolation
 plugin           node scripts/check.js plugin
 plugin-loads     node scripts/check.js plugin-loads
 plugin-smoke     sh scripts/plugin-smoke.sh
+sim-smoke        node --no-warnings scripts/simulate.js --smoke
 ci-selftest      ./ci --selftest

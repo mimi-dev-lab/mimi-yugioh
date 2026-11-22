@@ -14,15 +14,16 @@ export function openSearchCache({ store, deck, search, now, budgetMs, isPaused, 
   };
 
   return {
-    // 这手需要搜就在后台开始搜（不等它）：没有可用的条目、超时的条目用的上限比现在小、上次搜崩了；force 是已有条目也重搜（条目的路线在这个种子下重放不了）。已经在搜的不重开
+    // 这手需要搜就在后台开始搜（服务不等它）：没有可用的条目、超时的条目用的上限比现在小、上次搜崩了；force 是已有条目也重搜（条目的路线在这个种子下重放不了）。已经在搜的不重开。
+    // 返回这次搜索的 Promise（搜完写进缓存后 resolve，搜崩了也 resolve），没开新的搜索返回 null；模拟预先搜练习手时等它
     ensure(hand, seed, { force = false } = {}) {
       const key = handKey(hand);
-      if (budgetMs <= 0 || running.get(key) === 'pending') return;
+      if (budgetMs <= 0 || running.get(key) === 'pending') return null;
       const entry = entryFor(key);
       const stale = !entry || (entry.timedOut && (entry.budgetMs ?? 0) < budgetMs);
-      if (!force && !stale) return;
+      if (!force && !stale) return null;
       running.set(key, 'pending');
-      search(hand, seed, { now, budgetMs, isPaused }).then((result) => {
+      return search(hand, seed, { now, budgetMs, isPaused }).then((result) => {
         store.writeSearch(key, { v: version, hand: [...hand].sort((a, b) => a - b), seed, budgetMs, at: now(), ...result });
         running.delete(key);
       }).catch((e) => { onError(e); running.set(key, 'failed'); });
