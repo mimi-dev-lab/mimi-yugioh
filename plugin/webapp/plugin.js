@@ -245,7 +245,7 @@ function Curve({ result }) {
   const user = result.curve.user;
   const best = result.curve.best;
   const n = Math.max(user.length, best?.length ?? 0, 1);
-  const W = 880, H = 200, L = 56, R = 70, T = 14, B = 28;
+  const W = 880, H = 160, L = 56, R = 70, T = 14, B = 28;
   const x = (k) => L + (k / n) * (W - L - R);
   const y = (v) => T + (1 - Math.min(1, Math.max(0, v))) * (H - T - B);
   const path = (list) => [`M${x(0)},${y(0)}`, ...list.map((v, i) => `H${x(i + 1)}V${y(v)}`), `H${W - R + 24}`].join("");
@@ -267,52 +267,54 @@ function MiniCard({ rest, card, missing }) {
   return h("div", { className: "yg-mini" }, h("div", { className: "yg-mini-art" }, h(CardArt, { rest, code: card.code, md: card.md })), h("span", { className: "yg-mini-name" }, card.md));
 }
 
-// the user's field cards, with a dashed slot for each card the best field has and the user's does not
+// both final fields side by side, slot for slot: the user's row has exactly as many slots as the best row (cards only the user has are named in a line under it), a card the best field has and the user's does not is a dashed slot "少 name"
 function Finals({ rest, result }) {
   const mine = [...result.finalBoard.monsters, ...result.finalBoard.spellTraps];
   const best = result.bestBoard ? [...result.bestBoard.monsters, ...result.bestBoard.spellTraps] : null;
   const left = [...mine];
-  const missing = [];
-  for (const c of best ?? []) {
+  const slots = (best ?? []).map((c) => {
     const i = left.findIndex((m) => m.code === c.code);
-    if (i >= 0) left.splice(i, 1); else missing.push(c);
-  }
+    return i >= 0 ? { card: left.splice(i, 1)[0] } : { card: c, missing: true };
+  });
+  const row = (cards) => h("div", { className: "yg-minis", style: { gridTemplateColumns: `repeat(${Math.max(cards.length, 1)}, minmax(0, 52px))` } }, cards.map((c, i) => h(MiniCard, { key: i, rest, card: c.card, missing: c.missing })));
   const head = (p) => (p ? `打断 ${p.interrupts} · 手牌 ${p.hand}` : "");
   return h("div", { className: "yg-finals" },
     best ? h("div", { className: "yg-final-block", "aria-label": "最好终场" },
       h("div", { className: "yg-line" }, h("strong", null, "最好终场"), h("span", { className: "yg-fill" }), h("span", { className: "yg-mono yg-lab" }, head(result.parts.best))),
-      h("div", { className: "yg-minis" }, best.map((c, i) => h(MiniCard, { key: i, rest, card: c })))) : h("p", { className: "yg-lab" }, "没有最好终场可画：基准是你自己以前的成绩"),
+      row(best.map((c) => ({ card: c })))) : h("p", { className: "yg-lab" }, "没有最好终场可画：基准是你自己以前的成绩"),
     h("div", { className: "yg-final-block", "aria-label": "你的终场" },
       h("div", { className: "yg-line" }, h("strong", null, "你的终场"), h("span", { className: "yg-fill" }), h("span", { className: "yg-mono yg-lab" }, head(result.parts.user))),
-      h("div", { className: "yg-minis" }, mine.map((c, i) => h(MiniCard, { key: i, rest, card: c })), missing.map((c, i) => h(MiniCard, { key: `m${i}`, rest, card: c, missing: true })))));
+      row(best ? slots : mine.map((c) => ({ card: c }))),
+      best && left.length ? h("span", { className: "yg-lab" }, `另有 ${left.map((c) => c.md).join("、")}（最好终场里没有）`) : null));
 }
 
+// one row per step (rows = the longer of the two routes): best on the left, you on the right; the step you diverged on is lit up across the row; the whole block scrolls
 function StepCompare({ result }) {
   const { steps, bestSteps, divergeStep: d } = result;
   const n = Math.max(steps.length, bestSteps?.length ?? 0);
   const spend = (s) => `花 ${s.spent} → ${s.gained}`;
-  const cols = Array.from({ length: n }, (_, i) => {
+  const side = (s, empty, tone) => (s
+    ? [h("strong", { key: "t", className: tone }, s.summary), h("span", { key: "s", className: "soft" }, spend(s)), s.hinted ? h("span", { key: "h", className: "yg-warn hinted" }, "用提示") : null]
+    : h("span", { className: "yg-lab" }, empty));
+  const rows = Array.from({ length: n }, (_, i) => {
     const u = steps[i];
     const b = bestSteps?.[i];
-    const same = !bestSteps || !d || i + 1 < d;
-    return h("div", { key: i, className: `yg-sc${d === i + 1 ? " diverge" : ""}`, "data-step": i + 1 },
-      h("div", { className: `yg-mono yg-lab${d === i + 1 ? " warn" : ""}` }, d === i + 1 ? `${i + 1} · 走偏` : i + 1),
-      same && u ? [h("strong", { key: "t", title: u.summary }, u.summary), h("span", { key: "s", className: "soft", title: spend(u) }, spend(u)), h("span", { key: "x", className: "yg-lab" }, bestSteps ? "两边相同" : ""), u.hinted ? h("span", { key: "h", className: "yg-warn hinted" }, "用提示") : null]
-        : [
-          b ? h("strong", { key: "bt", className: "best", title: b.summary }, `最好：${b.summary}`) : h("span", { key: "bt", className: "yg-lab" }, "最好：已经结束"),
-          b ? h("span", { key: "bs", className: "soft", title: spend(b) }, spend(b)) : null,
-          u ? h("strong", { key: "ut", title: u.summary }, `你：${u.summary}`) : h("span", { key: "ut", className: "yg-lab" }, "你：已经结束"),
-          u ? h("span", { key: "us", className: "soft", title: spend(u) }, spend(u)) : null,
-          u?.hinted ? h("span", { key: "h", className: "yg-warn hinted" }, "用提示") : null,
-        ]);
+    const diverge = d === i + 1;
+    const same = bestSteps && !!u && !!b && (!d || i + 1 < d);
+    return h("div", { key: i, className: `yg-sr${diverge ? " diverge" : ""}`, "data-step": i + 1 },
+      h("div", { className: `yg-mono yg-sn${diverge ? " warn" : ""}` }, i + 1, diverge ? h("span", { className: "yg-lab warn" }, "走偏") : null),
+      bestSteps ? h("div", { className: "yg-sb" }, h("span", { className: "yg-lab" }, same ? "最好 = 你" : "最好"), side(b, "最好路线已经结束", "best")) : null,
+      h("div", { className: "yg-su" }, h("span", { className: "yg-lab" }, "你"), same ? h("span", { className: "yg-lab" }, "两边相同") : null, side(u, "你已经结束", "")));
   });
-  return h("section", { className: "yg-steps", "aria-label": "逐步对照" }, h("div", { className: "yg-lab yg-stephead" }, "逐步对照"), h("div", { className: "yg-scs" }, cols));
+  return h("section", { className: "yg-steps", "aria-label": "逐步对照" },
+    h("div", { className: "yg-stephead" }, h("strong", null, "逐步对照"), h("span", { className: "yg-lab" }, `${n} 步`)),
+    h("div", { className: "yg-srs" }, rows));
 }
 
 function Settled({ rest, result, busy, onAgain, onReplay, onHome }) {
   const hintedSteps = result.steps.filter((s) => s.hinted).map((s) => s.step);
   const time = clock(result.durationMs);
-  const speedSub = !result.speedCounted ? `场面未达 90%，${time} 不计` : result.speedBonus === 0 ? `用时 ${time}，超过 5:00 不加` : `用时 ${time}，60 秒内满 +20，5:00 降到 0`;
+  const speedSub = !result.speedCounted ? `用时 ${time} · 场面未到 90，不加速度分` : result.speedBonus === 0 ? `用时 ${time}，超过 5:00 不加` : `用时 ${time}，60 秒内满 +20，5:00 降到 0`;
   const parts = result.parts;
   const typeText = `${result.handTypeStats.name}起手平均 ${result.handTypeStats.average}`;
   return h("div", { className: "yg-result", "aria-label": "结算" },
@@ -321,7 +323,7 @@ function Settled({ rest, result, busy, onAgain, onReplay, onHome }) {
       h("span", { className: "yg-op" }, "+"),
       h(Stat, { label: "速度加成", value: result.speedCounted ? `+${result.speedBonus}` : "0", sub: speedSub, tone: result.speedBonus ? "" : "dim" }),
       h("span", { className: "yg-op" }, "×"),
-      h(Stat, { label: result.hints ? `提示 ${result.hints} 次` : "提示 0 次", value: result.hintFactor.toFixed(result.hints > 1 ? 2 : 1), sub: hintedSteps.length ? `第 ${hintedSteps.join("、")} 步用的` : "没用提示", tone: result.hints ? "warn" : "" }),
+      h(Stat, { label: result.hints ? `提示 ${result.hints} 次` : "提示 0 次", value: result.hintFactor.toFixed(result.hints > 1 ? 2 : 1), sub: hintedSteps.length ? `第 ${hintedSteps.join("、")} 步用了提示` : "没用提示", tone: result.hints ? "warn" : "" }),
       h("span", { className: "yg-op" }, "="),
       h(Stat, { label: "总分", value: result.total, sub: typeText, tone: "total" }),
       h("div", { className: "yg-rbtns" },
@@ -644,30 +646,33 @@ const CSS = `
 .yg-feedback { border: 1px solid #333; border-radius: 8px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
 .yg-feedback.right { border-color: #c8ff3d; } .yg-feedback.wrong { border-color: #ff9a6b; }
 .yg-qfoot { margin-top: auto; border-top: 1px solid #1c1c1c; padding-top: 14px; display: flex; align-items: center; justify-content: space-between; }
-.yg-result { display: flex; flex-direction: column; gap: 14px; }
+.yg-result { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 110px); min-height: 640px; }
+.yg-result > section { flex: none; }
 .yg-rtop { display: flex; align-items: flex-start; gap: 22px; padding: 0 4px 10px; border-bottom: 1px solid #1c1c1c; }
 .yg-rstat { display: flex; flex-direction: column; gap: 6px; min-width: 150px; }
 .yg-rstat .sub { letter-spacing: 0; }
-.yg-rnum { font-size: 60px; line-height: 1; color: #ececec; letter-spacing: -.04em; }
-.yg-rnum.dim { color: #8a8a8a; } .yg-rnum.warn { color: #ff9a6b; } .yg-rnum.total { color: #c8ff3d; font-size: 80px; }
+.yg-rnum { font-size: 52px; line-height: 1; color: #ececec; letter-spacing: -.04em; }
+.yg-rnum.dim { color: #8a8a8a; } .yg-rnum.warn { color: #ff9a6b; } .yg-rnum.total { color: #c8ff3d; font-size: 68px; }
 .yg-op { font-size: 32px; color: #8a8a8a; align-self: center; margin-top: 14px; }
 .yg-rbtns { margin-left: auto; display: flex; flex-direction: column; gap: 6px; width: 170px; }
 .yg-rmid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 24px; }
 .yg-rcurve { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .yg-curve { width: 100%; height: auto; display: block; }
-.yg-finals { display: flex; flex-direction: column; gap: 16px; }
-.yg-final-block { display: flex; flex-direction: column; gap: 8px; }
-.yg-minis { display: flex; flex-wrap: wrap; gap: 8px; }
-.yg-mini { width: 56px; display: flex; flex-direction: column; gap: 4px; }
-.yg-mini-art { width: 56px; height: 80px; position: relative; } .yg-mini-art .yg-art { height: 80px; }
+.yg-finals { display: flex; flex-direction: column; gap: 10px; }
+.yg-final-block { display: flex; flex-direction: column; gap: 6px; }
+.yg-minis { display: grid; gap: 8px; justify-content: start; }
+.yg-mini { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.yg-mini-art { width: 100%; aspect-ratio: 56 / 80; position: relative; } .yg-mini-art .yg-art { height: 100%; }
 .yg-mini-art.gap { border: 1px dashed #ff9a6b; border-radius: 3px; }
 .yg-mini-name { font-size: 10px; line-height: 1.3; text-align: center; color: #d6d6d6; } .yg-mini-name.warn { color: #ff9a6b; }
+.yg-result > .yg-steps { flex: 1; min-height: 120px; }
 .yg-steps { display: flex; border: 1px solid #1f1f1f; border-radius: 8px; overflow: hidden; }
-.yg-stephead { width: 56px; padding: 0 12px; letter-spacing: 0; word-break: break-all; flex: none; display: flex; align-items: center; justify-content: center; text-align: center; border-right: 1px solid #1c1c1c; }
-.yg-scs { display: flex; overflow-x: auto; flex: 1; }
-.yg-sc { flex: 1 0 190px; max-width: 260px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; border-right: 1px solid #1c1c1c; font-size: 12px; line-height: 1.45; }
-.yg-sc strong, .yg-sc .soft { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.yg-sc.diverge { background: #120d0a; } .yg-sc .warn { color: #ff9a6b; } .yg-sc .best { color: #c8ff3d; } .yg-sc .soft { color: #bdbdbd; }
+.yg-stephead { width: 90px; flex: none; padding: 12px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #1c1c1c; }
+.yg-srs { flex: 1; min-height: 0; overflow-y: auto; }
+.yg-sr { display: grid; grid-template-columns: 56px minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 10px 14px; border-bottom: 1px solid #1c1c1c; font-size: 12px; line-height: 1.5; }
+.yg-sr > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.yg-sr.diverge { background: #1a120d; box-shadow: inset 3px 0 0 #ff9a6b; }
+.yg-sn { font-size: 14px; } .yg-sr .warn { color: #ff9a6b; } .yg-sr .best { color: #c8ff3d; } .yg-sr .soft { color: #bdbdbd; }
 .yg-bench { padding: 0 4px; }
 @media (max-width: 900px) { .yg-bottom { grid-template-columns: 1fr; } .yg-rmid { grid-template-columns: 1fr; } }
 `;
