@@ -45,6 +45,18 @@ describe('模拟学习者的实验', () => {
   });
 });
 
+describe('遇到服务还不支持的引擎提示', () => {
+  test('考试里这一手没法结算：记 0 分并计数（用户在这里也只能开下一手）', async () => {
+    const service = {
+      benchmarks: benchmarkHands(BRANDED),
+      handle: async (method, path) => (path === '/hand/start' ? [200, { status: 'playing', prompt: { kind: 'unsupported', options: [] } }] : [500, { error: `不该调 ${method} ${path}` }]),
+    };
+    const open = () => ({ practice: { service, store: { readHands: () => [] } }, exam: { service } });
+    const r = await runLearner({ deck: BRANDED, open, profile: PROFILES.player, params: PARAMS, regimen: REGIMENS.random, seed: 1, days: 0, examDays: [0], pool: [1] });
+    assert.deepEqual(r.exams[0], { day: 0, mean: 0, totals: Array(8).fill(0), abandoned: 8 });
+  });
+});
+
 describe('模拟学习者的模型', () => {
   const prompt = { kind: 'idle', options: [{ action: 'activate', code: ID.aluber, md: md(ID.aluber) }, { action: 'summon', code: ID.quem, md: md(ID.quem) }, { action: 'end-turn' }] };
 

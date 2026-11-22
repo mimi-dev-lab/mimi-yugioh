@@ -157,7 +157,7 @@ function summarize(jobs, results, days) {
     out.main[profile].diff = paired(full, cell('main', null, profile, 'random'), days);
     out.main[profile].diffGame8 = paired(full, cell('main', null, profile, 'game8'), days);
     out.activity[profile] = Object.fromEntries(['full', 'random', 'game8', 'no-quiz', 'no-weak', 'no-review'].map((g) => [g, cell(g.startsWith('no-') ? 'ablation' : 'main', null, profile, g)]).filter(([, c]) => c).map(([g, c]) => [g, {
-      hands: mean(c.runs.map((r) => r.hands)), benchmarkHands: mean(c.runs.map((r) => r.benchmarkHands)), hints: mean(c.runs.map((r) => r.hints)), reviews: mean(c.runs.map((r) => r.reviews)), answers: mean(c.runs.map((r) => r.answers)), studied: mean(c.runs.map((r) => r.studied)), known: mean(c.runs.map((r) => r.known)),
+      hands: mean(c.runs.map((r) => r.hands)), abandoned: mean(c.runs.map((r) => r.abandoned)), examAbandoned: mean(c.runs.flatMap((r) => r.exams.map((e) => e.abandoned / e.totals.length))), benchmarkHands: mean(c.runs.map((r) => r.benchmarkHands)), hints: mean(c.runs.map((r) => r.hints)), reviews: mean(c.runs.map((r) => r.reviews)), answers: mean(c.runs.map((r) => r.answers)), studied: mean(c.runs.map((r) => r.studied)), known: mean(c.runs.map((r) => r.known)),
     }]));
     for (const g of ['no-quiz', 'no-weak', 'no-review']) {
       const c = cell('ablation', null, profile, g);
@@ -214,8 +214,8 @@ function resultsMarkdown(s, meta) {
     for (const row of s.sensitivity) md += `| ${row.variant} | ${Object.keys(s.main).map((p) => `${range(row.diffs[p])}<br>完整 ${f1(row.diffs[p].full)} / 随机 ${f1(row.diffs[p].random)}`).join(' | ')} |\n`;
     md += `\n![敏感性](sensitivity.svg)\n`;
   }
-  md += `\n## 14 天里做了什么（每个学习者平均）\n\n| 画像 | 练法 | 练习手 | 其中基准手 | 提示 | 看复盘学到的步 | 记卡答题 | 看路线的步 | 记住的决定点 |\n|---|---|---|---|---|---|---|---|---|\n`;
-  for (const p of Object.keys(s.activity)) for (const [g, a] of Object.entries(s.activity[p])) md += `| ${P(p)} | ${REGIMENS[g].name} | ${f1(a.hands)} | ${f1(a.benchmarkHands)} | ${f1(a.hints)} | ${f1(a.reviews)} | ${f1(a.answers)} | ${f1(a.studied)} | ${f1(a.known)} |\n`;
+  md += `\n## 14 天里做了什么（每个学习者平均）\n\n| 画像 | 练法 | 练习手 | 其中基准手 | 没法结算而作废的手 | 考试里没法结算的比例 | 提示 | 看复盘学到的步 | 记卡答题 | 看路线的步 | 记住的决定点 |\n|---|---|---|---|---|---|---|---|---|---|---|\n`;
+  for (const p of Object.keys(s.activity)) for (const [g, a] of Object.entries(s.activity[p])) md += `| ${P(p)} | ${REGIMENS[g].name} | ${f1(a.hands)} | ${f1(a.benchmarkHands)} | ${f1(a.abandoned)} | ${(100 * a.examAbandoned).toFixed(1)}% | ${f1(a.hints)} | ${f1(a.reviews)} | ${f1(a.answers)} | ${f1(a.studied)} | ${f1(a.known)} |\n`;
   return md;
 }
 

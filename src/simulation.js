@@ -32,7 +32,8 @@ const call = (service) => async (method, path, body) => {
 };
 const callMaybe = (service) => (method, path, body) => service.handle(method, path, { readBody: async () => body ?? {} });
 
-// 打一手：从开局走到结算。learner 照自己的模型选，hints 为 true 时卡住了会要提示（基准手服务回 409，不算）。返回 { settlement, keys, hints }
+// 打一手：从开局走到结算。learner 照自己的模型选，hints 为 true 时卡住了会要提示（基准手服务回 409，不算）。返回 { settlement, keys, hints, abandoned }；
+// abandoned：遇到服务还不支持的提示，这一手没法结算（settlement 是 null）
 async function playHand(service, learner, deck, clock, { seed, hints: canHint }) {
   const api = call(service);
   let view = await api('POST', '/hand/start', { seed });
@@ -41,6 +42,8 @@ async function playHand(service, learner, deck, clock, { seed, hints: canHint })
   for (let n = 0; view.status === 'playing' && view.prompt; n++) {
     if (n > MAX_CHOICES + 200) throw new Error(`种子 ${seed}：选了 ${n} 次回合还没结束`);
     const prompt = view.prompt;
+    // 服务还不支持的引擎提示：用户在这里既选不了也结束不了回合，只能开下一手（服务把这一手记成作废）。模拟照做，这一手不结算
+    if (prompt.kind === 'unsupported') return { settlement: null, keys, hints, abandoned: true };
     const endTurn = prompt.kind === 'idle' && n >= MAX_CHOICES ? prompt.options.findIndex((o) => o.action === 'end-turn') : -1;
     let d = endTurn >= 0 ? { indices: [endTurn], ms: 1000, keys: [], stuck: false } : decide(learner, deck, prompt, clock.t);
     if (canHint && wantsHint(learner, d, hints)) {
@@ -57,18 +60,21 @@ async function playHand(service, learner, deck, clock, { seed, hints: canHint })
     view = await api('POST', '/hand/choose', { indices: d.indices });
   }
   const settlement = await api('POST', '/hand/end');
-  return { settlement, keys, hints };
+  return { settlement, keys, hints, abandoned: false };
 }
 
-// 天末考试：每手基准手打一次（另一个服务、另一份数据目录，不进练习日志），学习者照常做决定但什么都不学。返回每手的总分
+// 天末考试：每手基准手打一次（另一个服务、另一份数据目录，不进练习日志），学习者照常做决定但什么都不学。
+// 返回 { totals, abandoned }：每手的总分；没法结算的一手（遇到服务不支持的提示）记 0 分，abandoned 是这种手的数目
 async function exam(service, learner, deck, clock, benchmarks, rng) {
   const frozen = { ...learner, rng, params: { ...learner.params, exposeP: 0 } };
   const totals = [];
+  let abandoned = 0;
   for (const b of benchmarks) {
-    const { settlement } = await playHand(service, frozen, deck, clock, { seed: b.seed, hints: false });
-    totals.push(settlement.total);
+    const played = await playHand(service, frozen, deck, clock, { seed: b.seed, hints: false });
+    if (played.abandoned) abandoned++;
+    totals.push(played.abandoned ? 0 : played.settlement.total);
   }
-  return totals;
+  return { totals, abandoned };
 }
 
 const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
@@ -84,12 +90,12 @@ export async function runLearner({ deck, open, profile, params, regimen, seed, d
   const api = call(practice.service);
   const benchmarks = practice.service.benchmarks;
   const benchmarkKeys = new Set(benchmarks.map((b) => handKey(b.hand)));
-  const out = { exams: [], hands: 0, benchmarkHands: 0, hints: 0, reviews: 0, answers: 0, studied: 0 };
+  const out = { exams: [], hands: 0, abandoned: 0, benchmarkHands: 0, hints: 0, reviews: 0, answers: 0, studied: 0 };
   let cursor = 0; // 看路线看到哪一步了（第二天接着看）
   const examAt = async (day) => {
     clock.t = SIM_START + day * DAY_MS + EXAM_HOUR_MS;
-    const totals = await exam(examSide.service, learner, deck, clock, benchmarks, rngFrom((seed ^ Math.imul(day + 1, 0x9E3779B1)) >>> 0));
-    out.exams.push({ day, mean: mean(totals), totals });
+    const { totals, abandoned } = await exam(examSide.service, learner, deck, clock, benchmarks, rngFrom((seed ^ Math.imul(day + 1, 0x9E3779B1)) >>> 0));
+    out.exams.push({ day, mean: mean(totals), totals, abandoned });
   };
   if (examDays.includes(0)) await examAt(0);
   for (let day = 1; day <= days; day++) {
@@ -118,9 +124,10 @@ export async function runLearner({ deck, open, profile, params, regimen, seed, d
     }
     while (clock.t < dayEnd) {
       const dealt = nextDeal(deck, practice.store.readHands(), { seed: Math.floor(rng() * 2 ** 32), benchmarks, weakDealing: regimen.weakDealing, candidateSeed: (r) => pool[Math.floor(r() * pool.length)] });
-      const { settlement, keys, hints } = await playHand(practice.service, learner, deck, clock, { seed: dealt.seed, hints: regimen.hints });
-      out.hands++;
+      const { settlement, keys, hints, abandoned } = await playHand(practice.service, learner, deck, clock, { seed: dealt.seed, hints: regimen.hints });
       out.hints += hints;
+      if (abandoned) { out.abandoned++; continue; } // 作废的一手不占基准手的位置，也没有结算可看
+      out.hands++;
       if (dealt.benchmark || benchmarkKeys.has(handKey(settlement.hand))) out.benchmarkHands++;
       clock.t += regimen.review ? REVIEW_MS : SCORE_LOOK_MS;
       if (regimen.review && learnFromReview(learner, settlement, clock.t)) out.reviews++;
