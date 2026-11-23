@@ -379,7 +379,7 @@ function Scatter({ home }) {
       h("stop", { offset: 0, stopColor: "#c8ff3d", stopOpacity: 0.26 }), h("stop", { offset: 1, stopColor: "#c8ff3d", stopOpacity: 0 }))),
     h("rect", { x: x(0), y: y(1), width: x(NO_BONUS_S) - x(0), height: y(SPEED_MIN) - y(1), fill: "url(#yg-zone)" }),
     // the bonus at the two ends of the slope sits under the time axis, away from the dots
-    [[FULL_BONUS_S, "+20"], [NO_BONUS_S, "+0"]].map(([s, t]) => h("text", { key: s, x: x(s), y: H - B + 38, textAnchor: "middle", fontSize: 11, fill: "#c8ff3d", className: "yg-mono" }, `速度加成 ${t}`)),
+    [[FULL_BONUS_S, "+20"], [NO_BONUS_S, "+0"]].map(([s, t]) => h("text", { key: s, x: x(s), y: H - B + 38, textAnchor: s === NO_BONUS_S ? "end" : "middle", fontSize: 11, fill: "#c8ff3d", className: "yg-mono" }, `速度加成 ${t}`)),
     h("line", { x1: L, x2: W - R, y1: y(SPEED_MIN), y2: y(SPEED_MIN), stroke: "#6f8f2a", strokeDasharray: "4 4" }),
     h("line", { x1: L, x2: W - R, y1: y(0.5), y2: y(0.5), stroke: "#333" }),
     h("path", { d: `M${L},${T}V${H - B}H${W - R}`, fill: "none", stroke: "#8a8a8a" }),
