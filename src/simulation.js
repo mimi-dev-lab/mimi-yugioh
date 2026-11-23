@@ -69,7 +69,7 @@ async function playHand(service, learner, deck, clock, { seed, hints: canHint })
   return { settlement, units, hints, abandoned: false };
 }
 
-// 天末考试：每手基准手打一次（另一个服务、另一份数据目录，不进练习日志），学习者照常做决定但什么都不学。
+// 天末考试：每手基准手打一次（新开的服务和数据目录，不进练习日志、也没有以前考试的记录），学习者照常做决定但什么都不学。
 // 返回 { totals, abandoned }：每手的总分；没法结算的一手（遇到服务不支持的提示）记 0 分，abandoned 是这种手的数目
 async function exam(service, learner, deck, clock, benchmarks, rng) {
   const frozen = { ...learner, rng, params: { ...learner.params, exposeP: 0 } };
@@ -85,12 +85,13 @@ async function exam(service, learner, deck, clock, benchmarks, rng) {
 
 const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
 
-// 跑一个学习者。open(now) 返回 { practice: { service, store }, exam: { service } }：两份服务都用 now 当「现在」。
+// 跑一个学习者。open(now) 返回 { practice: { service, store }, openExam: () => ({ service }) }：服务都用 now 当「现在」。
+// 每次考试用 openExam() 开一份新的服务和数据目录：结算的基准含「这手牌的个人最好」，考试的数据目录要是留着以前的考试，学习者以前打得好的基准手就会越考越难，分数随考试次数变
 // profile / params：src/sim-learner.js 的画像和参数；regimen：REGIMENS 的一项；seed：这个学习者的种子（同一个种子同一个结果）；
 // pool：练习手从这组种子里抽（预先搜好最好路线的）；game8Steps：Game8 路线的每一步 [{ summary, index（第几步）, handType（这条路线起手的类型）}]（看路线的练法用）；examDays：哪几天考（0 = 练之前）
 export async function runLearner({ deck, open, profile, params, regimen, seed, days, examDays, pool, game8Steps = [] }) {
   const clock = { t: SIM_START };
-  const { practice, exam: examSide } = open(() => clock.t);
+  const { practice, openExam } = open(() => clock.t);
   const rng = rngFrom(seed);
   const learner = createLearner(profile, params, rng);
   const api = call(practice.service);
@@ -100,7 +101,7 @@ export async function runLearner({ deck, open, profile, params, regimen, seed, d
   let cursor = 0; // 看路线看到哪一步了（第二天接着看）
   const examAt = async (day) => {
     clock.t = SIM_START + day * DAY_MS + EXAM_HOUR_MS;
-    const { totals, abandoned } = await exam(examSide.service, learner, deck, clock, benchmarks, rngFrom((seed ^ Math.imul(day + 1, 0x9E3779B1)) >>> 0));
+    const { totals, abandoned } = await exam(openExam().service, learner, deck, clock, benchmarks, rngFrom((seed ^ Math.imul(day + 1, 0x9E3779B1)) >>> 0));
     out.exams.push({ day, mean: mean(totals), totals, abandoned });
   };
   if (examDays.includes(0)) await examAt(0);

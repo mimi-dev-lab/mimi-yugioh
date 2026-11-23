@@ -17,14 +17,14 @@ const NOW = Date.UTC(2026, 11, 1);
 const md = (code) => BRANDED.cards[code].md;
 
 // 一个学习者跑两天：每次都是新的临时数据目录
-async function runOnce({ seed = 3, regimen = 'full', profile = 'player' } = {}) {
+async function runOnce({ seed = 3, regimen = 'full', profile = 'player', examDays = [0, 2] } = {}) {
   const root = await dataDir();
   let n = 0;
   const open = (now) => {
     const side = () => { const store = openStore(`${root}/${++n}`); let t = 0; return { store, service: openService({ deck: BRANDED, store, engine: () => engine, now, searchMs: 0, hintBudgetMs: 300, searchNow: () => ++t }) }; };
-    return { practice: side(), exam: side() };
+    return { practice: side(), openExam: side };
   };
-  return runLearner({ deck: BRANDED, open, profile: PROFILES[profile], params: PARAMS, regimen: REGIMENS[regimen], seed, days: 2, examDays: [0, 2], pool: [11, 12, 13, 14, 15] });
+  return runLearner({ deck: BRANDED, open, profile: PROFILES[profile], params: PARAMS, regimen: REGIMENS[regimen], seed, days: 2, examDays, pool: [11, 12, 13, 14, 15] });
 }
 
 describe('模拟学习者的实验', () => {
@@ -36,6 +36,12 @@ describe('模拟学习者的实验', () => {
     assert.equal(a.exams[0].totals.length, benchmarkHands(BRANDED).length);
     assert.ok(a.hands > 0 && a.answers > 0); // 完整系统：打了练习手，也记了卡
     assert.notDeepEqual(await runOnce({ seed: 4 }), a);
+  });
+
+  test('考试分数不随考了几次变：第 2 天的考试，前面考没考第 1 天都一样（每次考试新开数据目录，个人最好不带到下一次）', async () => {
+    const twice = await runOnce({ examDays: [0, 2] });
+    const thrice = await runOnce({ examDays: [0, 1, 2] });
+    assert.deepEqual(thrice.exams.find((e) => e.day === 2), twice.exams.find((e) => e.day === 2));
   });
 
   test('只随机打只给分：不记卡、不要提示、不看复盘；练习里没有基准手（基准手只在考试里打）', async () => {
@@ -52,7 +58,7 @@ describe('遇到服务还不支持的引擎提示', () => {
       benchmarks: benchmarkHands(BRANDED),
       handle: async (method, path) => (path === '/hand/start' ? [200, { status: 'playing', board: { hand: [] }, prompt: { kind: 'unsupported', options: [] } }] : [500, { error: `不该调 ${method} ${path}` }]),
     };
-    const open = () => ({ practice: { service, store: { readHands: () => [] } }, exam: { service } });
+    const open = () => ({ practice: { service, store: { readHands: () => [] } }, openExam: () => ({ service }) });
     const r = await runLearner({ deck: BRANDED, open, profile: PROFILES.player, params: PARAMS, regimen: REGIMENS.random, seed: 1, days: 0, examDays: [0], pool: [1] });
     assert.deepEqual(r.exams[0], { day: 0, mean: 0, totals: Array(8).fill(0), abandoned: 8 });
   });

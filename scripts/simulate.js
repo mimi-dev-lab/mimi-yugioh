@@ -93,7 +93,8 @@ async function worker() {
         const store = { ...own, readSearch: shared.readSearch, writeSearch: shared.writeSearch }; // 搜索缓存全体共用（预先搜好的练习池），日志各自一份
         return { store, service: openService({ deck: DECK, store, engine: async () => engine, now, searchMs: 0, hintBudgetMs: hintBudget, searchNow: tickClock() }) };
       };
-      return { practice: side('practice'), exam: side('exam') };
+      let exams = 0;
+      return { practice: side('practice'), openExam: () => side(`exam-${++exams}`) };
     };
     const params = { ...PARAMS, ...(job.variant ? { [job.variant.param]: PARAMS[job.variant.param] * job.variant.factor } : {}) };
     const started = Date.now();
