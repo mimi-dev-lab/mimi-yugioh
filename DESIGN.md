@@ -141,6 +141,9 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 - 练习手从预先搜好的练习池（`scripts/simulate.js` 的 `POOL_SIZE` 手）里抽：`nextDeal` / `pickPractice` 的 `candidateSeed` 换候选种子的来源；`weakDealing: false` 时每类权重都是 1（去掉按弱点发牌）。产品里两个选项都用默认。
 - `searchCache.ensure` 返回这次搜索的 Promise（没开新搜索是 null），预先搜练习池时等它；服务不等。
 - 模拟服务的 `searchMs` 是 0：只读共用的搜索缓存，不在后台搜，所以结果不受后台搜索快慢影响。
+- 考试每次新开服务和数据目录（`runLearner` 的 `openExam()`）：结算的基准含「这手牌的个人最好」，考试留着以前的记录，打得好的基准手会越考越难。
+- 学习模型的知识单位（`use:` / `pick:` / `open:` / `principle:`）见 `src/sim-learner.js` 开头和报告的「第二版学习模型」。
+- 实验脚本每跑完一个学习者就往 `<out>/runs.jsonl` 追加一行，`--resume` 接着跑。
 
 ## 接口
 
