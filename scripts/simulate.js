@@ -3,6 +3,7 @@
 //   node scripts/simulate.js                 完整实验：主实验 + 去功能 + 敏感性，结果写进 docs/simulation/
 //   node scripts/simulate.js --smoke         冒烟：每种画像 2 个学习者、2 天、只跑主实验，结果写进临时目录后删掉
 //   node scripts/simulate.js --only main --learners 5 --timing-only    只看用时（估算完整实验要多久），不打印分数
+//   加 --resume：接着上次停下的地方跑（每跑完一个学习者就追加进 <out>/runs.jsonl，已经在里面的不重跑）
 //
 // 选项：--engine <引擎数据目录>（默认 ~/.cache/mimi-yugioh/engine）、--cache <练习池搜索缓存目录>（默认 ~/.cache/mimi-yugioh/sim-search，公开数据推出来的，可复用）、
 //       --workers <n>（默认 CPU 数 − 1）、--learners <n>（每格几个学习者，默认 100）、--out <目录>（默认 docs/simulation）。
@@ -10,13 +11,14 @@
 // 搜索和提示的时间上限按「调用一次时钟走 1 毫秒」计（约等于真实搜索一个节点 1 毫秒），所以同样的输入同样的结果，和机器快慢无关。
 // 每个学习者的数据目录在本次运行用 mkdtemp 建的临时目录里，跑完删掉；不碰 ~/.mimi-yugioh。
 import { fork } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BRANDED } from '../src/decks/branded.js';
 import { openEngine } from '../src/duel-session.js';
 import { openEngineFiles } from '../src/engine-files.js';
+import { classifyHand } from '../src/deck.js';
 import { deal, handKey, rngFrom } from '../src/hand.js';
 import { benchmarkHands } from '../src/practice.js';
 import { playRoute } from '../src/route.js';
@@ -74,7 +76,7 @@ async function worker() {
   const engine = await openEngine(openEngineFiles(engineDir));
   const shared = openStore(cacheDir);
   const game8Steps = [];
-  for (const route of DECK.routes) game8Steps.push(...(await playRoute(engine, DECK, route)).steps);
+  for (const route of DECK.routes) game8Steps.push(...(await playRoute(engine, DECK, route)).steps.map((summary, i) => ({ summary, index: i + 1, handType: classifyHand(DECK, route.hand) })));
   const tickClock = () => { let t = 0; return () => ++t; };
   process.on('message', async (msg) => {
     if (msg.type === 'search') {
@@ -120,7 +122,7 @@ async function runPool(n, env, tasks, toMessage, onDone) {
         if (m.type === 'ready') { feed(w); return; }
         if (m.error) { workers.forEach((x) => x.kill()); reject(new Error(m.error)); return; }
         results[m.id] = m.result; finished++;
-        onDone?.(finished, tasks.length);
+        onDone?.(finished, tasks.length, m.id, m.result);
         if (finished === tasks.length) { workers.forEach((x) => x.kill()); resolve(); } else feed(w);
       });
       w.on('exit', (code) => { if (code && finished < tasks.length) reject(new Error(`工人退出 ${code}`)); });
@@ -189,7 +191,7 @@ const range = (c) => `${f1(c.mean)}（${f1(c.lo)}–${f1(c.hi)}）`;
 function resultsMarkdown(s, meta) {
   const P = (id) => PROFILES[id].name;
   let md = `# 模拟学习者实验结果（脚本生成）\n\n由 \`node scripts/simulate.js\` 生成，别手改。说明和成功标准见 [../simulation-report.md](../simulation-report.md)。\n\n`;
-  md += `- 运行：${meta.command}\n- 用时：${meta.minutes} 分钟（${meta.workers} 个工人进程，${meta.jobs} 个学习者任务）\n- 每格学习者：${meta.learners}；练习池 ${meta.poolSize} 手（其中搜索超时 ${meta.poolTimedOut} 手）；基准手 8 手搜索：${meta.benchmarkStatus}\n\n`;
+  md += `- 学习模型：${meta.model}\n- 运行：${meta.command}\n- 用时：${meta.minutes} 分钟（${meta.workers} 个工人进程，${meta.jobs} 个学习者任务）\n- 每格学习者：${meta.learners}；练习池 ${meta.poolSize} 手（其中搜索超时 ${meta.poolTimedOut} 手）；基准手 8 手搜索：${meta.benchmarkStatus}\n\n`;
   md += `数字是第 ${s.days} 天天末考试的基准手平均总分（8 手的平均，再对学习者平均），括号是 95% 置信区间；差是同一个学习者种子配对的差。\n\n`;
   md += `## 结论\n\n- 成功标准（完整系统 − 只随机打 ≥ ${SUCCESS_DIFF}，三种画像都成立）：主实验 **${s.verdict.mainPass ? '成立' : '不成立'}**；敏感性 ${s.verdict.sensitivityRan ? `**${s.verdict.sensitivityPass ? '每个设置都成立' : '有设置不成立'}**` : '没跑'}；合起来 **${s.verdict.pass ? '过' : '没过'}**\n`;
   md += `- 去功能（有可测贡献 = 至少一个画像里完整系统高 ≥ ${CONTRIB_MIN} 分且配对差 95% 区间不含 0）：${Object.entries(s.contributions).map(([g, ok]) => `${REGIMENS[g].name.replace('去掉', '')} ${ok ? '有' : '**没有**'}`).join('；')}\n\n`;
@@ -249,16 +251,29 @@ async function main() {
     console.log(`练习池 ${pool.length} 手（搜索超时 ${poolTimedOut}），基准手搜索：${benchmarkStatus}，准备用了 ${Math.round((Date.now() - started) / 1000)} 秒`);
     // 2. 学习者
     const jobs = plan({ learners, only: opt('only', smoke ? 'main' : undefined), days });
+    // 每跑完一个学习者就追加一行到 runs.jsonl（中途停下不丢）；--resume 时同一个任务（同样的实验、画像、练法、参数设置、种子）已经在里面的就不再跑
+    mkdirSync(outDir, { recursive: true });
+    const runsFile = join(outDir, 'runs.jsonl');
+    const jobKey = (j) => JSON.stringify([j.exp, j.profile, j.regimen, j.variant, j.seed, j.days, j.examDays]);
+    const done = new Map();
+    if (flag('resume') && existsSync(runsFile)) for (const line of readFileSync(runsFile, 'utf8').split('\n').filter(Boolean)) { const r = JSON.parse(line); done.set(jobKey(r.job), r.result); }
+    else writeFileSync(runsFile, '');
+    const todo = jobs.filter((j) => !done.has(jobKey(j))).map((j, id) => ({ ...j, id, planId: j.id }));
     const simStarted = Date.now();
-    console.log(`${jobs.length} 个学习者任务，${workers} 个工人`);
-    const results = await runPool(workers, env, jobs, (job) => ({ type: 'learner', job, pool }), (done, all) => { if (done % 100 === 0 || done === all) console.log(`  ${done}/${all}  ${Math.round((Date.now() - simStarted) / 1000)} 秒`); });
+    console.log(`${jobs.length} 个学习者任务（已有 ${jobs.length - todo.length} 个），${workers} 个工人`);
+    await runPool(workers, env, todo, (job) => ({ type: 'learner', job, pool }), (n, all, id, result) => {
+      const { id: _id, planId: _plan, ...job } = todo[id];
+      appendFileSync(runsFile, `${JSON.stringify({ job, result })}\n`);
+      done.set(jobKey(todo[id]), result);
+      if (n % 100 === 0 || n === all) console.log(`  ${n}/${all}  ${Math.round((Date.now() - simStarted) / 1000)} 秒`);
+    });
+    const results = jobs.map((j) => done.get(jobKey(j)));
     const ms = results.map((r) => r.ms).sort((a, b) => a - b);
     console.log(`学习者用时：每个中位 ${ms[Math.floor(ms.length / 2)]} 毫秒、最长 ${ms.at(-1)} 毫秒；全部 ${Math.round((Date.now() - simStarted) / 1000)} 秒`);
     if (timingOnly) return;
     const summary = summarize(jobs, results, days);
     const minutes = ((Date.now() - started) / 60000).toFixed(1);
-    const meta = { command: `\`node scripts/simulate.js ${args.join(' ')}\``.replace(' `', '`'), minutes, workers, jobs: jobs.length, learners, poolSize, poolTimedOut, benchmarkStatus };
-    mkdirSync(outDir, { recursive: true });
+    const meta = { model: 'v2：可迁移的知识单位（docs/simulation-report.md「第二版学习模型」）', command: `\`node scripts/simulate.js ${args.join(' ')}\``.replace(' `', '`'), minutes, workers, jobs: jobs.length, learners, poolSize, poolTimedOut, benchmarkStatus };
     writeFileSync(join(outDir, 'results.json'), `${JSON.stringify({ meta, ...summary }, null, 1)}\n`);
     writeFileSync(join(outDir, 'results.md'), resultsMarkdown(summary, meta));
     const { curvesSvg, sensitivitySvg, MAIN_COLORS, ABLATION_COLORS } = await import('./sim-charts.js');

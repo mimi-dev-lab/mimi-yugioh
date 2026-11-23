@@ -6,7 +6,7 @@ import { BRANDED } from '../src/decks/branded.js';
 import { benchmarkHands, nextDeal, pickPractice } from '../src/practice.js';
 import { openSearchCache } from '../src/search-cache.js';
 import { openService } from '../src/service.js';
-import { PARAMS, PROFILES, createLearner, decide, knows, learnFromReview, learnFromScore, stepItems, study } from '../src/sim-learner.js';
+import { PARAMS, PROFILES, createLearner, decide, knows, learnFromQuiz, learnFromReview, learnFromScore, stepUnits, study } from '../src/sim-learner.js';
 import { REGIMENS, runLearner } from '../src/simulation.js';
 import { openStore } from '../src/store.js';
 import { rngFrom } from '../src/hand.js';
@@ -50,7 +50,7 @@ describe('遇到服务还不支持的引擎提示', () => {
   test('考试里这一手没法结算：记 0 分并计数（用户在这里也只能开下一手）', async () => {
     const service = {
       benchmarks: benchmarkHands(BRANDED),
-      handle: async (method, path) => (path === '/hand/start' ? [200, { status: 'playing', prompt: { kind: 'unsupported', options: [] } }] : [500, { error: `不该调 ${method} ${path}` }]),
+      handle: async (method, path) => (path === '/hand/start' ? [200, { status: 'playing', board: { hand: [] }, prompt: { kind: 'unsupported', options: [] } }] : [500, { error: `不该调 ${method} ${path}` }]),
     };
     const open = () => ({ practice: { service, store: { readHands: () => [] } }, exam: { service } });
     const r = await runLearner({ deck: BRANDED, open, profile: PROFILES.player, params: PARAMS, regimen: REGIMENS.random, seed: 1, days: 0, examDays: [0], pool: [1] });
@@ -58,51 +58,89 @@ describe('遇到服务还不支持的引擎提示', () => {
   });
 });
 
-describe('模拟学习者的模型', () => {
-  const prompt = { kind: 'idle', options: [{ action: 'activate', code: ID.aluber, md: md(ID.aluber) }, { action: 'summon', code: ID.quem, md: md(ID.quem) }, { action: 'end-turn' }] };
+describe('模拟学习者的模型（可迁移的知识单位）', () => {
+  const opt = (action, code) => ({ action, code, md: md(code) });
+  const idle = (...options) => ({ kind: 'idle', options: [...options, { action: 'end-turn' }] });
+  const sure = (profile = PROFILES.novice) => createLearner(profile, { ...PARAMS, slip: 0, cardFloor: 1 }, rngFrom(1));
+  const many = (learner, prompt, ctx, t = NOW + 1000) => Array.from({ length: 100 }, () => decide(learner, BRANDED, prompt, t, ctx));
 
-  test('复盘、路线上的一步拆成决定点：发起的动作 + 这一步选的卡（「等 n 张」去掉）', () => {
-    assert.deepEqual(stepItems('发动 X · 选 A、B 等 4 张'), ['|发动 X', '发动 X|选 A', '发动 X|选 B']);
-    assert.deepEqual(stepItems('结束回合'), ['|结束回合']);
+  test('一步拆成知识单位：这张卡该用（带步序）、开头两步还学「这类起手先从它开始」、选的卡是它该拿的；结束回合是原则；盖放不算「该用」', () => {
+    assert.deepEqual(stepUnits(BRANDED, `发动 ${md(ID.aluber)} · 选 ${md(ID.bfusion)} 等 3 张`, 1, 'other'), [
+      { key: `use:${ID.aluber}`, code: ID.aluber, index: 1 }, { key: `open:other:${ID.aluber}`, code: ID.aluber }, { key: `pick:${ID.aluber}:${ID.bfusion}`, code: ID.bfusion, source: ID.aluber }]);
+    assert.deepEqual(stepUnits(BRANDED, `连锁发动 ${md(ID.albaz)}`, 5, 'other'), [{ key: `use:${ID.albaz}`, code: ID.albaz, index: 5 }]);
+    assert.deepEqual(stepUnits(BRANDED, '结束回合', 6, 'other'), [{ key: 'principle:end-when-done' }]);
+    assert.deepEqual(stepUnits(BRANDED, `盖放 ${md(ID.ash)}`, 2), []);
   });
 
-  test('学会的决定点会用上：学过「发动 阿鲁伯」之后，主阶段 100 次都选它，而且比不会时快', () => {
-    const params = { ...PARAMS, slip: 0, cardFloor: 1 };
-    const learner = createLearner(PROFILES.novice, params, rngFrom(1));
-    const before = Array.from({ length: 100 }, () => decide(learner, BRANDED, prompt, NOW));
-    study(learner, [`|发动 ${md(ID.aluber)}`], NOW, 1);
-    const after = Array.from({ length: 100 }, () => decide(learner, BRANDED, prompt, NOW + 1000));
-    assert.ok(before.some((d) => d.indices[0] !== 0)); // 不会时乱选
-    assert.ok(after.every((d) => d.indices[0] === 0 && d.known && !d.stuck));
-    const avg = (list) => list.reduce((s, d) => s + d.ms, 0) / list.length;
+  test('学到的「该用」在没见过的局面里也用上，并且按学到的步序先用早的；比不会时快', () => {
+    const learner = sure();
+    const prompt = idle(opt('summon', ID.quem), opt('activate', ID.aluber), opt('activate', ID.bfusion));
+    const before = many(learner, prompt, { step: 3 }, NOW);
+    study(learner, [{ key: `use:${ID.bfusion}`, code: ID.bfusion, index: 4 }, { key: `use:${ID.aluber}`, code: ID.aluber, index: 1 }], NOW, 1);
+    const after = many(learner, prompt, { step: 3 });
+    assert.ok(before.some((d) => d.indices[0] !== 1)); // 不会时乱选
+    assert.ok(after.every((d) => d.indices[0] === 1 && d.known && !d.stuck)); // 阿卢绯尔学到的步序更早
+    assert.ok(many(learner, idle(opt('summon', ID.quem), opt('activate', ID.bfusion)), { step: 3 }).every((d) => d.indices[0] === 1)); // 没有阿卢绯尔的局面：用烙印融合
+    const avg = (list) => list.reduce((x, d) => x + d.ms, 0) / list.length;
     assert.ok(avg(after) < avg(before));
+  });
+
+  test('「这类起手先从哪张开始」只在这一手的第一步、起手类型对得上时用', () => {
+    const learner = sure();
+    study(learner, [{ key: `open:other:${ID.bfusion}`, code: ID.bfusion }], NOW, 1);
+    const prompt = idle(opt('summon', ID.quem), opt('activate', ID.bfusion));
+    assert.ok(many(learner, prompt, { step: 0, handType: 'other' }).every((d) => d.indices[0] === 1));
+    assert.ok(many(learner, prompt, { step: 0, handType: 'brick' }).some((d) => d.indices[0] !== 1));
+  });
+
+  test('选卡：学到「这张卡该拿什么」就拿它，换了别的选项组合也一样', () => {
+    const learner = sure();
+    study(learner, [{ key: `pick:${ID.aluber}:${ID.bfusion}`, code: ID.bfusion, source: ID.aluber }], NOW, 1);
+    const source = { code: ID.aluber, md: md(ID.aluber), action: '发动' };
+    assert.ok(many(learner, { kind: 'pick-one', source, options: [opt('select', ID.ash), opt('select', ID.albaz), opt('select', ID.bfusion)] }).every((d) => d.indices[0] === 2));
+    assert.ok(many(learner, { kind: 'cards', min: 1, max: 1, source, options: [opt('select', ID.bfusion), opt('select', ID.quem)] }).every((d) => d.indices.join() === '0'));
+  });
+
+  test('原则：想起「手坑留在手里」、认识灰流丽时，不召唤它；想起「用完就结束」时，走过一步以后想不起别的就结束回合', () => {
+    const learner = sure();
+    for (let i = 0; i < 3; i++) learnFromQuiz(learner, ID.ash, 'Easy', NOW + i * 1000);
+    study(learner, [{ key: 'principle:keep-handtraps' }], NOW, 1);
+    const prompt = idle(opt('summon', ID.ash), opt('summon', ID.quem));
+    assert.ok(many(learner, prompt, { step: 1 }, NOW + 5000).every((d) => d.indices[0] !== 0));
+    study(learner, [{ key: 'principle:end-when-done' }], NOW, 1);
+    assert.ok(many(learner, prompt, { step: 1 }, NOW + 5000).every((d) => d.indices[0] === 2));
+    assert.ok(many(learner, prompt, { step: 0 }, NOW + 5000).some((d) => d.indices[0] !== 2)); // 一步都没走时不结束
   });
 
   test('会忘：记性差的画像隔 30 天想起来的概率比普通画像低', () => {
     const normal = createLearner(PROFILES.player, PARAMS, rngFrom(1));
     const weak = createLearner(PROFILES.forgetful, PARAMS, rngFrom(1));
-    for (const l of [normal, weak]) study(l, ['|发动 X'], NOW, 1);
+    for (const l of [normal, weak]) study(l, [{ key: 'use:1', code: 1, index: 1 }], NOW, 1);
     const later = NOW + 30 * 86400000;
-    assert.ok(knows(weak, '|发动 X', later) < knows(normal, '|发动 X', later));
-    assert.ok(knows(normal, '|发动 X', later) < knows(normal, '|发动 X', NOW + 1000));
+    assert.ok(knows(weak, 'use:1', later) < knows(normal, 'use:1', later));
+    assert.ok(knows(normal, 'use:1', later) < knows(normal, 'use:1', NOW + 1000));
   });
 
-  test('复盘学的是走偏的那一步；一直没走偏但停得早就学最好路线的下一步；场面分 100 不学', () => {
-    const settle = (over) => ({ fieldScore: 50, steps: [{}, {}], bestSteps: [{ summary: '发动 A' }, { summary: '发动 B · 选 C' }, { summary: '发动 D' }], divergeStep: 2, ...over });
-    const learner = () => createLearner(PROFILES.player, { ...PARAMS, learnP: 1 }, rngFrom(1));
+  test('复盘学走偏的那一步（停得早就学下一步，场面分 100 不学）；自己那步用了认得出的手坑，还学「手坑留在手里」', () => {
+    const best = [{ summary: `发动 ${md(ID.aluber)}` }, { summary: `发动 ${md(ID.bfusion)} · 选 ${md(ID.albaz)}` }, { summary: '结束回合' }];
+    const settle = (over) => ({ fieldScore: 50, handTypeStats: { type: 'other' }, steps: [{ summary: `发动 ${md(ID.aluber)}` }, { summary: `召唤 ${md(ID.ash)}` }], bestSteps: best, divergeStep: 2, ...over });
+    const learner = () => { const l = createLearner(PROFILES.player, { ...PARAMS, learnP: 1 }, rngFrom(1)); for (let i = 0; i < 3; i++) learnFromQuiz(l, ID.ash, 'Easy', NOW - 5000 + i * 1000); return l; };
     const l1 = learner();
-    assert.equal(learnFromReview(l1, settle(), NOW), '发动 B · 选 C');
-    assert.deepEqual([...l1.decisions.keys()], ['|发动 B', '发动 B|选 C']);
-    assert.equal(learnFromReview(learner(), settle({ divergeStep: null }), NOW), '发动 D');
-    assert.equal(learnFromReview(learner(), settle({ fieldScore: 100 }), NOW), null);
-    assert.equal(learnFromReview(learner(), settle({ bestSteps: null }), NOW), null);
+    assert.equal(learnFromReview(l1, BRANDED, settle(), NOW), best[1].summary);
+    assert.deepEqual([...l1.decisions.keys()].sort(), [`open:other:${ID.bfusion}`, `pick:${ID.bfusion}:${ID.albaz}`, 'principle:keep-handtraps', `use:${ID.bfusion}`].sort());
+    const l2 = learner();
+    assert.equal(learnFromReview(l2, BRANDED, settle({ divergeStep: null, steps: settle().steps.slice(0, 2) }), NOW), '结束回合');
+    assert.ok(l2.decisions.has('principle:end-when-done'));
+    assert.equal(learnFromReview(learner(), BRANDED, settle({ fieldScore: 100 }), NOW), null);
+    assert.equal(learnFromReview(learner(), BRANDED, settle({ bestSteps: null }), NOW), null);
   });
 
-  test('只看分数：总分到 80 才回想自己的做法', () => {
+  test('只看分数：总分到 80 才回想自己这手的做法', () => {
     const l = createLearner(PROFILES.player, { ...PARAMS, selfP: 1 }, rngFrom(1));
-    learnFromScore(l, 79, ['|发动 X'], NOW);
+    const units = [{ key: 'use:1', code: 1, index: 1 }];
+    learnFromScore(l, 79, units, NOW);
     assert.equal(l.decisions.size, 0);
-    learnFromScore(l, 80, ['|发动 X'], NOW);
+    learnFromScore(l, 80, units, NOW);
     assert.equal(l.decisions.size, 1);
   });
 });
