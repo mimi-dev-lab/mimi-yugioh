@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { before, describe, test } from 'node:test';
-import { startSession } from '../src/duel-session.js';
+import { BRANDED } from '../src/decks/branded.js';
+import { openHandSession, startSession } from '../src/duel-session.js';
+import { indicesFor } from '../src/route.js';
 import { ID, PROBE_DUEL, drive, openTestEngine } from './helpers.js';
 
 const PLAN = () => [
@@ -72,5 +74,25 @@ describe('决斗会话', () => {
     assert.ok(s.endBoard);
     assert.equal(s.endBoard.hand.length, handBefore);
     s.close();
+  });
+
+  // 展开中屏要能点到额外卡组、墓地里的卡：引擎给的主阶段选项带这张卡所在的区域和序号，要和 board() 里那张卡对得上
+  test('主阶段的选项里有墓地（烙印断罪）的卡，区域和序号对得上 board()', async () => {
+    const OPENING = 36637374, RED = 82738008, QUEM = 45883110, RETRIBUTION = 17751597, FILLER = [48130397, 75500286, 94145021];
+    const session = await openHandSession(engine, BRANDED, [OPENING, RED, ...FILLER], 3);
+    const inBoard = (zone, o) => session.board()[zone].some((c) => c.code === o.code && c.sequence === o.sequence);
+    const idle = () => session.prompt().options.filter((o) => o.location !== undefined);
+    const reply = (r) => session.choose(indicesFor(session.prompt(), r));
+    while (session.prompt().kind !== 'idle') reply('pass'); // 开场的连锁窗口放行
+    for (const r of [{ idle: 'activate', code: OPENING }, { place: 0 }, 'pass', { pick: [RED] }, { pick: [QUEM] }, { option: 0 }, 'pass', { idle: 'summon', code: QUEM }, { place: 0 }, 'pass', 'yes', 'pass', { pick: [RETRIBUTION] }, 'pass']) reply(r);
+    assert.equal(session.prompt().kind, 'idle');
+    const fromGrave = idle().find((o) => o.location === 0x10);
+    assert.equal(fromGrave?.code, RETRIBUTION);
+    assert.equal(fromGrave.action, 'activate');
+    assert.ok(inBoard('grave', fromGrave), '墓地里的这张卡在 board().grave 里');
+    reply({ idle: 'activate', code: RETRIBUTION }); // 照常提交：引擎接受
+    assert.deepEqual(session.board().banished.map((c) => c.code), [RETRIBUTION]); // 效果把它自己除外作代价
+    assert.ok(!session.board().grave.some((c) => c.code === RETRIBUTION));
+    session.close();
   });
 });

@@ -26,6 +26,9 @@ src/engine-files.js  读引擎数据：cards.cdb（node:sqlite）和卡牌脚本
 scripts/prepare-engine.js  把固定版本的 Project Ignis CardScripts 和 BabelCDB 的 cards.cdb 下载到引擎数据目录（唯一联网的地方）
 scripts/fetch-card-names.js  按日文卡名向 ygocdb 查密码和简中名（md_name），整理卡组数据时手动跑；服务不联网
 scripts/sync-card-images.js  把卡组用到的卡图从 NAS 经 ssh（stat + tar）复制到数据目录 images/；手动跑，`--dry-run` 只打出要复制的文件数
+launchd/             在 mac mini 上常驻用的 launchd 配置 jp.lifan.mimi-yugioh（见「在 mini 上常驻」）
+scripts/deploy.js    部署到 mini：导出 origin/main、核对、装依赖、换上、只重启自己的任务、冒烟；`--dry-run` 只演练
+scripts/smoke.js     线上冒烟（只读）：部署的版本、/health、/home、/cards、引擎数据、卡组用到的卡图
 scripts/plugin-setup  把插件链进 Hermes 的插件目录（`--home <目录>` 沙盒用；`--live` 是上线那一步，单独一张票，要用户点头）
 scripts/plugin-smoke.sh  ./ci 的插件冒烟：临时 Hermes 网页工作区里开始一手、点卡、发动、回答提示、结束回合
 scripts/simulate.js  手动跑的模拟学习者实验（练习池预先搜索、多进程、出 docs/simulation/ 的表和图）；`--smoke` 是 ./ci 的冒烟。图在 scripts/sim-charts.js
@@ -46,7 +49,27 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 | `YUGIOH_SEARCH_MS` | `60000`（`SEARCH_BUDGET_MS`） | 一手的搜索时间上限（毫秒）；`0` = 不搜索（开局不起后台搜索，结算的搜索状态是 `none`，测打一手本身时用它）；提示的上限 `HINT_BUDGET_MS` 不受它影响 |
 | `YUGIOH_ENGINE` | `$YUGIOH_DATA/engine` | 引擎数据目录（卡库、脚本）；测试和 `./ci` 用 `~/.cache/mimi-yugioh/engine` |
 | `YUGIOH_URL` | `http://127.0.0.1:4519` | 插件后端转发到哪个服务（只许本机）；在 Hermes 网关的环境里设 |
+| `YUGIOH_DEPLOY_DIR`、`YUGIOH_AGENTS_DIR`、`YUGIOH_LAUNCHCTL`、`YUGIOH_NPM`、`YUGIOH_SMOKE_BASE`、`YUGIOH_LOG` | mini 上的真实位置 | 只给部署、冒烟的演练换成临时的（部署目录、LaunchAgents 目录、launchctl 和 npm 命令、冒烟连的地址、日志） |
 | `YUGIOH_NAS`、`YUGIOH_NAS_IMAGES` | `lifan222@192.168.10.124`、`mimi-projects/mimi-yugioh/images/cn` | 只有 `scripts/sync-card-images.js` 读：NAS 的 ssh 地址和卡图目录（相对它的家目录） |
+
+## 在 mini 上常驻
+
+游戏王服务在 mac mini 上由 launchd 常驻（`launchd/jp.lifan.mimi-yugioh.plist`，`RunAtLoad` + `KeepAlive`），只监听 `127.0.0.1:4519`。**没有自己的网页、不加 tailscale 转发**：给用户的入口只有 Hermes 网页工作区里的插件「游戏王」，插件后端在同一台机器上转给 4519。服务不往外发请求。
+
+跑的是部署目录 `~/Library/Application Support/MimiYugioh/` 里的那份，不跟着仓的 checkout 变；数据目录 `~/.mimi-yugioh/`（日志、`engine/`、`images/`）在部署目录之外，换部署不动它。部署：在仓里跑 `npm run deploy`（部署 `origin/main`；`npm run deploy -- <提交>` 部署别的提交，回滚就是部署上一个 sha）。它做的事（`scripts/deploy.js`）：
+
+1. 部署 `origin/…` 时先 `git fetch`，取要部署的提交的 sha；
+2. `git archive` 导出到部署目录旁边的新目录，和提交逐文件比对（字节相同、不多不少），不一致就停下并写明少了、多了或不一样的文件；
+3. 在新目录里 `npm ci --omit=dev --ignore-scripts`（`git archive` 不带 `node_modules`；这是部署唯一联网的一步，装 `ocgcore-wasm`、`ts-fsrs`）；装不上就停在这，原来的那份没动；
+4. 写 `DEPLOYED`（部署的 sha），把新目录整体换上、旧的删掉；换的时候失败就把原来的放回去，不留下临时目录；
+5. 刚部署的那份 plist 和 `~/Library/LaunchAgents/` 里的一样就只 `launchctl kickstart -k gui/<uid>/jp.lifan.mimi-yugioh`，不一样就拷过去再 `bootout` + `bootstrap`（`bootstrap` 失败隔一秒再试，最多三次）；只动 `jp.lifan.mimi-yugioh`；
+6. 跑冒烟，退出码跟冒烟。
+
+`--dry-run` 只做 1、2（导出到系统临时目录核对完就删），再打出 3–6 真跑时会做的事；不写部署目录、不装依赖、不碰 launchd、不冒烟。
+
+冒烟（`npm run smoke`，`scripts/smoke.js`）只读、不开始一手：`DEPLOYED` 等于期望的 sha（默认 `origin/main`）；`127.0.0.1:4519` 的 `/health`（`{ok:true}`）、`/home`（读结算日志，打出手数不打内容）、`/cards` 都 200；引擎数据目录有 `VERSION`；卡组用到的每张卡图经 `/card-image` 都读得到（缺了只提醒：页面改写卡名）；服务日志超过 10 MB 时提醒。输出一行一项「通过 / 失败 / 提醒」，有失败就非 0。
+
+日志在 `~/Library/Logs/mimi-yugioh.log`。查跑的是哪个版本：`cat "$HOME/Library/Application Support/MimiYugioh/DEPLOYED"`。node 用 mise 装的绝对路径（`…/mise/installs/node/22/bin/node`，`22` 是指向当前小版本的软链接）；服务不读 iCloud，不要完全磁盘访问权限，也不连 NAS（卡图由 `sync-card-images.js` 手动复制进 `images/`）。上线的整个顺序（准备数据、部署、装插件、回退）见 README「上线清单」。
 
 ## 引擎数据
 
