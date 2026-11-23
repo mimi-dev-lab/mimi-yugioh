@@ -1,6 +1,6 @@
 # 模拟学习者实验结果（脚本生成）
 
-由 `node scripts/simulate.js` 生成，别手改。说明和成功标准见 [../simulation-report.md](../simulation-report.md)。
+由 `node scripts/simulate.js` 生成，别手改。**这一份的考试有缺陷**：每个学习者的考试共用一份数据目录，结算基准里的「个人最好」跨天累积，学习者以前打得好的基准手越考越难；修好之后重跑的结果在 [../simulation/results.md](../simulation/results.md)。说明和成功标准见 [../simulation-report.md](../simulation-report.md)。
 
 - 学习模型：v2：可迁移的知识单位（docs/simulation-report.md「第二版学习模型」）
 - 运行：`node scripts/simulate.js --only main --resume`
