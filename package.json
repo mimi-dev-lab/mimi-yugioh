@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
-    "prepare-engine": "node scripts/prepare-engine.js"
+    "prepare-engine": "node scripts/prepare-engine.js",
+    "deploy": "node scripts/deploy.js",
+    "smoke": "node scripts/smoke.js"
   },
   "engines": {
     "node": ">=22"
