@@ -194,7 +194,7 @@ function resultsMarkdown(s, meta) {
   md += `- 学习模型：${meta.model}\n- 运行：${meta.command}\n- 用时：${meta.minutes} 分钟（${meta.workers} 个工人进程，${meta.jobs} 个学习者任务）\n- 每格学习者：${meta.learners}；练习池 ${meta.poolSize} 手（其中搜索超时 ${meta.poolTimedOut} 手）；基准手 8 手搜索：${meta.benchmarkStatus}\n\n`;
   md += `数字是第 ${s.days} 天天末考试的基准手平均总分（8 手的平均，再对学习者平均），括号是 95% 置信区间；差是同一个学习者种子配对的差。\n\n`;
   md += `## 结论\n\n- 成功标准（完整系统 − 只随机打 ≥ ${SUCCESS_DIFF}，三种画像都成立）：主实验 **${s.verdict.mainPass ? '成立' : '不成立'}**；敏感性 ${s.verdict.sensitivityRan ? `**${s.verdict.sensitivityPass ? '每个设置都成立' : '有设置不成立'}**` : '没跑'}；合起来 **${s.verdict.pass ? '过' : '没过'}**\n`;
-  md += `- 去功能（有可测贡献 = 至少一个画像里完整系统高 ≥ ${CONTRIB_MIN} 分且配对差 95% 区间不含 0）：${Object.entries(s.contributions).map(([g, ok]) => `${REGIMENS[g].name.replace('去掉', '')} ${ok ? '有' : '**没有**'}`).join('；')}\n\n`;
+  md += `- 去功能（有可测贡献 = 至少一个画像里完整系统高 ≥ ${CONTRIB_MIN} 分且配对差 95% 区间不含 0）：${Object.keys(s.ablation).length ? Object.entries(s.contributions).map(([g, ok]) => `${REGIMENS[g].name.replace('去掉', '')} ${ok ? '有' : '**没有**'}`).join('；') : '这次没跑'}\n\n`;
   md += `## 主实验\n\n| 画像 | 完整系统 | 只随机打只给分 | 先看 Game8 路线 | 完整 − 只随机打 | 完整 − Game8 |\n|---|---|---|---|---|---|\n`;
   for (const p of Object.keys(s.main)) {
     const m = s.main[p]; const end = (g) => m[g].at(-1);
