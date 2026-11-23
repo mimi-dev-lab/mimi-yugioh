@@ -355,32 +355,37 @@ const typeColor = (id) => TYPE_COLOR[id] ?? "#bdbdbd";
 const FULL_BONUS_S = 60;
 const NO_BONUS_S = 300;
 const SPEED_MIN = 0.9;
+const Y_MIN = 0.4; // the vertical axis shows 40–100%: every point is above it in practice, and the zone is 10 points tall
 const QUICK_ANSWER_S = 5; // a quick answer in 记卡 (EASY_MS in src/quiz.js), for "about N minutes"
 
 function Scatter({ home }) {
-  const W = 820, H = 620, L = 62, R = 26, T = 40, B = 56;
+  const W = 820, H = 620, L = 62, R = 26, T = 40, B = 64;
   const spanS = Math.max(NO_BONUS_S, Math.ceil(Math.max(0, ...home.points.map((p) => p.durationMs)) / 60000) * 60);
   const x = (s) => L + (s / spanS) * (W - L - R);
-  const y = (v) => T + (1 - v) * (H - T - B);
+  const y = (v) => T + (1 - (Math.max(v, Y_MIN) - Y_MIN) / (1 - Y_MIN)) * (H - T - B);
   const step = spanS > 600 ? 120 : 60;
   const { best, last } = home;
   const same = best && last && best.number === last.number;
   const label = (p, text, dy) => {
     const right = x(p.durationMs / 1000) > W - 230;
-    return h("text", { x: x(p.durationMs / 1000) + (right ? -14 : 14), y: y(p.fieldScore / 100) + dy, textAnchor: right ? "end" : "start", fontSize: 13, fontWeight: 600, fill: text.color, stroke: "#000", strokeWidth: 4, paintOrder: "stroke", className: "yg-mono" }, text.t);
+    const tx = x(p.durationMs / 1000) + (right ? -14 : 14), ty = y(p.fieldScore / 100) + dy, w = text.t.length * 7.4 + 12;
+    // a solid plate behind the text so the dots under it do not eat the letters
+    return h("g", { key: text.t },
+      h("rect", { x: right ? tx - w + 6 : tx - 6, y: ty - 15, width: w, height: 21, rx: 4, fill: "#000", fillOpacity: 0.88, stroke: text.color, strokeOpacity: 0.5 }),
+      h("text", { x: tx, y: ty, textAnchor: right ? "end" : "start", fontSize: 13, fontWeight: 600, fill: text.color, className: "yg-mono" }, text.t));
   };
   return h("svg", { className: "yg-scatter", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "每一手的用时和场面" },
     h("defs", null, h("linearGradient", { id: "yg-zone", gradientUnits: "userSpaceOnUse", x1: x(FULL_BONUS_S), x2: x(NO_BONUS_S), y1: 0, y2: 0 },
       h("stop", { offset: 0, stopColor: "#c8ff3d", stopOpacity: 0.26 }), h("stop", { offset: 1, stopColor: "#c8ff3d", stopOpacity: 0 }))),
     h("rect", { x: x(0), y: y(1), width: x(NO_BONUS_S) - x(0), height: y(SPEED_MIN) - y(1), fill: "url(#yg-zone)" }),
-    h("text", { x: W - R - 8, y: y(SPEED_MIN) - 9, textAnchor: "end", fontSize: 13, fill: "#c8ff3d" }, "速度加成区：场面 ≥ 90%，60 秒内 +20，到 5:00 线性降为 0"),
-    [[FULL_BONUS_S, "+20"], [NO_BONUS_S, "0"]].map(([s, t]) => h("text", { key: s, x: x(s), y: y(SPEED_MIN) + 16, textAnchor: "middle", fontSize: 11, fill: "#bdbdbd", className: "yg-mono" }, t)),
+    // the bonus at the two ends of the slope sits under the time axis, away from the dots
+    [[FULL_BONUS_S, "+20"], [NO_BONUS_S, "+0"]].map(([s, t]) => h("text", { key: s, x: x(s), y: H - B + 38, textAnchor: s === NO_BONUS_S ? "end" : "middle", fontSize: 11, fill: "#c8ff3d", className: "yg-mono" }, `速度加成 ${t}`)),
     h("line", { x1: L, x2: W - R, y1: y(SPEED_MIN), y2: y(SPEED_MIN), stroke: "#6f8f2a", strokeDasharray: "4 4" }),
     h("line", { x1: L, x2: W - R, y1: y(0.5), y2: y(0.5), stroke: "#333" }),
     h("path", { d: `M${L},${T}V${H - B}H${W - R}`, fill: "none", stroke: "#8a8a8a" }),
-    [[1, "100%"], [SPEED_MIN, "90%"], [0.5, "50%"], [0, "0"]].map(([v, t]) => h("text", { key: t, x: L - 8, y: y(v) + 4, textAnchor: "end", fontSize: 12, fill: v === SPEED_MIN ? "#c8ff3d" : "#bdbdbd", className: "yg-mono" }, t)),
+    [[1, "100%"], [SPEED_MIN, "90%"], [0.7, "70%"], [0.5, "50%"], [Y_MIN, "40%"]].map(([v, t]) => h("text", { key: t, x: L - 8, y: y(v) + 4, textAnchor: "end", fontSize: 12, fill: v === SPEED_MIN ? "#c8ff3d" : "#bdbdbd", className: "yg-mono" }, t)),
     Array.from({ length: Math.floor(spanS / step) + 1 }, (_, i) => h("text", { key: i, x: x(i * step), y: H - B + 22, textAnchor: "middle", fontSize: 12, fill: "#bdbdbd", className: "yg-mono" }, clock(i * step * 1000))),
-    h("text", { x: (L + W - R) / 2, y: H - 8, textAnchor: "middle", fontSize: 12, fill: "#bdbdbd" }, "用时"),
+    h("text", { x: (L + W - R) / 2, y: H - 6, textAnchor: "middle", fontSize: 12, fill: "#bdbdbd" }, "用时"),
     home.points.length === 0 ? h("text", { x: (L + W - R) / 2, y: H / 2, textAnchor: "middle", fontSize: 15, fill: "#bdbdbd" }, "还没有记录：打完第一手，这里会出现一个点") : null,
     home.points.map((p) => h("circle", { key: p.number, cx: x(p.durationMs / 1000), cy: y(p.fieldScore / 100), r: best && p.number === best.number ? 9 : 6, fill: typeColor(p.handType), fillOpacity: 0.92 })),
     last ? h("circle", { cx: x(last.durationMs / 1000), cy: y(last.fieldScore / 100), r: 13, fill: "none", stroke: "#fff", strokeWidth: 2 }) : null,
@@ -411,6 +416,7 @@ function Home({ home, due, busy, ready, hasHand, onStart, onResume, onQuiz }) {
   return h("div", { className: "yg-dash", "aria-label": "首页" },
     h("section", { className: "yg-panel yg-chart" },
       h("div", { className: "yg-line" }, h("strong", null, "每一手：用时 × 场面"), h("span", { className: "yg-lab" }, "越往左上越好 · 一个点是一手")),
+      h("p", { className: "yg-lab yg-zonenote" }, "绿色渐变 = 速度加成区：场面 ≥ 90%，60 秒内 +20，到 5:00 线性降为 0 · 纵轴只画 40–100%"),
       home ? h(Scatter, { home }) : null),
     h("div", { className: "yg-side" },
       h("section", { className: "yg-start" },
@@ -657,6 +663,7 @@ const CSS = `
 .yg-error { border: 1px solid #ff9a6b; color: #ff9a6b; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
 .yg-dash { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: stretch; }
 .yg-panel { border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px 18px; background: #000; text-align: left; }
+.yg-zonenote { margin: 0; color: #c8ff3d; }
 .yg-chart { display: flex; flex-direction: column; gap: 6px; }
 .yg-scatter { width: 100%; height: auto; flex: 1; }
 .yg-side { display: flex; flex-direction: column; gap: 14px; }

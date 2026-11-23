@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 游戏王在 mac mini 上常驻：只听 127.0.0.1:4519，没有自己的网页、不经 tailscale 转发；给用户的入口是 Hermes 里的插件「游戏王」。
+     跑的是部署目录里的那份（origin/main 用 git archive 导出，再 npm ci --omit=dev），不跟着仓的 checkout 变。部署与验证见 DESIGN.md「在 mini 上常驻」。
+     数据目录用默认的 ~/.mimi-yugioh（YUGIOH_DATA 可换；引擎数据在它的 engine/，卡图在 images/）。node 用 mise 装的绝对路径（22 是指向当前小版本的软链接） -->
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>jp.lifan.mimi-yugioh</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/lifan/.local/share/mise/installs/node/22/bin/node</string>
+		<string>/Users/lifan/Library/Application Support/MimiYugioh/src/server.js</string>
+	</array>
+	<key>WorkingDirectory</key><string>/Users/lifan/Library/Application Support/MimiYugioh</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key><string>/usr/bin:/bin</string>
+		<key>TZ</key><string>Asia/Tokyo</string>
+	</dict>
+	<key>RunAtLoad</key><true/>
+	<key>KeepAlive</key><true/>
+	<key>ThrottleInterval</key><integer>20</integer>
+	<key>StandardOutPath</key><string>/Users/lifan/Library/Logs/mimi-yugioh.log</string>
+	<key>StandardErrorPath</key><string>/Users/lifan/Library/Logs/mimi-yugioh.log</string>
+</dict>
+</plist>
