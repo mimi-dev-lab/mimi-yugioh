@@ -91,6 +91,7 @@ describe('模拟学习者的模型（可迁移的知识单位）', () => {
     const prompt = idle(opt('summon', ID.quem), opt('activate', ID.bfusion));
     assert.ok(many(learner, prompt, { step: 0, handType: 'other' }).every((d) => d.indices[0] === 1));
     assert.ok(many(learner, prompt, { step: 0, handType: 'brick' }).some((d) => d.indices[0] !== 1));
+    assert.ok(many(learner, prompt, { step: 1, handType: 'other' }).some((d) => d.indices[0] !== 1)); // 走过一步以后不再按开局走
   });
 
   test('选卡：学到「这张卡该拿什么」就拿它，换了别的选项组合也一样', () => {
