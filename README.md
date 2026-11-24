@@ -1,12 +1,13 @@
 # mimi-yugioh
 
-游戏王 Master Duel 的烙印教程 wiki，给用户一个人看：卡组一览（每张卡的卡图、简中名、日文名、作用、效果说明），以后加上逐步播放的展开路线和起手速查。形状是 Hermes 插件 + 一个只听本机的服务；路线由规则引擎重放验证。规则、检查和设计见 [AGENTS.md](AGENTS.md)、[DESIGN.md](DESIGN.md)。规格是 #27（取代 #1 的计时练习）。
+游戏王 Master Duel 的烙印教程 wiki，给用户一个人看：卡组一览（每张卡的卡图、简中名、日文名、作用、效果说明），逐步播放的展开路线（每步的场面由引擎重放得出，终场汇总打断数），以后加上起手速查。形状是 Hermes 插件 + 一个只听本机的服务；路线由规则引擎重放验证。规则、检查和设计见 [AGENTS.md](AGENTS.md)、[DESIGN.md](DESIGN.md)。规格是 #27（取代 #1 的计时练习）。
 
 ```sh
 node scripts/prepare-engine.js                 # 下载引擎数据（卡库和卡牌脚本）到 ~/.mimi-yugioh/engine（路线重放测试用）
 YUGIOH_DATA=$(mktemp -d) npm start             # 起服务（127.0.0.1:4519）
 curl -s 127.0.0.1:4519/health
 curl -s 127.0.0.1:4519/deck                    # 卡组一览
+curl -s 127.0.0.1:4519/routes                  # 展开路线列表（服务启动时用引擎重放；引擎数据在 $YUGIOH_ENGINE，默认 ~/.mimi-yugioh/engine，缺了回 503）
 ./ci                                           # 全部检查
 ```
 
@@ -16,7 +17,7 @@ curl -s 127.0.0.1:4519/deck                    # 卡组一览
 
 ## 插件
 
-`plugin/` 是 Hermes 的磁盘插件 `yugioh`：页面 `plugin/webapp/plugin.js`（侧栏「游戏王」，路由 `/yugioh`），后端 `plugin/dashboard/plugin_api.py`（只把请求转给 `YUGIOH_URL`，默认 `http://127.0.0.1:4519`，必须是本机）。`scripts/plugin-setup --live` 只做两条软链：后端 `~/.hermes/plugins/yugioh → 本仓 plugin/`，页面 `~/.hermes/desktop-plugins/yugioh → 本仓 plugin/webapp`（链整个文件夹）；`--home <目录>` 链进别的 HERMES_HOME（验证用），`--remove` 拆掉；目标处已有别的东西就停下。注意链接指向**本仓的 checkout**（`~/work/personal/repos/mimi-yugioh`），不是部署目录：这个 checkout 要一直在，插件的改动要在这里 `git pull` 后才到线上。页面改了以后：⌘K → Reload desktop plugins；后端（`plugin_api.py`）改了要重启网关（#28 把后端的路径换成了 `/deck`、`/card-image`：部署 #28 时要让用户在独立终端跑一次 `hermes gateway restart`，不然页面取不到卡组一览）。
+`plugin/` 是 Hermes 的磁盘插件 `yugioh`：页面 `plugin/webapp/plugin.js`（侧栏「游戏王」，路由 `/yugioh`），后端 `plugin/dashboard/plugin_api.py`（只把请求转给 `YUGIOH_URL`，默认 `http://127.0.0.1:4519`，必须是本机）。`scripts/plugin-setup --live` 只做两条软链：后端 `~/.hermes/plugins/yugioh → 本仓 plugin/`，页面 `~/.hermes/desktop-plugins/yugioh → 本仓 plugin/webapp`（链整个文件夹）；`--home <目录>` 链进别的 HERMES_HOME（验证用），`--remove` 拆掉；目标处已有别的东西就停下。注意链接指向**本仓的 checkout**（`~/work/personal/repos/mimi-yugioh`），不是部署目录：这个 checkout 要一直在，插件的改动要在这里 `git pull` 后才到线上。页面改了以后：⌘K → Reload desktop plugins；后端（`plugin_api.py`）改了要重启网关（#28 把后端的路径换成了 `/deck`、`/card-image`：部署 #28 时要让用户在独立终端跑一次 `hermes gateway restart`，不然页面取不到卡组一览）；#29 又加了 `/routes`、`/route`，部署 #29 时同样要重启网关。
 
 ## 上线清单
 
@@ -55,7 +56,7 @@ scripts/plugin-setup --live
 **5. 重启网关（用户跑）。** 银月和 worker 都不能跑（会杀掉自己的进程）。让用户在**独立的终端**里跑一句：`hermes gateway restart`（后端在重启时才加载）。
 查：`hermes gateway status` 起来了；用户的 Hermes 桌面端侧栏出现「游戏王」。
 
-**6. 在真 Hermes 里验证（银月）。** 打开「游戏王」：第一个页签「卡组一览」按作用分组画出每张卡（卡图是真图），点一张卡出效果说明；手机上经 tailnet 打开同一页也能看；截图。登录后 `/api/plugins/yugioh/deck` 是 200。只读，不写线上数据。
+**6. 在真 Hermes 里验证（银月）。** 打开「游戏王」：第一个页签「卡组一览」按作用分组画出每张卡（卡图是真图），点一张卡出效果说明；手机上经 tailnet 打开同一页也能看；截图。点「展开路线」，翻完一条路线到终场汇总。登录后 `/api/plugins/yugioh/deck`、`/api/plugins/yugioh/routes` 是 200。只读，不写线上数据。
 查：`npm run smoke` 通过。
 
 **回退**（哪一步出问题就从那一步往回退；数据一直在 `~/.mimi-yugioh/`，哪一步退都不删它）：

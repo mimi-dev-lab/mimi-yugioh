@@ -127,7 +127,7 @@ function Trade({ diff }) {
 function EndSummary({ rest, end }) {
   return h("section", { className: "yg-end", "aria-label": "终场汇总" },
     h("h2", null, "终场汇总"),
-    h("div", { className: "yg-end-num" }, h("span", { className: "yg-bignum" }, end.interrupts), h("span", null, "次打断（对手回合）")),
+    h("p", { className: "yg-end-num" }, "对手回合能打断 ", h("span", { className: "yg-bignum" }, end.interrupts), " 次"),
     end.breakers.length ? h("ul", { className: "yg-breakers" }, end.breakers.map((b) => h("li", { key: b.code },
       h("strong", null, `${b.md}${b.copies > 1 ? ` ×${b.copies}` : ""}`), h("span", { className: "yg-chip on" }, `打断 ${b.interrupts}`), h("span", { className: "yg-lab" }, b.interruptHow)))) : h("p", { className: "yg-lab" }, "终场没有打断"),
     h(ZoneRow, { rest, label: "场上的怪兽", cards: end.monsters }),
@@ -306,8 +306,8 @@ const CSS = `
 .yg-new { position: absolute; right: -4px; top: -4px; padding: 0 5px; border-radius: 9px; background: #c8ff3d; color: #000; font-size: 11px; font-weight: 600; }
 .yg-end { border: 1px solid #c8ff3d; border-radius: 8px; padding: 14px 16px; }
 .yg-end h2 { font-size: 16px; color: #c8ff3d; }
-.yg-end-num { display: flex; align-items: baseline; gap: 10px; }
-.yg-bignum { font-size: 34px; font-weight: 700; color: #c8ff3d; }
+.yg-end-num { font-size: 15px; }
+.yg-bignum { font-size: 30px; vertical-align: -3px; padding: 0 2px; font-weight: 700; color: #c8ff3d; }
 .yg-breakers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .yg-breakers li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; line-height: 1.6; }
 @media (max-width: 760px) {

@@ -1,6 +1,6 @@
 ---
 name: verify-yugioh
-description: 在真的游戏王插件页上证明行为：用编的数据起一个临时的游戏王服务和只开 Webapp 的临时 Hermes 网关，无头 Chromium 从侧栏点「游戏王」，看烙印教程的卡组一览、点卡看说明、切页签，桌面宽和手机宽截图留证据，可和设计稿并排。改了 src/ 或 plugin/、要截图给用户看、或要确认「页面上真的这样」时用。
+description: 在真的游戏王插件页上证明行为：用编的数据起一个临时的游戏王服务和只开 Webapp 的临时 Hermes 网关，无头 Chromium 从侧栏点「游戏王」，看烙印教程的卡组一览、点卡看说明、展开路线的列表和逐步播放、切页签，桌面宽和手机宽截图留证据，可和设计稿并排。改了 src/ 或 plugin/、要截图给用户看、或要确认「页面上真的这样」时用。
 ---
 
 # 验证游戏王（verify-yugioh）
@@ -27,10 +27,10 @@ $P up --images ~/.cache/mimi-yugioh/real-images   # 用真卡图（先 node scri
 ## Drive
 
 ```sh
-$P shot <名字> [--design | --mobile] [--tab 卡组一览|展开路线|起手速查] [--select 卡名] [--compare PNG]
+$P shot <名字> [--design | --mobile] [--tab 卡组一览|展开路线|起手速查] [--select 卡名] [--route ID或名字 [--step N|last] [--keys]] [--compare PNG]
 ```
 
-从侧栏点「游戏王」（默认是「卡组一览」），可选地：`--tab` 切页签，`--select` 在卡组一览里按卡名点一张卡（等说明区出这张卡）。视口默认是 1600 宽的桌面、按内容拉高；`--design` 是设计稿的 1280×860 并收起侧栏；`--mobile` 是手机（390×844，按手机模拟）并收起侧栏。网页工作区自己的「Update ready」提示框会被关掉，不盖住页面。`--compare` 另写 `<名字>-compare.png`：设计稿在左、这张在右。写进证据目录 `<名字>.png`、`.txt`（页面文字）、`.json`（这个页签发的请求、不同源的请求、有没有横向滚动条 `overflowX`）。
+从侧栏点「游戏王」（默认是「卡组一览」），可选地：`--tab` 切页签，`--select` 在卡组一览里按卡名点一张卡（等说明区出这张卡）；`--route` 打开「展开路线」并点列表里的那条（按 id，如 `white-albaz` / `branded-fusion`，或名字的一部分），`--step N|last` 从第 1 步起一步步点「下一步」走到第 N 步或最后一步（终场汇总），`--keys` 改按右方向键。手机宽加 `--route` 时整页截长图。视口默认是 1600 宽的桌面、按内容拉高；`--design` 是设计稿的 1280×860 并收起侧栏；`--mobile` 是手机（390×844，按手机模拟）并收起侧栏。网页工作区自己的「Update ready」提示框会被关掉，不盖住页面。`--compare` 另写 `<名字>-compare.png`：设计稿在左、这张在右。写进证据目录 `<名字>.png`、`.txt`（页面文字）、`.json`（这个页签发的请求、不同源的请求、有没有横向滚动条 `overflowX`）。
 
 第二个视图（不走页面）：`node .claude/skills/verify-yugioh/scripts/yv.mjs api /deck`（只读 GET）。
 
@@ -38,7 +38,7 @@ $P shot <名字> [--design | --mobile] [--tab 卡组一览|展开路线|起手�
 
 证据目录 `~/work/personal/.verify/yugioh/<yv run id>/`（`YV_EVIDENCE` 可换），`down` 不删。证明的标准：
 
-- 走用户的路：点页面上的页签和卡，不直接调接口来造结果。
+- 走用户的路：点页面上的页签、卡、路线和「下一步」，不直接调接口来造结果。路线播放要翻完一条：`--step 1`、中间一步、`--step last` 各一张，桌面宽和手机宽都有。
 - 动作前后都留：点卡前一张、点卡后一张，加上第二个视图（`yv api /deck`）。
 - 桌面宽和手机宽各截一张（`--mobile`），`.json` 的 `overflowX` 要是 false。
 - 页面上出现 `NaN`、`undefined`、`Infinity`，或 `shot` 退出 1，就是失败。页面上出现百分比、「还差」、估值或旧功能（打牌、评分、记卡、进步曲线）的字样也是失败（冒烟查）。
