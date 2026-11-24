@@ -20,9 +20,9 @@ scripts/fetch-card-names.js  按日文卡名向 ygocdb 查密码和简中名（m
 scripts/sync-card-images.js  把卡组用到的卡图从 NAS 经 ssh（stat + tar）复制到数据目录 images/；手动跑，`--dry-run` 只打出要复制的文件数
 launchd/             在 mac mini 上常驻用的 launchd 配置 jp.lifan.mimi-yugioh（见「在 mini 上常驻」）
 scripts/deploy.js    部署到 mini：导出 origin/main、核对、装依赖、换上、只重启自己的任务、冒烟；`--dry-run` 只演练
-scripts/smoke.js     线上冒烟（只读）：部署的版本、/health、/deck、卡组用到的卡图
+scripts/smoke.js     线上冒烟（只读）：部署的版本、/health、/deck、/routes（有路线、每条重放通过）、卡组用到的卡图
 scripts/plugin-setup  把插件链进 Hermes 的插件目录（`--home <目录>` 沙盒用；`--live` 是上线那一步，单独一张票，要用户点头）
-scripts/plugin-smoke.sh  ./ci 的插件冒烟：临时 Hermes 网页工作区里看卡组一览、点卡看说明，桌面宽和手机宽各一遍
+scripts/plugin-smoke.sh  ./ci 的插件冒烟：临时 Hermes 网页工作区里看卡组一览、点卡看说明、展开路线列表和逐步播放（起手、第 1 步、中间一步、终场），桌面宽和手机宽各一遍
 scripts/check.js     ./ci 用的架构约定检查（boundary、deps-whitelist、outbound、test-isolation、plugin、plugin-loads）
 plugin/              Hermes 插件「游戏王」（路由 /yugioh）：plugin.yaml、dashboard/（后端，只转发给本机服务）、webapp/plugin.js（页面）
 .claude/skills/verify-yugioh/  在真页面上验证的技能：yv.mjs（临时服务）、plugin-verify（临时网页工作区）、plugin-shot.mjs（无头 Chromium）
@@ -56,7 +56,9 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 `--dry-run` 只做 1、2（导出到系统临时目录核对完就删），再打出 3–6 真跑时会做的事；不写部署目录、不装依赖、不碰 launchd、不冒烟。
 
-冒烟（`npm run smoke`，`scripts/smoke.js`）只读：`DEPLOYED` 等于期望的 sha（默认 `origin/main`）；`127.0.0.1:4519` 的 `/health`（`{ok:true}`）、`/deck`（有卡）都 200；卡组用到的每张卡图经 `/card-image` 都读得到（缺了只提醒：页面改写卡名）；服务日志超过 10 MB 时提醒。输出一行一项「通过 / 失败 / 提醒」，有失败就非 0。
+冒烟（`npm run smoke`，`scripts/smoke.js`）只读：`DEPLOYED` 等于期望的 sha（默认 `origin/main`）；`127.0.0.1:4519` 的 `/health`（`{ok:true}`）、`/deck`（有卡）、`/routes`（有路线；引擎数据在、每条重放得通才是 200）都 200；卡组用到的每张卡图经 `/card-image` 都读得到（缺了只提醒：页面改写卡名）；服务日志超过 10 MB 时提醒。输出一行一项「通过 / 失败 / 提醒」，有失败就非 0。
+
+`./ci` 的插件冒烟（`scripts/plugin-smoke.sh`，临时网页工作区里无头 Chromium 截图，截图拷到 `YUGIOH_SMOKE_KEEP` 目录）除卡组一览外，还截 `/routes` 的路线列表和白之落胤线的播放页：起手（第 0 步）、第 1 步、中间一步、终场（桌面宽按钮和右方向键各一次、手机宽），烙印融合线的终场；每张查页面文字和不横向滚动。
 
 日志在 `~/Library/Logs/mimi-yugioh.log`。查跑的是哪个版本：`cat "$HOME/Library/Application Support/MimiYugioh/DEPLOYED"`。node 用 mise 装的绝对路径（`…/mise/installs/node/22/bin/node`，`22` 是指向当前小版本的软链接）；服务不读 iCloud，不要完全磁盘访问权限，也不连 NAS（卡图由 `sync-card-images.js` 手动复制进 `images/`）。上线的整个顺序（准备数据、部署、装插件、回退）见 README「上线清单」。
 
@@ -113,7 +115,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 - `steps`：路线数据里每一项 `steps` 一条（条数 = `route.steps.length`），`{ n, text, actions, activated, board, diff }`。`board` 是这一步走完后我方的完整场面：`hand`、`monsters`（含额外怪兽区，`sequence` 5、6）、`spellTraps`（含场地）、`grave`、`banished`，每张卡 `{ code, md, jp, sequence }`（`sequence` 是区内位置），刚进来的卡多一个 `fresh: true`。`diff` 是和上一步（第 1 步对比起手 `start`）相比每个区的 `{ in, out }`：进来了哪些、离开了哪些，即「花了什么 → 换来什么」（按密码数张数，区内换位置不算）。`activated` 是这一步里引擎记到的我方发动效果的卡，`actions` 是这一步引擎动作的文字（去掉「发动」「选完」「放在第几格」这类机械确认）。最后一步的 `board` 是终场。
 - `end`（终场汇总）：`monsters`、`spellTraps`、`hand`、`grave`、`banished`，`interrupts` = 终场在场（怪兽区 + 魔陷区）各卡 `interrupts` 之和，`breakers` 列出每个打断靠哪张卡、几张、怎么打断（`interruptHow`）。不在路线里手写。
-- `engineDiff`：引擎重放的终场和路线上写的 `end` 的差异（`diffEnd`，空 = 一致）；`mismatch`：路线数据里写的说明。教程和引擎不一致时两者都在，页面醒目显示；路线测试要求 `engineDiff` 非空时 `mismatch` 必须有。
+- `engineDiff`：引擎重放的终场和路线上写的 `end` 的差异（`diffEnd`，空 = 一致）；`mismatch`：路线数据里写的说明。教程和引擎不一致时两者都在，页面醒目显示；路线测试要求 `engineDiff` 非空时 `mismatch` 必须有（`test/route-view-http.test.js`）。
 - `source`、`verified`、`needs`（起手卡 `{ code, md, jp }`）、`start`（起手场面）。
 
 服务启动时对 `BRANDED.routes` 逐条重放并缓存（启动后台跑，请求等它跑完；两条约 0.1 秒）。引擎数据缺失或哪条重放不通（脚本报错、步骤对不上提示），`/routes` 和 `/route` 都回 503 和原因，不让页面显示没验证过的路线。
@@ -130,12 +132,12 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 ## 插件
 
-`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /deck`、`GET /routes`、`GET /route?id=`（id 只许小写字母、数字、连字符，否则 400）、`GET /card-image?code=`（只收数字）。没有写的接口。服务没应答是 502。后端的路径改了要重启 Hermes 网关才生效。
+`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /deck`、`GET /routes`、`GET /route?id=`（id 只许小写字母、数字、连字符、最长 64 个字符，否则 400）、`GET /card-image?code=`（只收数字）。没有写的接口。服务没应答是 502。后端的路径改了要重启 Hermes 网关才生效。
 
 页面 `plugin/webapp/plugin.js`：标题「游戏王 · 烙印教程」，三个页签：
 
 - **卡组一览**（第一个）：顶上一行写卡组名、主 / 额外卡组张数、卡表出处（链到 `source.url`）。按作用分组，每组写张数和一句含义；每张卡是卡图 + 简中名 + 日文名，多张的标 ×N，额外卡组的标「额外」，有打断的标「打断 N」。点卡在右边（手机宽在底部弹出）显示大图、两个名字、作用、在哪个卡组几张、三件事和「对手回合」（有打断：终场时能打断几次、怎么打断；手坑：从手牌发动，不算终场的打断；别的：终场时不提供打断）；再点一次、点「关上」或按 Esc 收起。
-- **展开路线**：先是路线列表（每条：起手卡的卡图 + 简中名、终场打断数、步数、来源和页面版本日期、引擎验证日期，有 mismatch 标「和教程不一致」），点一条进播放页。播放页顶上是「← 路线列表」、路线名、来源链接（`source.url`）、页面版本日期、「引擎验证于 …」，有 `mismatch` 或 `engineDiff` 时一个橙色边框的醒目框「教程和引擎不一致」；一条步号条（点任一号跳到那一步）、上一步 / 下一步、「第 N / 总数 步」，键盘左右键同样翻步；当前步的说明、发动了什么、引擎里的操作、「花了什么（离开）→ 换来什么（进来）」按区列出；完整场面（怪兽区、魔陷区、手牌、墓地、除外，每张卡图加简中名，刚进来的卡带「新」和高亮边框）。最后一步多一块「终场汇总」：对手回合能打断几次、每个打断靠哪张卡怎么打断、场上的卡、剩余手牌。
+- **展开路线**：先是路线列表（每条：起手卡的卡图 + 简中名、终场打断数、步数、来源和页面版本日期、引擎验证日期，有 mismatch 标「和教程不一致」），点一条进播放页。播放页顶上是「← 路线列表」、路线名、来源链接（`source.url`）、页面版本日期、「引擎验证于 …」，有 `mismatch` 或 `engineDiff` 时一个橙色边框的醒目框「教程和引擎不一致」；一条步号条（最前面是「起手」，点任一号跳到那一步）、上一步 / 下一步、「第 N / 总数 步」，键盘左右键同样翻步（路线没读到、焦点在输入框或可编辑区时不响应）。打开播放页默认停在「起手」（第 0 步）：显示接口的 `start` 起手场面，没有说明和差异区块，这样第 1 步的「花了什么」有对照；当前步的说明、发动了什么、引擎里的操作、「花了什么（离开）→ 换来什么（进来）」按区列出；完整场面（怪兽区、魔陷区、手牌、墓地、除外，每张卡图加简中名，刚进来的卡带「新」和高亮边框；怪兽区里 `sequence` 5、6 的卡标「额外怪兽区」，别的区不标）。最后一步多一块「终场汇总」：对手回合能打断几次、每个打断靠哪张卡怎么打断、场上的卡、剩余手牌。
 - **起手速查**：占位，#31 做。
 
 教程没有评分：页面上不许出现百分比、「还差」、估值（`./ci` 的 plugin 检查查源码，plugin-smoke 查渲染出来的文字和旧功能的字样）。宽度 ≤ 760 px 按手机排（页签占满一行、卡图小一号、说明从底部弹出），不出横向滚动条。
