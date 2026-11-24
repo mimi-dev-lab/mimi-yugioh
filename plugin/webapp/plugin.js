@@ -132,7 +132,7 @@ function EndSummary({ rest, end }) {
       h("strong", null, `${b.md}${b.copies > 1 ? ` ×${b.copies}` : ""}`), h("span", { className: "yg-chip on" }, `打断 ${b.interrupts}`), h("span", { className: "yg-lab" }, b.interruptHow)))) : h("p", { className: "yg-lab" }, "终场没有打断"),
     h(ZoneRow, { rest, label: "场上的怪兽", cards: end.monsters }),
     h(ZoneRow, { rest, label: "场上的魔陷", cards: end.spellTraps }),
-    h(ZoneRow, { rest, label: `剩余手牌 ${end.hand.length} 张`, cards: end.hand }));
+    h(ZoneRow, { rest, label: "剩余手牌", cards: end.hand }));
 }
 
 function Player({ rest, id, onBack }) {

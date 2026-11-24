@@ -72,7 +72,7 @@ shot route-mid --route white-albaz --step 9
 has route-mid "第 9 / 17 步"
 lacks route-mid "终场汇总"
 shot route-end --route white-albaz --step last --keys
-has route-end "第 17 / 17 步 · 终场" "终场汇总" "对手回合能打断 2 次" "打断 1" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "剩余手牌 4 张"
+has route-end "第 17 / 17 步 · 终场" "终场汇总" "对手回合能打断 2 次" "打断 1" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "剩余手牌"
 lacks route-end "%" "还差" "估值" "评分" "总分"
 shot route-fusion-end --route branded-fusion --step last
 has route-fusion-end "第 10 / 10 步 · 终场" "终场汇总" "对手回合能打断 1 次" "烙印断罪"
