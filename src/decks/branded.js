@@ -3,6 +3,7 @@
 // 卡名：md_name 是 Master Duel 简体中文客户端的译名，取自百鸽 ygocdb 接口（scripts/fetch-card-names.js 查到后写死在这里）；jp 是日文名。
 // 三件事（does / cost / limit）、作用、打断数和 interruptHow 是我们自己的概括，不是原文转载；打断数 = 这张卡在终场时，对手回合里能打断几次（手牌里的手坑不算），interruptHow 写怎么打断，打断数是 0 就留空。
 // 和 Game8 页面不一致的一处：路线 A 要用阿卢绯尔检索「赫之烙印」，但页面的卡表里没有它，只有烙印之气炎 ×3；这里按路线走得通改成 烙印之气炎 ×2 + 赫之烙印 ×1，其余照页面。
+import { LOOKUP } from './branded-lookup.js';
 import { ROUTES } from './branded-routes.js';
 
 export const SOURCE = { name: 'Game8', url: 'https://game8.jp/yugioh-masterduel/534262', date: '2026-11-20' };
@@ -103,4 +104,4 @@ export const EXTRA = [
   { code: 54757758, count: 1 }, // 沼地のドロゴン
 ];
 
-export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, routes: ROUTES };
+export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, routes: ROUTES, lookup: LOOKUP };

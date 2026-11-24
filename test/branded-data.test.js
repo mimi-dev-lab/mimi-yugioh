@@ -4,6 +4,7 @@ import { openEngineFiles } from '../src/engine-files.js';
 import { BANLIST_DATE, maxCopies } from '../src/banlist.js';
 import { BRANDED } from '../src/decks/branded.js';
 import { checkDeck, expand } from '../src/deck.js';
+import { checkLookup } from '../src/lookup.js';
 import { ENGINE_DIR } from './helpers.js';
 
 const ALBAZ = 73819701; const FUSION = 44362883; const ASH = 14558127; const MIRRORJADE = 44146295;
@@ -15,6 +16,7 @@ describe('烙印卡组数据', () => {
     assert.equal(expand(BRANDED.extra).length, 15);
     assert.equal(BANLIST_DATE, '2026-11-05');
     assert.deepEqual(checkDeck(BRANDED), []);
+    assert.deepEqual(checkLookup(BRANDED), []);
   });
 
   test('每张卡都有简中名、日文名、作用、三件事、打断数；有打断的写了怎么打断，没有的留空', () => {

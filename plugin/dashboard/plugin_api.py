@@ -3,7 +3,7 @@
 starts no process.
 
 GET  /deck               → GET  /deck                  (卡组一览: every card with its names, role, count, effect and how it interrupts)
-GET  /routes             → GET  /routes                (展开路线 list: needs, interrupts at the end, source, verification date)
+GET  /routes             → GET  /routes                (展开路线 list: needs, interrupts at the end, source, verification date; and `lookup`, the 起手速查 data)
 GET  /route?id=X         → GET  /route?id=X            (one route: every step with the engine's board and what changed, the end summary; the id is lowercase letters, digits and hyphens)
 GET  /card-image?code=N  → GET  /card-image?code=N     (one card picture, as JSON with base64; the code has to be digits)
 

@@ -2,10 +2,11 @@
    A Branded (烙印) tutorial wiki, drawn as a shell over the yugioh service (src/), reached through this plugin's backend
    (../dashboard/plugin_api.py) and ctx.rest, which adds /api/plugins/yugioh and the web workspace's own login and path prefix:
    GET /deck (every card: Master Duel and Japanese names, role, count, the three things, how it interrupts on the opponent's turn),
-   GET /routes and GET /route?id= (the 展开路线 list, and one route's steps: the engine's board after each step, what changed, the end summary),
+   GET /routes (the 展开路线 list, plus `lookup`, the 起手速查 data: key card -> routes, and which route to take without a card) and
+   GET /route?id= (one route's steps: the engine's board after each step, what changed, the end summary),
    GET /card-image?code= (JSON with base64; drawn as a data: address).
    Tabs: 卡组一览 (the deck grouped by role; click a card for its effect), 展开路线 (the route list, then a player: previous / next / jump / arrow keys,
-   a step bar starting with 起手 (the opening hand, step 0, no diff), the last step is the end summary), 起手速查 (a placeholder until its ticket).
+   a step bar starting with 起手 (the opening hand, step 0, no diff), the last step is the end summary), 起手速查 (per key card: the route(s) to take with its end interrupts, and "缺 X → route" lines; a click jumps to that route's player, step 0).
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -191,13 +192,11 @@ function Player({ rest, id, onBack }) {
     last ? h(EndSummary, { rest, end: route.end }) : null);
 }
 
-function RoutesView({ rest }) {
-  const [routes, setRoutes] = useState(null);
-  const [error, setError] = useState("");
-  const [id, setId] = useState(null);
-  useEffect(() => { rest("/routes").then((r) => setRoutes(r.routes)).catch((e) => setError(message(e))); }, [rest]);
+// `loaded` is the shared GET /routes result: { data, error } (data null until it arrives)
+function RoutesView({ rest, loaded, id, setId }) {
   if (id) return h(Player, { rest, id, onBack: () => setId(null) });
-  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+  if (loaded.error) return h("div", { className: "yg-error", role: "alert" }, loaded.error);
+  const routes = loaded.data?.routes;
   if (!routes) return h("p", { className: "yg-lab" }, "读取路线…");
   return h("div", { className: "yg-routes" },
     h("p", { className: "yg-lab yg-sum" }, "每条路线的每一步都在规则引擎里重放过，场面是引擎的结果。点一条逐步看。"),
@@ -213,11 +212,48 @@ function RoutesView({ rest }) {
         h("span", { className: "yg-lab" }, `来源 ${r.source.name}（${r.source.date} 版）· 引擎验证于 ${r.verified}`)))));
 }
 
+// ---- 起手速查: per key card, the route(s) to take and what to do without a card; every route is a button that opens its player ----
+function JumpButton({ route, onOpen, extra }) {
+  return h("button", { className: "yg-jump", "data-route-id": route.id, onClick: () => onOpen(route.id), "aria-label": `打开路线：${route.name}` },
+    h("span", { className: "yg-title" }, route.name),
+    h("span", { className: "yg-row wrap" },
+      h("span", { className: "yg-chip on" }, `终场打断 ${route.interrupts}`),
+      h("span", { className: "yg-chip" }, `${route.steps} 步`),
+      extra ?? null));
+}
+
+function LookupView({ rest, loaded, onOpen }) {
+  if (loaded.error) return h("div", { className: "yg-error", role: "alert" }, loaded.error);
+  const lookup = loaded.data?.lookup;
+  if (!lookup) return h("p", { className: "yg-lab" }, "读取速查…");
+  return h("div", { className: "yg-lookup" },
+    h("p", { className: "yg-lab yg-sum" }, "手里有哪张关键卡，就走哪条路线；缺某张卡时看「缺」那几行。点路线名，打开那条路线的逐步播放。每条路线都在规则引擎里重放过。"),
+    lookup.map((e) => h("section", { key: e.card.code, className: "yg-key", "aria-label": e.card.md, "data-card-code": String(e.card.code) },
+      h("div", { className: "yg-key-head" },
+        h("span", { className: "yg-route-art" }, h(CardArt, { rest, code: e.card.code, md: e.card.md })),
+        h("span", { className: "yg-col" },
+          h("span", { className: "yg-title" }, e.card.md),
+          h("span", { className: "yg-lab" }, e.card.jp),
+          h("span", { className: "yg-lab" }, "手里有它：走"))),
+      h("div", { className: "yg-jumps" }, e.routes.map((r) => h(JumpButton, { key: r.id, route: r, onOpen,
+        extra: r.with ? h("span", { className: "yg-chip" }, `搭 ${r.with.md}`) : null }))),
+      e.fallbacks.length ? h("div", { className: "yg-fallbacks" },
+        e.fallbacks.map((f, i) => h("div", { key: i, className: "yg-fallback", "data-route-id": f.route.id },
+          h("p", { className: "yg-fb-line" }, h("strong", null, `缺 ${f.lack.md}`), h("span", { className: "yg-lab" }, ` 手里有 ${f.have.map((c) => c.md).join("、")} → `)),
+          h(JumpButton, { route: f.route, onOpen }),
+          h("p", { className: "yg-lab" }, f.how)))) : null)));
+}
+
 function YugiohApp({ rest }) {
   const [tab, setTab] = useState(TABS[0]);
   const [deck, setDeck] = useState(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
+  const [routeId, setRouteId] = useState(null); // the route open in 展开路线 (null = the list); 起手速查 sets it to jump there
+  const [routes, setRoutes] = useState({ data: null, error: "" }); // one GET /routes shared by 展开路线 and 起手速查 (a 503 shows only in those two tabs)
+  useEffect(() => {
+    rest("/routes").then((data) => setRoutes({ data, error: "" })).catch((e) => setRoutes({ data: null, error: message(e) }));
+  }, [rest]);
   useEffect(() => {
     (async () => {
       try { setDeck(await rest("/deck")); } catch (e) { setError(message(e)); }
@@ -226,8 +262,8 @@ function YugiohApp({ rest }) {
   }, [rest]);
 
   let main = null;
-  if (tab === "展开路线") main = h(RoutesView, { rest });
-  else if (tab !== "卡组一览") main = h("div", { className: "yg-soon" }, h("h2", null, tab), h("p", { className: "yg-lab" }, `「${tab}」还没做，下一步加上。`));
+  if (tab === "展开路线") main = h(RoutesView, { rest, loaded: routes, id: routeId, setId: setRouteId });
+  else if (tab === "起手速查") main = h(LookupView, { rest, loaded: routes, onOpen: (id) => { setRouteId(id); setTab("展开路线"); } });
   else if (deck) main = h(DeckView, { rest, deck });
   return h("div", { className: "yg", "data-ready": ready ? "true" : "false" },
     h("header", { className: "yg-head" }, h("h1", null, "游戏王 · 烙印教程"),
@@ -250,8 +286,6 @@ const CSS = `
 .yg-tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 6px 12px; color: #bdbdbd; }
 .yg-tab.on { color: #c8ff3d; border-color: #c8ff3d; }
 .yg-error { border: 1px solid #ff9a6b; color: #ff9a6b; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
-.yg-soon { display: flex; flex-direction: column; gap: 12px; padding: 24px 4px; }
-.yg-soon h2 { font-size: 20px; }
 .yg-row { display: flex; gap: 8px; align-items: center; } .yg-row.wrap { flex-wrap: wrap; }
 .yg-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .yg-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; }
@@ -288,6 +322,15 @@ const CSS = `
 .yg-route:hover { border-color: #c8ff3d; }
 .yg-route-art { width: 64px; flex: none; aspect-ratio: 59 / 86; }
 .yg-chip.warn { border-color: #ff9a6b; color: #ff9a6b; }
+.yg-lookup { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+.yg-key { display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid #2a2a2a; border-radius: 8px; min-width: 0; }
+.yg-key-head { display: flex; gap: 14px; align-items: flex-start; }
+.yg-jumps, .yg-fallbacks { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.yg-jump { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 10px 12px; border: 1px solid #3a3a3a; border-radius: 6px; background: #000; min-width: 0; max-width: 100%; }
+.yg-jump:hover { border-color: #c8ff3d; }
+.yg-fallbacks { border-top: 1px solid #1c1c1c; padding-top: 10px; }
+.yg-fallback { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; line-height: 1.6; min-width: 0; }
+.yg-fb-line strong { color: #ececec; }
 .yg-player { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .yg-route-title { font-size: 18px; }
 .yg-mismatch { border: 2px solid #ff9a6b; border-radius: 8px; padding: 10px 14px; color: #ffb48f; background: #1c0f08; display: flex; flex-direction: column; gap: 4px; line-height: 1.6; }

@@ -11,8 +11,10 @@ src/banlist.js       Master Duel 禁限表（自己维护，现行 2026-11-05，
 src/duel-session.js  决斗会话：包住规则引擎 ocgcore-wasm，一手牌一个会话；开局（卡组、起手、种子）、当前提示和合法选项、提交选择、查场面、存档回滚；纯逻辑，卡库和脚本由调用方注入
 src/route.js         展开路线重放：把一条路线的步骤喂给决斗会话，走到我方回合结束，返回终场和每一步之后的场面，并和路线上写的终场对照
 src/route-view.js    路线的展示数据：把 playRoute 重放出的每一步场面配上卡名、算和上一步的差异、标刚进来的卡、汇总终场和打断数；纯函数，引擎由调用方注入
+src/lookup.js        起手速查：检查卡组数据里的 lookup（目标路线存在、起手里的卡对得上路线数据）、把它展开成 GET /routes 的 lookup（卡名、目标路线的名字和打断数）；纯函数
 src/decks/branded.js         烙印卡组数据：卡表、卡名、作用、三件事、打断数和怎么打断
 src/decks/branded-routes.js  烙印的展开路线（引擎可重放的步骤序列）：Game8 两条，另有从 B站专栏路线图、T³ 文库 Mas 的展开一览补的几条，每条带出处
+src/decks/branded-lookup.js  烙印的起手速查数据：关键卡 → 路线，缺卡改走哪条（只指向 branded-routes.js 里的路线 id）
 src/engine-files.js  读引擎数据：cards.cdb（node:sqlite）和卡牌脚本，给会话提供 cardReader、scriptReader、卡名；只读
 src/store.js         数据目录的读取（卡图）；唯一碰数据目录的地方
 scripts/prepare-engine.js  把固定版本的 Project Ignis CardScripts 和 BabelCDB 的 cards.cdb 下载到引擎数据目录（唯一联网的地方）
@@ -56,9 +58,9 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 `--dry-run` 只做 1、2（导出到系统临时目录核对完就删），再打出 3–6 真跑时会做的事；不写部署目录、不装依赖、不碰 launchd、不冒烟。
 
-冒烟（`npm run smoke`，`scripts/smoke.js`）只读：`DEPLOYED` 等于期望的 sha（默认 `origin/main`）；`127.0.0.1:4519` 的 `/health`（`{ok:true}`）、`/deck`（有卡）、`/routes`（有路线；引擎数据在、每条重放得通才是 200）都 200；卡组用到的每张卡图经 `/card-image` 都读得到（缺了只提醒：页面改写卡名）；服务日志超过 10 MB 时提醒。输出一行一项「通过 / 失败 / 提醒」，有失败就非 0。
+冒烟（`npm run smoke`，`scripts/smoke.js`）只读：`DEPLOYED` 等于期望的 sha（默认 `origin/main`）；`127.0.0.1:4519` 的 `/health`（`{ok:true}`）、`/deck`（有卡）、`/routes`（有路线和起手速查、速查指向的路线都在列表里；引擎数据在、每条重放得通才是 200）都 200；卡组用到的每张卡图经 `/card-image` 都读得到（缺了只提醒：页面改写卡名）；服务日志超过 10 MB 时提醒。输出一行一项「通过 / 失败 / 提醒」，有失败就非 0。
 
-`./ci` 的插件冒烟（`scripts/plugin-smoke.sh`，临时网页工作区里无头 Chromium 截图，截图拷到 `YUGIOH_SMOKE_KEEP` 目录）除卡组一览外，还截 `/routes` 的路线列表和白之落胤线的播放页：起手（第 0 步）、第 1 步、中间一步、终场（桌面宽按钮和右方向键各一次、手机宽），烙印融合线的终场；每张查页面文字和不横向滚动。
+`./ci` 的插件冒烟（`scripts/plugin-smoke.sh`，临时网页工作区里无头 Chromium 截图，截图拷到 `YUGIOH_SMOKE_KEEP` 目录）除卡组一览外，还截 `/routes` 的路线列表和白之落胤线的播放页：起手（第 0 步）、第 1 步、中间一步、终场（桌面宽按钮和右方向键各一次、手机宽），烙印融合线的终场；起手速查截桌面宽和手机宽，并从速查点路线（阿卢绯尔线、白之圣女线、天底的使徒线）看跳到播放页、翻到终场；每张查页面文字和不横向滚动。
 
 日志在 `~/Library/Logs/mimi-yugioh.log`。查跑的是哪个版本：`cat "$HOME/Library/Application Support/MimiYugioh/DEPLOYED"`。node 用 mise 装的绝对路径（`…/mise/installs/node/22/bin/node`，`22` 是指向当前小版本的软链接）；服务不读 iCloud，不要完全磁盘访问权限，也不连 NAS（卡图由 `sync-card-images.js` 手动复制进 `images/`）。上线的整个顺序（准备数据、部署、装插件、回退）见 README「上线清单」。
 
@@ -85,13 +87,14 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 ## 卡组数据
 
-`src/decks/<卡组>.js` 导出一个卡组对象 `{ name, source, roles, cards, main, extra, routes }`：
+`src/decks/<卡组>.js` 导出一个卡组对象 `{ name, source, roles, cards, main, extra, routes, lookup }`：
 
 - `source`：卡表的出处 `{ name, url, date }`（页面版本日期），卡组一览上显示并链过去。
 - `roles`：作用的先后和含义，`[{ name, note }]`（`name` 是 `启动 / 检索 / 融合素材 / 终场 / 手坑`，`note` 是页面上组名下的一句含义，词义见 GLOSSARY.md「作用」；含义的原文只写在这里）；卡组一览按它分组。
 - `cards`：密码 → `{ jp, md, role, interrupts, interruptHow, does, cost, limit }`。`md` 是 Master Duel 简体中文客户端的译名（ygocdb 的 `md_name`，用 `scripts/fetch-card-names.js` 查，写死在数据里；字符照抄，不手敲：库妸㽗 是 U+5E93 U+59B8 U+3F57），`jp` 是日文名。`role` 是 `roles` 里某个 `name`；`does / cost / limit` 是「三件事」，我们自己的概括；`interrupts` 是这张卡在终场时对手回合里能打断几次（手牌里的卡不算），`interruptHow` 写怎么打断，`interrupts` 是 0 就是空字符串。一条路线终场的打断数 = 终场在场各卡的 `interrupts` 之和，不在路线里手写。
 - `main` / `extra`：`{ code, count }` 列表。`checkDeck` 查张数（主 40、额外 15、不超禁限表上限）和每张卡的字段是否齐，`interrupts` 和 `interruptHow` 是否对得上（有打断就要写怎么打断，没有就留空）。
 - `routes`：展开路线，`{ id, name, source, verified, mismatch?, needs, hand, steps, end }`。`source` 是这条路线的出处 `{ name, url, date }`（页面版本日期），`verified` 是引擎重放验证的日期（写在数据里，改了路线或引擎要重新验证再改它），`mismatch` 是教程和引擎结果不一致处的说明（一致就不写）。`hand` 是起手 5 张（必要卡 + 填充牌），`steps` 每步 `{ text, do }`，`do` 是给引擎的回应（写法见 `src/route.js` 开头），`end` 是出处页面写的我方回合结束时的终场 `{ monsters, spellTraps, hand }`（`hand` 是剩几张手牌；出处没写时，按起手张数减去这条路线用掉的算，写法同 `src/decks/branded-routes.js` 文件头）。`playRoute` 重放（返回终场、路线数据里每一步走完后的场面 `stepBoards`、每步的引擎动作文字和发动了效果的卡，另有按引擎的提示切的 `boards`），`diffEnd` 和 `end` 对照。
+- `lookup`：起手速查，`[{ card, routes, fallbacks }]`，一项一张关键卡（`card` 是密码），三个字段都必填（没有缺卡改走的写 `[]`）。`routes` 是手里有它走哪条：`[{ route, with? }]`，`route` 是路线 id，`with` 是这条路线起手里还要搭的那张卡（两卡展开才有，如烙印之气炎搭软绵雀精或黑衣龙 阿尔比昂）。`fallbacks` 是缺卡改走哪条：`[{ lack, have, route, how }]`，缺 `lack`、手里有 `have`（一张或几张）时改走 `route`，`how` 是为什么走得通，只写那条路线的步骤里真有的事。`checkLookup`（`src/lookup.js`）查：每个 `route` 都是 `routes` 里的 id，关键卡、`with`、`have` 都在那条路线的起手（`hand`）里，`lack` 不在，每张卡都在卡表里，`how` 非空，关键卡不重复；只在测试里查（`test/branded-data.test.js`，同 `checkDeck`），服务启动不查；运行时 `lookupView` 遇到指向的路线不在重放结果里就抛错，`/routes` 回 503。速查不手写打断数和步数：展示时取重放出来的路线（`lookupView`）。
 
 第一套（烙印）的卡表照 Game8 2026-11-20 版取用，有一处不照：页面的卡表没有赫之烙印，路线 A 却要用阿卢绯尔检索它，所以数据里是 烙印之气炎 ×2 + 赫之烙印 ×1（页面是 烙印之气炎 ×3）。
 
@@ -105,7 +108,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 |---|---|
 | `GET /health` | `{ ok: true }` |
 | `GET /deck` | 卡组一览：`name`、`source`（`{ name, url, date }`）、`roles`（作用的先后，每项 `{ name, note }`）、`cards`（按 `roles` 的先后分组，同一作用里主卡组在前、额外卡组在后，各自照卡组数据的顺序；每张 `code`、`md`、`jp`、`role`、`zone`（`main` / `extra`）、`count`、`does / cost / limit`、`interrupts`、`interruptHow`）。不含卡图 |
-| `GET /routes` | 展开路线列表：`routes[]`，每条 `id`、`name`、`needs`（起手卡 `{ code, md, jp }`）、`interrupts`（终场打断数）、`steps`（步数）、`source`、`verified`、`mismatch`、`engineDiff`。引擎数据缺失或重放不通 503 `{ error }` |
+| `GET /routes` | `{ routes, lookup }`。`routes[]` 是展开路线列表，每条 `id`、`name`、`needs`（起手卡 `{ code, md, jp }`）、`interrupts`（终场打断数）、`steps`（步数）、`source`、`verified`、`mismatch`、`engineDiff`。`lookup[]` 是起手速查，一项一张关键卡：`card`（`{ code, md, jp }`）、`routes[]`（手里有它走哪条：`id`、`name`、`interrupts`、`steps`，两卡展开另有 `with`，搭的那张卡 `{ code, md, jp }`，单卡起手是 `null`）、`fallbacks[]`（缺卡改走哪条：`lack`、`have[]`（都是 `{ code, md, jp }`）、`route`（同 `routes[]` 的一项）、`how`）。目标路线的名字、打断数、步数取自重放出的路线，和 `routes[]` 里同 id 的一致，页面不用再请求。引擎数据缺失或重放不通 503 `{ error }`（没有 `lookup`） |
 | `GET /route?id=X` | 一条路线：`id`、`name`、`needs`、`source`、`verified`、`mismatch`、`engineDiff`、`start`（起手场面）、`steps`（每步的说明、场面快照、差异）、`end`（终场汇总），格式见「路线快照」。没有这个 id 404；缺 id 也是 404；引擎问题 503 |
 | `GET /card-image?code=N` | 一张卡图，`{ code, type, base64 }`（插件经 `ctx.rest` 只读 JSON，页面拼成 data: 地址）；数据目录 `images/` 里没有就 404；`code` 只收纯数字 |
 
@@ -132,12 +135,12 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 ## 插件
 
-`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /deck`、`GET /routes`、`GET /route?id=`（id 只许小写字母、数字、连字符、最长 64 个字符，否则 400）、`GET /card-image?code=`（只收数字）。没有写的接口。服务没应答是 502。后端的路径改了要重启 Hermes 网关才生效。
+`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /deck`、`GET /routes`（含 `lookup`）、`GET /route?id=`（id 只许小写字母、数字、连字符、最长 64 个字符，否则 400）、`GET /card-image?code=`（只收数字）。没有写的接口。服务没应答是 502。后端的路径改了要重启 Hermes 网关才生效。
 
 页面 `plugin/webapp/plugin.js`：标题「游戏王 · 烙印教程」，三个页签：
 
 - **卡组一览**（第一个）：顶上一行写卡组名、主 / 额外卡组张数、卡表出处（链到 `source.url`）。按作用分组，每组写张数和一句含义；每张卡是卡图 + 简中名 + 日文名，多张的标 ×N，额外卡组的标「额外」，有打断的标「打断 N」。点卡在右边（手机宽在底部弹出）显示大图、两个名字、作用、在哪个卡组几张、三件事和「对手回合」（有打断：终场时能打断几次、怎么打断；手坑：从手牌发动，不算终场的打断；别的：终场时不提供打断）；再点一次、点「关上」或按 Esc 收起。
 - **展开路线**：先是路线列表（每条：起手卡的卡图 + 简中名、终场打断数、步数、来源和页面版本日期、引擎验证日期，有 mismatch 标「和教程不一致」），点一条进播放页。播放页顶上是「← 路线列表」、路线名、来源链接（`source.url`）、页面版本日期、「引擎验证于 …」，有 `mismatch` 或 `engineDiff` 时一个橙色边框的醒目框「教程和引擎不一致」；一条步号条（最前面是「起手」，点任一号跳到那一步）、上一步 / 下一步、「第 N / 总数 步」，键盘左右键同样翻步（路线没读到、焦点在输入框或可编辑区时不响应）。打开播放页默认停在「起手」（第 0 步）：显示接口的 `start` 起手场面，没有说明和差异区块，这样第 1 步的「花了什么」有对照；当前步的说明、发动了什么、引擎里的操作、「花了什么（离开）→ 换来什么（进来）」按区列出；完整场面（怪兽区、魔陷区、手牌、墓地、除外，每张卡图加简中名，刚进来的卡带「新」和高亮边框；怪兽区里 `sequence` 5、6 的卡标「额外怪兽区」，别的区不标）。最后一步多一块「终场汇总」：对手回合能打断几次、每个打断靠哪张卡怎么打断、场上的卡、剩余手牌。
-- **起手速查**：占位，#31 做。
+- **起手速查**：每张关键卡一块（白之落胤、烙印融合、阿卢绯尔、天底的使徒、白之圣女、烙印之气炎），卡图 + 简中名 + 日文名；「手里有它：走」下面是路线按钮（路线名、终场打断数、步数；两卡展开的路线标「搭 X」）；再下面是「缺 X　手里有 Y → 路线」几行，每行一个路线按钮和一句为什么走得通。数据全来自 `GET /routes` 的 `lookup`，页面不再请求别的。点路线按钮跳到「展开路线」页签里那条路线的播放页，停在起手（第 0 步）；点页签只切页，不动展开路线里打开的路线。`GET /routes` 只请求一次，展开路线和起手速查共用。
 
 教程没有评分：页面上不许出现百分比、「还差」、估值（`./ci` 的 plugin 检查查源码，plugin-smoke 查渲染出来的文字和旧功能的字样）。宽度 ≤ 760 px 按手机排（页签占满一行、卡图小一号、说明从底部弹出），不出横向滚动条。

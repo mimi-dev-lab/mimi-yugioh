@@ -1,7 +1,7 @@
 #!/bin/sh
 # ./ci 的插件冒烟：游戏王插件在临时的网页工作区（只开 Webapp 的 Hermes 网关，插件用本仓的 plugin/，后端转给编的数据起的游戏王服务）里，
 # 从侧栏点「游戏王」：首页是教程外壳，第一个页签「卡组一览」按作用分组列出每张卡（简中名、日文名）；点一张卡看效果说明和对手回合怎么打断；
-# 桌面宽和手机宽各走一遍；展开路线：列表、点进白之落胤线（停在起手）翻到第 1 步、中间一步、终场（点下一步和按右方向键各一次），看终场汇总的打断数；起手速查是占位。页面上不能有打牌、评分、记卡、进步曲线的字样，也没有百分比。
+# 桌面宽和手机宽各走一遍；展开路线：列表、点进白之落胤线（停在起手）翻到第 1 步、中间一步、终场（点下一步和按右方向键各一次），看终场汇总的打断数；起手速查：每张关键卡的路线和缺卡改走哪条，点一条路线跳到它的播放页（桌面宽、手机宽）。页面上不能有打牌、评分、记卡、进步曲线的字样，也没有百分比。
 # 每次的网络记录里不能有不同源的请求。照验证技能（.claude/skills/verify-yugioh）的 plugin-verify。
 # 不碰线上：端口、数据目录都是这次临时的，卡图是编的单色小图，不连 NAS；证据放临时目录，过了就删，没过留着并打出路径。
 # YUGIOH_SMOKE_KEEP=<目录>：过了也把截图拷到那个目录。
@@ -87,9 +87,22 @@ has route-phone "第 2 / 17 步" "花了什么"
 shot route-phone-end --mobile --route white-albaz --step last
 has route-phone-end "终场汇总" "对手回合能打断 2 次"
 shot quick --tab 起手速查
-has quick "「起手速查」还没做"
-for name in deck card phone phone-card routes route-start route-first route-mid route-end route-fusion-end route-phone-start route-phone route-phone-end; do
+has quick "手里有哪张关键卡" "白之落胤" "烙印融合" "惨绝戏之导化 阿卢绯尔" "天底的使徒" "白之圣女 艾克利西亚" "烙印之气炎" "手里有它：走" "基本展开｜白之落胤初动" "终场打断 2" "搭 多多迷宝・软绵雀精" "搭 黑衣龙 阿尔比昂" "缺 烙印融合" "手里有 惨绝戏之导化 阿卢绯尔 →" "检索烙印融合"
+lacks quick "还没做" "读取速查" "%" "还差" "估值" "评分" "总分"
+# shellcheck disable=SC2086
+lacks quick $OLD
+shot quick-phone --mobile --tab 起手速查
+has quick-phone "缺 烙印融合" "基本展开｜烙印融合初动" "终场打断 1"
+# 点一条速查里的路线：跳到展开路线页签里那条路线的播放页，停在起手；再翻到终场
+shot quick-jump --tab 起手速查 --jump aluber
+has quick-jump "展开路线" "基本展开｜阿卢绯尔初动" "← 路线列表" "起手 · 共 12 步" "手牌"
+lacks quick-jump "花了什么" "手里有哪张关键卡"
+shot quick-jump-end --tab 起手速查 --jump white-saint --step last
+has quick-jump-end "基本展开｜白之圣女初动" "终场汇总" "对手回合能打断 0 次"
+shot quick-jump-phone --mobile --tab 起手速查 --jump nadir-servant --step 2
+has quick-jump-phone "基本展开｜天底的使徒初动" "第 2 / 13 步" "花了什么"
+for name in deck card phone phone-card routes route-start route-first route-mid route-end route-fusion-end route-phone-start route-phone route-phone-end quick quick-phone quick-jump quick-jump-end quick-jump-phone; do
   grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
 done
 status=0
-echo "游戏王插件在网页工作区里画出来了：卡组一览按作用分组（简中名、日文名、张数、打断数），点卡出效果说明和对手回合怎么打断，桌面宽和手机宽都能用；展开路线列表和逐步播放（起手、第 1 步、中间一步、终场汇总，桌面宽和手机宽）；起手速查是占位；没有旧功能的字样"
+echo "游戏王插件在网页工作区里画出来了：卡组一览按作用分组（简中名、日文名、张数、打断数），点卡出效果说明和对手回合怎么打断，桌面宽和手机宽都能用；展开路线列表和逐步播放（起手、第 1 步、中间一步、终场汇总，桌面宽和手机宽）；起手速查按关键卡列出路线和缺卡改走哪条，点一条跳到它的播放页；没有旧功能的字样"

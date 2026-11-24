@@ -5,7 +5,7 @@ import { diffEnd, playRoute } from './route.js';
 // 场面里展示的区域：手牌、怪兽区（含额外怪兽区）、魔陷区（含场地）、墓地、除外
 export const ZONES = ['hand', 'monsters', 'spellTraps', 'grave', 'banished'];
 
-const cardOf = (deck, code) => ({ code, md: deck.cards[code]?.md ?? String(code), jp: deck.cards[code]?.jp ?? String(code) });
+export const cardOf = (deck, code) => ({ code, md: deck.cards[code]?.md ?? String(code), jp: deck.cards[code]?.jp ?? String(code) });
 
 // 一张场上的卡：密码、简中名、日文名、区内位置（手牌是第几张，怪兽区 0–4 是主怪兽区、5–6 是额外怪兽区，魔陷区同理）
 const placed = (deck, c) => ({ ...cardOf(deck, c.code), sequence: c.sequence });
