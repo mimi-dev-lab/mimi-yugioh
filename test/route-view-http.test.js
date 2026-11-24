@@ -7,6 +7,7 @@ import { BRANDED } from '../src/decks/branded.js';
 import { ZONES } from '../src/route-view.js';
 import { ENGINE_DIR, start } from './helpers.js';
 
+const isGame8 = (r) => r.source.url.startsWith('https://game8.jp/');
 const get = async (url, path) => { const res = await fetch(`${url}${path}`); return { status: res.status, body: await res.json() }; };
 
 describe('路线接口：GET /routes、GET /route?id=', () => {
@@ -16,18 +17,16 @@ describe('路线接口：GET /routes、GET /route?id=', () => {
       const { status, body } = await get(server.url, '/routes');
       assert.equal(status, 200);
       assert.deepEqual(body.routes.map((r) => r.id), ['white-albaz', 'branded-fusion', 'aluber', 'white-saint', 'high-spirits-fuwalos', 'high-spirits-shrouded', 'nadir-servant']);
-      const albaz = body.routes[0];
+      const albaz = body.routes.find((r) => r.id === 'white-albaz');
       assert.deepEqual([albaz.name, albaz.needs.code, albaz.needs.md, albaz.needs.jp], ['基本展开｜白之落胤初动', 73819701, '白之落胤', '白き竜の落胤']);
       assert.equal(albaz.interrupts, 2); // 终场：冰剑龙 镜翠幻种 1 + 赫之圣女 卡尔塔西亚 1，另两只 0
-      assert.equal(body.routes[1].needs.md, '烙印融合');
-      assert.deepEqual(body.routes.slice(2).map((r) => r.needs.md), ['惨绝戏之导化 阿卢绯尔', '白之圣女 艾克利西亚', '烙印之气炎', '烙印之气炎', '天底的使徒']);
+      assert.equal(body.routes.find((r) => r.id === 'branded-fusion').needs.md, '烙印融合');
+      assert.deepEqual(body.routes.filter((r) => !isGame8(r)).map((r) => r.needs.md), ['惨绝戏之导化 阿卢绯尔', '白之圣女 艾克利西亚', '烙印之气炎', '烙印之气炎', '天底的使徒']);
       const nadir = body.routes.find((r) => r.id === 'nadir-servant');
       assert.equal(nadir.interrupts, 3); // 终场：赫之圣女 卡尔塔西亚 1 + 盖着的落胤与圣女 1 + 烙印断罪 1
-      for (const r of body.routes.slice(0, 2)) {
-        assert.match(r.source.url, /^https:\/\/game8\.jp\//);
-        assert.equal(r.source.date, '2026-11-20');
-      }
-      for (const r of body.routes.slice(2)) assert.match(r.source.url, /^https:\/\/(www\.bilibili\.com\/opus\/|docs\.ihex\.dev\/)/);
+      assert.deepEqual(body.routes.filter(isGame8).map((r) => r.id), ['white-albaz', 'branded-fusion']);
+      for (const r of body.routes.filter(isGame8)) assert.equal(r.source.date, '2026-11-20');
+      for (const r of body.routes.filter((x) => !isGame8(x))) assert.match(r.source.url, /^https:\/\/(www\.bilibili\.com\/opus\/|docs\.ihex\.dev\/)/);
       for (const r of body.routes) assert.equal(r.verified, '2026-11-24');
     } finally { server.stop(); }
   });
