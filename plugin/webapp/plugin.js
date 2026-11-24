@@ -5,7 +5,7 @@
    GET /routes and GET /route?id= (the 展开路线 list, and one route's steps: the engine's board after each step, what changed, the end summary),
    GET /card-image?code= (JSON with base64; drawn as a data: address).
    Tabs: 卡组一览 (the deck grouped by role; click a card for its effect), 展开路线 (the route list, then a player: previous / next / jump / arrow keys,
-   the last step is the end summary), 起手速查 (a placeholder until its ticket).
+   a step bar starting with 起手 (the opening hand, step 0, no diff), the last step is the end summary), 起手速查 (a placeholder until its ticket).
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -99,19 +99,19 @@ function DeckView({ rest, deck }) {
 const ZONE_LABEL = { hand: "手牌", monsters: "怪兽区", spellTraps: "魔陷区", grave: "墓地", banished: "除外" };
 const BOARD_ZONES = ["monsters", "spellTraps", "hand", "grave", "banished"];
 
-function MiniCard({ rest, card, fresh }) {
+function MiniCard({ rest, card, fresh, zone }) {
   return h("div", { className: `yg-mini${fresh ? " fresh" : ""}`, title: card.jp, "data-fresh": fresh ? "true" : "false" },
     h("span", { className: "yg-mini-art" },
       h(CardArt, { rest, code: card.code, md: card.md }),
       fresh ? h("span", { className: "yg-new" }, "新") : null,
-      card.sequence >= 5 && card.sequence <= 6 ? h("span", { className: "yg-tag" }, "额外怪兽区") : null),
+      zone === "monsters" && card.sequence >= 5 && card.sequence <= 6 ? h("span", { className: "yg-tag" }, "额外怪兽区") : null),
     h("span", { className: "yg-name" }, card.md));
 }
 
-function ZoneRow({ rest, label, cards, empty = "空" }) {
+function ZoneRow({ rest, label, cards, zone, empty = "空" }) {
   return h("section", { className: "yg-zone", "aria-label": label },
     h("div", { className: "yg-zone-lab" }, h("span", null, label), h("span", { className: "yg-lab" }, `${cards.length} 张`)),
-    cards.length ? h("div", { className: "yg-minis" }, cards.map((c, i) => h(MiniCard, { key: `${c.code}-${i}`, rest, card: c, fresh: c.fresh }))) : h("span", { className: "yg-lab" }, empty));
+    cards.length ? h("div", { className: "yg-minis" }, cards.map((c, i) => h(MiniCard, { key: `${c.code}-${i}`, rest, card: c, fresh: c.fresh, zone }))) : h("span", { className: "yg-lab" }, empty));
 }
 
 // 花了什么 → 换来什么: what left each zone, what came into it
@@ -130,37 +130,40 @@ function EndSummary({ rest, end }) {
     h("p", { className: "yg-end-num" }, "对手回合能打断 ", h("span", { className: "yg-bignum" }, end.interrupts), " 次"),
     end.breakers.length ? h("ul", { className: "yg-breakers" }, end.breakers.map((b) => h("li", { key: b.code },
       h("strong", null, `${b.md}${b.copies > 1 ? ` ×${b.copies}` : ""}`), h("span", { className: "yg-chip on" }, `打断 ${b.interrupts}`), h("span", { className: "yg-lab" }, b.interruptHow)))) : h("p", { className: "yg-lab" }, "终场没有打断"),
-    h(ZoneRow, { rest, label: "场上的怪兽", cards: end.monsters }),
-    h(ZoneRow, { rest, label: "场上的魔陷", cards: end.spellTraps }),
-    h(ZoneRow, { rest, label: "剩余手牌", cards: end.hand }));
+    h(ZoneRow, { rest, label: "场上的怪兽", cards: end.monsters, zone: "monsters" }),
+    h(ZoneRow, { rest, label: "场上的魔陷", cards: end.spellTraps, zone: "spellTraps" }),
+    h(ZoneRow, { rest, label: "剩余手牌", cards: end.hand, zone: "hand" }));
 }
 
+// position 0 is 起手 (the opening hand, nothing spent yet); positions 1..total are the route's steps
 function Player({ rest, id, onBack }) {
   const [route, setRoute] = useState(null);
   const [error, setError] = useState("");
   const [index, setIndex] = useState(0);
   useEffect(() => {
     let live = true;
-    setRoute(null); setIndex(0);
+    setRoute(null); setIndex(0); setError("");
     rest(`/route?id=${id}`).then((r) => { if (live) setRoute(r); }).catch((e) => { if (live) setError(message(e)); });
     return () => { live = false; };
   }, [rest, id]);
   const total = route?.steps.length ?? 0;
   useEffect(() => {
     const onKey = (e) => {
-      if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? "")) return;
+      if (total === 0 || e.target?.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? "")) return;
       if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
-      if (e.key === "ArrowRight") setIndex((i) => Math.min(total - 1, i + 1));
+      if (e.key === "ArrowRight") setIndex((i) => Math.min(total, i + 1));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [total]);
   if (error) return h("div", { className: "yg-error", role: "alert" }, error);
   if (!route) return h("p", { className: "yg-lab" }, "读取路线…");
-  const step = route.steps[index];
-  const last = index === total - 1;
+  const opening = index === 0;
+  const step = opening ? null : route.steps[index - 1];
+  const board = opening ? route.start : step.board;
+  const last = index === total;
   const mismatch = [route.mismatch, ...route.engineDiff.map((d) => `引擎重放和教程写的终场不一致：${d}`)].filter(Boolean);
-  return h("div", { className: "yg-player", "data-step": String(step.n), "data-total": String(total) },
+  return h("div", { className: "yg-player", "data-step": String(index), "data-total": String(total) },
     h("div", { className: "yg-row wrap" },
       h("button", { className: "yg-btn small", onClick: onBack }, "← 路线列表"),
       h("h2", { className: "yg-route-title" }, route.name)),
@@ -169,18 +172,22 @@ function Player({ rest, id, onBack }) {
       ` · 页面版本 ${route.source.date} · 引擎验证于 ${route.verified}`),
     mismatch.length ? h("div", { className: "yg-mismatch", role: "alert" }, h("strong", null, "教程和引擎不一致"), mismatch.map((m, i) => h("p", { key: i }, m))) : null,
     h("div", { className: "yg-stepbar", role: "group", "aria-label": "跳到某一步" },
-      route.steps.map((s, i) => h("button", { key: s.n, className: `yg-stepno${i === index ? " on" : ""}`, onClick: () => setIndex(i), "aria-label": `第 ${s.n} 步`, "aria-current": i === index ? "step" : undefined }, String(s.n)))),
+      h("button", { className: `yg-stepno${opening ? " on" : ""}`, onClick: () => setIndex(0), "aria-label": "起手", "aria-current": opening ? "step" : undefined }, "起手"),
+      route.steps.map((s, i) => h("button", { key: s.n, className: `yg-stepno${i + 1 === index ? " on" : ""}`, onClick: () => setIndex(i + 1), "aria-label": `第 ${s.n} 步`, "aria-current": i + 1 === index ? "step" : undefined }, String(s.n)))),
     h("div", { className: "yg-nav" },
-      h("button", { className: "yg-btn", disabled: index === 0, onClick: () => setIndex(index - 1) }, "上一步"),
-      h("span", { className: "yg-lab yg-pos" }, `第 ${step.n} / ${total} 步${last ? " · 终场" : ""}`),
+      h("button", { className: "yg-btn", disabled: opening, onClick: () => setIndex(index - 1) }, "上一步"),
+      h("span", { className: "yg-lab yg-pos" }, opening ? `起手 · 共 ${total} 步` : `第 ${index} / ${total} 步${last ? " · 终场" : ""}`),
       h("button", { className: "yg-btn", disabled: last, onClick: () => setIndex(index + 1) }, "下一步")),
-    h("section", { className: "yg-step", "aria-label": "这一步" },
-      h("p", { className: "yg-step-text" }, step.text),
-      step.activated.length ? h("p", null, h("span", { className: "yg-lab" }, "发动了 "), step.activated.map((c) => c.md).join("、")) : null,
-      step.actions.length ? h("p", { className: "yg-lab" }, `引擎里的操作：${step.actions.join(" · ")}`) : null,
-      h(Trade, { diff: step.diff })),
+    h("section", { className: "yg-step", "aria-label": opening ? "起手" : "这一步" },
+      opening ? h("p", { className: "yg-step-text" }, "起手：先看这副手牌，往后每一步都和上一步比")
+        : [
+          h("p", { key: "text", className: "yg-step-text" }, step.text),
+          step.activated.length ? h("p", { key: "act" }, h("span", { className: "yg-lab" }, "发动了 "), step.activated.map((c) => c.md).join("、")) : null,
+          step.actions.length ? h("p", { key: "acts", className: "yg-lab" }, `引擎里的操作：${step.actions.join(" · ")}`) : null,
+          h(Trade, { key: "trade", diff: step.diff }),
+        ]),
     h("div", { className: "yg-board", "aria-label": "完整场面" },
-      BOARD_ZONES.map((zone) => h(ZoneRow, { key: zone, rest, label: ZONE_LABEL[zone], cards: step.board[zone] }))),
+      BOARD_ZONES.map((zone) => h(ZoneRow, { key: zone, rest, label: ZONE_LABEL[zone], cards: board[zone], zone }))),
     last ? h(EndSummary, { rest, end: route.end }) : null);
 }
 

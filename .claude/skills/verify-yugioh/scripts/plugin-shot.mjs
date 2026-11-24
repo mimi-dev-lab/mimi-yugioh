@@ -119,7 +119,7 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     if (!clicked) await fail(new Error(`卡组一览里没有卡「${opts.select}」`));
     await until((n) => document.querySelector('.yg-detail .yg-title')?.innerText === n, opts.select, 10000, `说明区显示「${opts.select}」`).catch(fail);
   }
-  // 展开路线：按 id 或名字点列表里的一条，再从第 1 步一步步点「下一步」（--keys：按右方向键）走到第 N 步或最后一步
+  // 展开路线：按 id 或名字点列表里的一条，播放页默认停在起手（第 0 步），再一步步点「下一步」（--keys：按右方向键）走到第 N 步（0 或「起手」就是不动）或最后一步
   if (opts.route) {
     if (!opts.tab || opts.tab === '卡组一览') {
       if (!(await clickButton('展开路线'))) throw new Error('页面上没有页签「展开路线」');
@@ -131,8 +131,8 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     await until(() => !!document.querySelector('.yg-player'), null, 60000, '播放页出来').catch(fail);
     if (opts.step) {
       const total = await evaluate(() => Number(document.querySelector('.yg-player').dataset.total));
-      const target = opts.step === 'last' ? total : Number(opts.step);
-      if (!Number.isInteger(target) || target < 1 || target > total) await fail(new Error(`--step ${opts.step} 不在 1–${total} 里`));
+      const target = opts.step === 'last' ? total : opts.step === '起手' ? 0 : Number(opts.step);
+      if (!Number.isInteger(target) || target < 0 || target > total) await fail(new Error(`--step ${opts.step} 不在 0（起手）–${total} 里`));
       for (;;) {
         const now = await evaluate(() => Number(document.querySelector('.yg-player').dataset.step));
         if (now >= target) break;
