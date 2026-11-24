@@ -6,9 +6,11 @@
                                          serves only its Webapp with this checkout's plugin/ (YUGIOH_URL = that instance);
                                          prints run.json, then runs doctor. A failed `up` stops what it started.
   plugin-verify doctor                   is this run worth driving? (read-only; exit 0 = yes)
-  plugin-verify shot NAME [--design | --mobile] [--tab 卡组一览|展开路线|起手速查] [--select 卡名] [--compare PNG]
+  plugin-verify shot NAME [--design | --mobile] [--tab 卡组一览|展开路线|起手速查] [--select 卡名] [--route ID或名字 [--step N|起手|last] [--keys]] [--compare PNG]
                                          open the web workspace (headless Chromium, plugin-shot.mjs), click 游戏王 in the sidebar like a user (the tab is 卡组一览),
                                          wait until it has drawn; then optionally switch tab and click a card in 卡组一览 by its name (the effect panel shows it);
+                                         --route (opens 展开路线) clicks that route in the list (by id or name), --step walks the player there by clicking
+                                         下一步 from 起手 (step 0; --step 0 or 起手 stays there) (--keys presses the right arrow key instead);
                                          --design is 1280x860 with the sidebar hidden, --mobile a 390x844 phone; --compare also writes NAME-compare.png
                                          (a design PNG on the left); writes NAME.png, NAME.txt and NAME.json (every request the tab made, and the ones not
                                          to this origin)
@@ -307,7 +309,7 @@ def cmd_shot(a) -> int:
     evidence = run["evidence"]
     if not evidence:
         sys.exit("no evidence folder in run.json")
-    opts = {"name": a.name, "design": a.design, "mobile": a.mobile, "tab": a.tab, "select": a.select, "compare": a.compare}
+    opts = {"name": a.name, "design": a.design, "mobile": a.mobile, "tab": a.tab, "select": a.select, "route": a.route, "step": a.step, "keys": a.keys, "compare": a.compare}
     pub = {"id": run["id"], "base": run["base"], "evidence": evidence, "cookies": [kv.split("=", 1) for kv in cookie(run).split("; ")]}
     r = subprocess.run([node(), str(YV.parent / "plugin-shot.mjs"), json.dumps({**pub, **opts}, ensure_ascii=False)],
                        capture_output=True, text=True, timeout=300)
@@ -347,6 +349,9 @@ def main() -> int:
     view.add_argument("--mobile", action="store_true", help="a 390x844 phone (mobile emulation) with the sidebar hidden")
     s.add_argument("--tab", choices=["卡组一览", "展开路线", "起手速查"], help="open this tab (the default is 卡组一览)")
     s.add_argument("--select", metavar="卡名", help="in 卡组一览, click the card with this name (its effect panel opens)")
+    s.add_argument("--route", metavar="ID或名字", help="open 展开路线 and click this route (its id, or part of its name); the player opens at 起手 (step 0)")
+    s.add_argument("--step", metavar="N|起手|last", help="with --route: walk the player to step N (0 or 起手 = the opening hand, or the last step) by clicking 下一步")
+    s.add_argument("--keys", action="store_true", help="with --step: press the right arrow key instead of clicking 下一步")
     s.add_argument("--compare", metavar="PNG", help="also write NAME-compare.png: the design PNG on the left, this screenshot on the right")
     s.set_defaults(f=cmd_shot)
     sub.add_parser("down").set_defaults(f=cmd_down)

@@ -78,7 +78,7 @@ async function launch(opts) {
   const serverLog = join(dir, 'server.log');
   const out = openSync(serverLog, 'a');
   const server = spawn(process.execPath, [SERVER], { cwd: REPO, detached: true, stdio: ['ignore', out, out],
-    env: { ...process.env, PORT: '0', YUGIOH_DATA: data } });
+    env: { ...process.env, PORT: '0', YUGIOH_DATA: data, YUGIOH_ENGINE: process.env.YUGIOH_ENGINE ?? join(homedir(), '.cache/mimi-yugioh/engine') } });
   server.unref();
   try {
     const url = await waitFor(async () => readFileSync(serverLog, 'utf8').match(/http:\/\/127\.0\.0\.1:\d+/)?.[0], 15_000, `服务打出地址（看 ${serverLog}）`);

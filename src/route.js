@@ -60,12 +60,21 @@ function summarizeLabels(labels) {
 
 const describeOptions = (prompt) => prompt.options.map((o) => [o.action, o.code].filter((x) => x !== undefined).join(' ')).join(' | ');
 
-// 用路线自己写的起手开局；seed 是洗牌的种子（不给用 1），路线不该依赖洗牌。boards 是按 startsStep 切的每一步之后的场面
+// 路线步骤的动作文字里不要机械确认（「发动」「不发动」「选完」「放在第几格」「选第几项」）
+const MECHANICAL = /^(发动|不发动|选完)$|^(放在 |选第 )/;
+
+// 用路线自己写的起手开局；seed 是洗牌的种子（不给用 1），路线不该依赖洗牌。
+// boards 是按 startsStep 切的每一步之后的场面；stepBoards 是路线数据里每一项 steps 走完后的场面（条数等于 route.steps，
+// 最后一步回合已结束时取终场），stepActions 是那一步里引擎动作的文字，stepActivated 是那一步里我方发动了效果的卡的密码
 export async function playRoute(engine, deck, route, { seed } = {}) {
   const session = await openHandSession(engine, deck, route.hand, seed);
   try {
     const boards = [];
     const labels = []; // 每一步每个选择的文字
+    const stepBoards = [];
+    const stepActions = [];
+    const stepActivated = [];
+    let stepTexts = [];
     const startBoard = session.board();
     const choose = (prompt, indices) => {
       const text = labelFor(deck, prompt, indices);
@@ -73,8 +82,11 @@ export async function playRoute(engine, deck, route, { seed } = {}) {
       if (startsStep(prompt, indices) || !boards.length) { boards.push(null); labels.push([]); }
       boards[boards.length - 1] = session.board();
       labels.at(-1).push(text);
+      stepTexts.push(text);
     };
     route.steps.forEach((step, stepIndex) => {
+      stepTexts = [];
+      const activatedBefore = session.activated.length;
       for (const response of step.do) {
         const where = `第 ${stepIndex + 1} 步「${step.text}」的回应 ${JSON.stringify(response)}`;
         if (response === 'finish') {
@@ -93,9 +105,12 @@ export async function playRoute(engine, deck, route, { seed } = {}) {
         if (indices.some((i) => i < 0)) throw new Error(`${where}：当前提示是 ${prompt.kind}，合法项里没有它 [${describeOptions(prompt)}]`);
         choose(prompt, indices);
       }
+      stepBoards.push(session.endBoard ?? session.board());
+      stepActions.push(stepTexts.filter((t) => !MECHANICAL.test(t)));
+      stepActivated.push(session.activated.slice(activatedBefore));
     });
     if (!session.endBoard) throw new Error('步骤走完了，我方回合还没结束（最后一步应该是 finish）');
-    return { endBoard: session.endBoard, startBoard, boards, steps: labels.map((l) => summarizeLabels(l)), scriptErrors: [...session.scriptErrors] };
+    return { endBoard: session.endBoard, startBoard, boards, steps: labels.map((l) => summarizeLabels(l)), stepBoards, stepActions, stepActivated, scriptErrors: [...session.scriptErrors] };
   } finally {
     session.close();
   }

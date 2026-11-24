@@ -2,6 +2,7 @@
 // 每条路线是引擎可重放的步骤序列：每步一句我们自己的说明（text）和这一步要给引擎的回应（do）。回应的写法见 src/route.js。
 // 路线只写「从哪些牌出发」（hand 是起手 5 张，其余是填充用的无关牌，凑够 Game8 说的 1 卡初动），不写具体的洗牌顺序。
 // end 是 Game8 页面写的终场；测试把引擎重放出来的终场和它对照。
+// 每条路线另带：source（出处 { name, url, date }，date 是页面版本日期）、verified（引擎重放验证的日期）、mismatch（教程和引擎结果不一致处的说明，一致就不写这个字段）。
 const C = {
   albaz: 73819701, // 白之落胤
   whiteSaint: 55273560, // 白之圣女 艾克利西亚
@@ -14,6 +15,9 @@ const C = {
   lockBird: 94145021, superPoly: 48130397, sarcophagus: 75500286,
 };
 
+const SOURCE = { name: 'Game8', url: 'https://game8.jp/yugioh-masterduel/534262', date: '2026-11-20' };
+const VERIFIED = '2026-11-24';
+
 const act = (code) => ({ idle: 'activate', code });
 const chain = (code) => ({ chain: code });
 const pick = (...codes) => ({ pick: codes });
@@ -24,6 +28,8 @@ export const ROUTES = [
   {
     id: 'white-albaz',
     name: '基本展开｜白之落胤初动',
+    source: SOURCE,
+    verified: VERIFIED,
     needs: C.albaz,
     // 起手：白之落胤 + 4 张不影响展开的牌（2 超融合、黄金柜、抽牌小丑与封锁鸟）
     hand: [C.albaz, C.superPoly, C.superPoly, C.sarcophagus, C.lockBird],
@@ -51,6 +57,8 @@ export const ROUTES = [
   {
     id: 'branded-fusion',
     name: '基本展开｜烙印融合初动',
+    source: SOURCE,
+    verified: VERIFIED,
     needs: C.brandedFusion,
     // 起手：烙印融合 + 同样 4 张填充牌
     hand: [C.brandedFusion, C.superPoly, C.superPoly, C.sarcophagus, C.lockBird],

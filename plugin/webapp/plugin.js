@@ -2,8 +2,10 @@
    A Branded (烙印) tutorial wiki, drawn as a shell over the yugioh service (src/), reached through this plugin's backend
    (../dashboard/plugin_api.py) and ctx.rest, which adds /api/plugins/yugioh and the web workspace's own login and path prefix:
    GET /deck (every card: Master Duel and Japanese names, role, count, the three things, how it interrupts on the opponent's turn),
+   GET /routes and GET /route?id= (the 展开路线 list, and one route's steps: the engine's board after each step, what changed, the end summary),
    GET /card-image?code= (JSON with base64; drawn as a data: address).
-   Tabs: 卡组一览 (the deck grouped by role; click a card for its effect), 展开路线 and 起手速查 (placeholders until their tickets).
+   Tabs: 卡组一览 (the deck grouped by role; click a card for its effect), 展开路线 (the route list, then a player: previous / next / jump / arrow keys,
+   a step bar starting with 起手 (the opening hand, step 0, no diff), the last step is the end summary), 起手速查 (a placeholder until its ticket).
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -93,6 +95,124 @@ function DeckView({ rest, deck }) {
     h(Detail, { rest, card, onClose: () => setCode(null) }));
 }
 
+// ---- 展开路线: the list, then the player ----
+const ZONE_LABEL = { hand: "手牌", monsters: "怪兽区", spellTraps: "魔陷区", grave: "墓地", banished: "除外" };
+const BOARD_ZONES = ["monsters", "spellTraps", "hand", "grave", "banished"];
+
+function MiniCard({ rest, card, fresh, zone }) {
+  return h("div", { className: `yg-mini${fresh ? " fresh" : ""}`, title: card.jp, "data-fresh": fresh ? "true" : "false" },
+    h("span", { className: "yg-mini-art" },
+      h(CardArt, { rest, code: card.code, md: card.md }),
+      fresh ? h("span", { className: "yg-new" }, "新") : null,
+      zone === "monsters" && card.sequence >= 5 && card.sequence <= 6 ? h("span", { className: "yg-tag" }, "额外怪兽区") : null),
+    h("span", { className: "yg-name" }, card.md));
+}
+
+function ZoneRow({ rest, label, cards, zone, empty = "空" }) {
+  return h("section", { className: "yg-zone", "aria-label": label },
+    h("div", { className: "yg-zone-lab" }, h("span", null, label), h("span", { className: "yg-lab" }, `${cards.length} 张`)),
+    cards.length ? h("div", { className: "yg-minis" }, cards.map((c, i) => h(MiniCard, { key: `${c.code}-${i}`, rest, card: c, fresh: c.fresh, zone }))) : h("span", { className: "yg-lab" }, empty));
+}
+
+// 花了什么 → 换来什么: what left each zone, what came into it
+function Trade({ diff }) {
+  const side = (key, title) => {
+    const rows = BOARD_ZONES.map((zone) => [zone, diff[zone][key]]).filter(([, cards]) => cards.length);
+    return h("div", { className: "yg-side" }, h("span", { className: "yg-lab" }, title),
+      rows.length ? rows.map(([zone, cards]) => h("div", { key: zone, className: "yg-trade-row" }, h("span", { className: "yg-chip" }, ZONE_LABEL[zone]), h("span", null, cards.map((c) => c.md).join("、")))) : h("span", { className: "yg-lab" }, "没有"));
+  };
+  return h("div", { className: "yg-trade", "aria-label": "花了什么 → 换来什么" }, side("out", "花了什么（离开）"), h("span", { className: "yg-arrow", "aria-hidden": "true" }, "→"), side("in", "换来什么（进来）"));
+}
+
+function EndSummary({ rest, end }) {
+  return h("section", { className: "yg-end", "aria-label": "终场汇总" },
+    h("h2", null, "终场汇总"),
+    h("p", { className: "yg-end-num" }, "对手回合能打断 ", h("span", { className: "yg-bignum" }, end.interrupts), " 次"),
+    end.breakers.length ? h("ul", { className: "yg-breakers" }, end.breakers.map((b) => h("li", { key: b.code },
+      h("strong", null, `${b.md}${b.copies > 1 ? ` ×${b.copies}` : ""}`), h("span", { className: "yg-chip on" }, `打断 ${b.interrupts}`), h("span", { className: "yg-lab" }, b.interruptHow)))) : h("p", { className: "yg-lab" }, "终场没有打断"),
+    h(ZoneRow, { rest, label: "场上的怪兽", cards: end.monsters, zone: "monsters" }),
+    h(ZoneRow, { rest, label: "场上的魔陷", cards: end.spellTraps, zone: "spellTraps" }),
+    h(ZoneRow, { rest, label: "剩余手牌", cards: end.hand, zone: "hand" }));
+}
+
+// position 0 is 起手 (the opening hand, nothing spent yet); positions 1..total are the route's steps
+function Player({ rest, id, onBack }) {
+  const [route, setRoute] = useState(null);
+  const [error, setError] = useState("");
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setRoute(null); setIndex(0); setError("");
+    rest(`/route?id=${id}`).then((r) => { if (live) setRoute(r); }).catch((e) => { if (live) setError(message(e)); });
+    return () => { live = false; };
+  }, [rest, id]);
+  const total = route?.steps.length ?? 0;
+  useEffect(() => {
+    const onKey = (e) => {
+      if (total === 0 || e.target?.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? "")) return;
+      if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
+      if (e.key === "ArrowRight") setIndex((i) => Math.min(total, i + 1));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [total]);
+  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+  if (!route) return h("p", { className: "yg-lab" }, "读取路线…");
+  const opening = index === 0;
+  const step = opening ? null : route.steps[index - 1];
+  const board = opening ? route.start : step.board;
+  const last = index === total;
+  const mismatch = [route.mismatch, ...route.engineDiff.map((d) => `引擎重放和教程写的终场不一致：${d}`)].filter(Boolean);
+  return h("div", { className: "yg-player", "data-step": String(index), "data-total": String(total) },
+    h("div", { className: "yg-row wrap" },
+      h("button", { className: "yg-btn small", onClick: onBack }, "← 路线列表"),
+      h("h2", { className: "yg-route-title" }, route.name)),
+    h("p", { className: "yg-lab yg-sum" }, "来源 ",
+      h("a", { href: route.source.url, target: "_blank", rel: "noopener noreferrer" }, route.source.name),
+      ` · 页面版本 ${route.source.date} · 引擎验证于 ${route.verified}`),
+    mismatch.length ? h("div", { className: "yg-mismatch", role: "alert" }, h("strong", null, "教程和引擎不一致"), mismatch.map((m, i) => h("p", { key: i }, m))) : null,
+    h("div", { className: "yg-stepbar", role: "group", "aria-label": "跳到某一步" },
+      h("button", { className: `yg-stepno${opening ? " on" : ""}`, onClick: () => setIndex(0), "aria-label": "起手", "aria-current": opening ? "step" : undefined }, "起手"),
+      route.steps.map((s, i) => h("button", { key: s.n, className: `yg-stepno${i + 1 === index ? " on" : ""}`, onClick: () => setIndex(i + 1), "aria-label": `第 ${s.n} 步`, "aria-current": i + 1 === index ? "step" : undefined }, String(s.n)))),
+    h("div", { className: "yg-nav" },
+      h("button", { className: "yg-btn", disabled: opening, onClick: () => setIndex(index - 1) }, "上一步"),
+      h("span", { className: "yg-lab yg-pos" }, opening ? `起手 · 共 ${total} 步` : `第 ${index} / ${total} 步${last ? " · 终场" : ""}`),
+      h("button", { className: "yg-btn", disabled: last, onClick: () => setIndex(index + 1) }, "下一步")),
+    h("section", { className: "yg-step", "aria-label": opening ? "起手" : "这一步" },
+      opening ? h("p", { className: "yg-step-text" }, "起手：先看这副手牌，往后每一步都和上一步比")
+        : [
+          h("p", { key: "text", className: "yg-step-text" }, step.text),
+          step.activated.length ? h("p", { key: "act" }, h("span", { className: "yg-lab" }, "发动了 "), step.activated.map((c) => c.md).join("、")) : null,
+          step.actions.length ? h("p", { key: "acts", className: "yg-lab" }, `引擎里的操作：${step.actions.join(" · ")}`) : null,
+          h(Trade, { key: "trade", diff: step.diff }),
+        ]),
+    h("div", { className: "yg-board", "aria-label": "完整场面" },
+      BOARD_ZONES.map((zone) => h(ZoneRow, { key: zone, rest, label: ZONE_LABEL[zone], cards: board[zone], zone }))),
+    last ? h(EndSummary, { rest, end: route.end }) : null);
+}
+
+function RoutesView({ rest }) {
+  const [routes, setRoutes] = useState(null);
+  const [error, setError] = useState("");
+  const [id, setId] = useState(null);
+  useEffect(() => { rest("/routes").then((r) => setRoutes(r.routes)).catch((e) => setError(message(e))); }, [rest]);
+  if (id) return h(Player, { rest, id, onBack: () => setId(null) });
+  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+  if (!routes) return h("p", { className: "yg-lab" }, "读取路线…");
+  return h("div", { className: "yg-routes" },
+    h("p", { className: "yg-lab yg-sum" }, "每条路线的每一步都在规则引擎里重放过，场面是引擎的结果。点一条逐步看。"),
+    routes.map((r) => h("button", { key: r.id, className: "yg-route", "data-route-id": r.id, onClick: () => setId(r.id), "aria-label": r.name },
+      h("span", { className: "yg-route-art" }, h(CardArt, { rest, code: r.needs.code, md: r.needs.md })),
+      h("span", { className: "yg-col" },
+        h("span", { className: "yg-title" }, r.name),
+        h("span", null, h("span", { className: "yg-lab" }, "需要的起手卡 "), r.needs.md),
+        h("span", { className: "yg-row wrap" },
+          h("span", { className: "yg-chip on" }, `终场打断 ${r.interrupts}`),
+          h("span", { className: "yg-chip" }, `${r.steps} 步`),
+          r.mismatch || r.engineDiff.length ? h("span", { className: "yg-chip warn" }, "和教程不一致") : null),
+        h("span", { className: "yg-lab" }, `来源 ${r.source.name}（${r.source.date} 版）· 引擎验证于 ${r.verified}`)))));
+}
+
 function YugiohApp({ rest }) {
   const [tab, setTab] = useState(TABS[0]);
   const [deck, setDeck] = useState(null);
@@ -106,7 +226,8 @@ function YugiohApp({ rest }) {
   }, [rest]);
 
   let main = null;
-  if (tab !== "卡组一览") main = h("div", { className: "yg-soon" }, h("h2", null, tab), h("p", { className: "yg-lab" }, `「${tab}」还没做，下一步加上。`));
+  if (tab === "展开路线") main = h(RoutesView, { rest });
+  else if (tab !== "卡组一览") main = h("div", { className: "yg-soon" }, h("h2", null, tab), h("p", { className: "yg-lab" }, `「${tab}」还没做，下一步加上。`));
   else if (deck) main = h(DeckView, { rest, deck });
   return h("div", { className: "yg", "data-ready": ready ? "true" : "false" },
     h("header", { className: "yg-head" }, h("h1", null, "游戏王 · 烙印教程"),
@@ -162,6 +283,40 @@ const CSS = `
 .yg-title { font-size: 16px; font-weight: 600; line-height: 1.4; }
 .yg-facts { display: flex; flex-direction: column; font-size: 12px; line-height: 1.6; }
 .yg-fact { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid #1c1c1c; }
+.yg-routes { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+.yg-route { display: flex; gap: 14px; align-items: flex-start; text-align: left; padding: 12px; border: 1px solid #2a2a2a; border-radius: 8px; background: #000; }
+.yg-route:hover { border-color: #c8ff3d; }
+.yg-route-art { width: 64px; flex: none; aspect-ratio: 59 / 86; }
+.yg-chip.warn { border-color: #ff9a6b; color: #ff9a6b; }
+.yg-player { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.yg-route-title { font-size: 18px; }
+.yg-mismatch { border: 2px solid #ff9a6b; border-radius: 8px; padding: 10px 14px; color: #ffb48f; background: #1c0f08; display: flex; flex-direction: column; gap: 4px; line-height: 1.6; }
+.yg-stepbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.yg-stepno { min-width: 34px; height: 34px; border-radius: 5px; border: 1px solid #3a3a3a; background: none; padding: 0 6px; }
+.yg-stepno.on { background: #c8ff3d; border-color: #c8ff3d; color: #000; font-weight: 600; }
+.yg-nav { display: flex; align-items: center; gap: 12px; }
+.yg-btn:disabled { opacity: .35; cursor: default; }
+.yg-step { border: 1px solid #1f1f1f; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; line-height: 1.6; }
+.yg-step-text { font-size: 15px; font-weight: 600; }
+.yg-trade { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: start; }
+.yg-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.yg-trade-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.yg-arrow { color: #c8ff3d; font-size: 20px; padding-top: 18px; }
+.yg-board, .yg-end { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.yg-zone { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid #1c1c1c; min-width: 0; }
+.yg-zone-lab { display: flex; gap: 10px; align-items: baseline; }
+.yg-minis { display: flex; flex-wrap: wrap; gap: 10px; }
+.yg-mini { width: 76px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px; border: 2px solid transparent; border-radius: 6px; text-align: center; }
+.yg-mini.fresh { border-color: #c8ff3d; background: rgba(200, 255, 61, .12); }
+.yg-mini-art { position: relative; width: 100%; aspect-ratio: 59 / 86; }
+.yg-mini .yg-name { font-size: 11px; line-height: 1.3; }
+.yg-new { position: absolute; right: -4px; top: -4px; padding: 0 5px; border-radius: 9px; background: #c8ff3d; color: #000; font-size: 11px; font-weight: 600; }
+.yg-end { border: 1px solid #c8ff3d; border-radius: 8px; padding: 14px 16px; }
+.yg-end h2 { font-size: 16px; color: #c8ff3d; }
+.yg-end-num { font-size: 15px; }
+.yg-bignum { font-size: 30px; vertical-align: -3px; padding: 0 2px; font-weight: 700; color: #c8ff3d; }
+.yg-breakers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.yg-breakers li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; line-height: 1.6; }
 @media (max-width: 760px) {
   .yg { padding: 12px; }
   .yg-head h1 { font-size: 16px; }
@@ -172,6 +327,10 @@ const CSS = `
   .yg-deck.open { padding-bottom: 58vh; }
   .yg-detail { position: fixed; left: 0; right: 0; bottom: 0; top: auto; max-height: 56vh; overflow-y: auto; border-radius: 12px 12px 0 0; border-color: #3a3a3a; z-index: 5; }
   .yg-big { width: 96px; height: 140px; }
+  .yg-trade { grid-template-columns: minmax(0, 1fr); } .yg-arrow { padding-top: 0; transform: rotate(90deg); justify-self: start; }
+  .yg-mini { width: 62px; padding: 3px; } .yg-mini .yg-name { font-size: 10px; }
+  .yg-route-art { width: 52px; }
+  .yg-end, .yg-step { padding: 12px; }
 }
 `;
 

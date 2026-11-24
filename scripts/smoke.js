@@ -40,10 +40,11 @@ export async function smoke(sha) {
   if (deployed === sha) say('通过', `部署的版本 ${sha.slice(0, 7)}`);
   else say('失败', `部署的版本是 ${deployed.slice(0, 7) || '（没有 DEPLOYED）'}，期望 ${sha.slice(0, 7)}`);
 
-  // /health 是服务活着；/deck 是卡组一览（页面的第一个页签）
+  // /health 是服务活着；/deck 是卡组一览（页面的第一个页签）；/routes 是展开路线的列表（引擎数据在、路线都重放得通才是 200）
   const checks = [
     ['health', (b) => b?.ok === true || '回应不是 {ok:true}'],
     ['deck', (b) => (Array.isArray(b?.cards) && b.cards.length > 0) || '200 但没有卡组一览'],
+    ['routes', (b) => (Array.isArray(b?.routes) && b.routes.length > 0) || '200 但没有路线'],
   ];
   for (const [i, [path, ok]] of checks.entries()) {
     const began = Date.now();
@@ -51,7 +52,7 @@ export async function smoke(sha) {
     const verdict = status === 200 ? ok(body) : null;
     if (status !== 200) say('失败', `${BASE}/${path} ${status || '连不上'}${body?.error ? `：${body.error}` : ''}`);
     else if (verdict !== true) say('失败', `${BASE}/${path} ${verdict}`);
-    else say('通过', `${BASE}/${path} 200（${Date.now() - began} ms${path === 'deck' ? `，${body.cards.length} 种卡` : ''}）`);
+    else say('通过', `${BASE}/${path} 200（${Date.now() - began} ms${path === 'deck' ? `，${body.cards.length} 种卡` : path === 'routes' ? `，${body.routes.length} 条路线` : ''}）`);
   }
 
   // 卡图经服务读（和插件页面走的是同一条路）：卡组用到的每张都要有；缺了页面只是改写卡名，所以只提醒

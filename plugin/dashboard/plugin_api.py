@@ -3,6 +3,8 @@
 starts no process.
 
 GET  /deck               → GET  /deck                  (卡组一览: every card with its names, role, count, effect and how it interrupts)
+GET  /routes             → GET  /routes                (展开路线 list: needs, interrupts at the end, source, verification date)
+GET  /route?id=X         → GET  /route?id=X            (one route: every step with the engine's board and what changed, the end summary; the id is lowercase letters, digits and hyphens)
 GET  /card-image?code=N  → GET  /card-image?code=N     (one card picture, as JSON with base64; the code has to be digits)
 
 The tutorial only reads: there are no writes to let through.
@@ -61,6 +63,21 @@ def forward(method: str, path: str) -> tuple[int, dict]:
 @router.get("/deck")
 async def deck():
     status, body = await asyncio.to_thread(forward, "GET", "/deck")
+    return JSONResponse(body, status_code=status)
+
+
+@router.get("/routes")
+async def routes():
+    status, body = await asyncio.to_thread(forward, "GET", "/routes")
+    return JSONResponse(body, status_code=status)
+
+
+@router.get("/route")
+async def route(id: str):
+    """The id is checked here so that nothing but lowercase letters, digits and hyphens reaches the service."""
+    if not id or len(id) > 64 or not all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in id):
+        return JSONResponse({"error": "路线 id 只许小写字母、数字和连字符"}, status_code=400)
+    status, body = await asyncio.to_thread(forward, "GET", f"/route?id={id}")
     return JSONResponse(body, status_code=status)
 
 

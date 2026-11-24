@@ -7,7 +7,7 @@ const TYPE_LINK = 0x4000000;
 
 export function openEngineFiles(dir) {
   const cdb = join(dir, 'cards.cdb');
-  if (!existsSync(cdb)) throw new Error(`没有 ${cdb}：先跑 node scripts/prepare-engine.js`);
+  if (!existsSync(cdb)) throw Object.assign(new Error(`没有 ${cdb}：先跑 node scripts/prepare-engine.js`), { code: 'ENGINE_MISSING' });
   const db = new DatabaseSync(cdb, { readOnly: true });
   const names = new Map(db.prepare('select id, name from texts').all().map((r) => [r.id, r.name]));
   const getData = db.prepare('select * from datas where id = ?');

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // plugin-verify 的 shot 用的浏览器脚本：用本机的无头 Chromium（不装依赖）打开临时网页工作区，像用户一样从侧栏点「游戏王」（默认是「卡组一览」页签），
-// 可选地切页签、在卡组一览里点一张卡，写 <name>.png / .txt / .json（网络记录）。
-// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, mobile, tab, select, compare }>'
+// 可选地切页签、在卡组一览里点一张卡、在展开路线里点一条路线并翻到某一步（点「下一步」或按右方向键），写 <name>.png / .txt / .json（网络记录）。
+// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, mobile, tab, select, route, step, keys, compare }>'
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -119,11 +119,36 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     if (!clicked) await fail(new Error(`卡组一览里没有卡「${opts.select}」`));
     await until((n) => document.querySelector('.yg-detail .yg-title')?.innerText === n, opts.select, 10000, `说明区显示「${opts.select}」`).catch(fail);
   }
-  const overflowX = await evaluate(() => { const x = document.querySelector('.yg'); return x.scrollWidth > x.clientWidth + 1; });
+  // 展开路线：按 id 或名字点列表里的一条，播放页默认停在起手（第 0 步），再一步步点「下一步」（--keys：按右方向键）走到第 N 步（0 或「起手」就是不动）或最后一步
+  if (opts.route) {
+    if (!opts.tab || opts.tab === '卡组一览') {
+      if (!(await clickButton('展开路线'))) throw new Error('页面上没有页签「展开路线」');
+      await until(() => [...document.querySelectorAll('.yg-tab.on')].some((b) => b.innerText === '展开路线'), null, 10000, '「展开路线」页签打开');
+    }
+    await until((r) => document.querySelectorAll('.yg-route').length > 0, null, 30000, '路线列表出来').catch(fail);
+    const opened = await evaluate((r) => { const b = [...document.querySelectorAll('button.yg-route')].find((x) => x.dataset.routeId === r || (x.getAttribute('aria-label') || '').includes(r)); if (!b) return false; b.click(); return true; }, opts.route);
+    if (!opened) await fail(new Error(`路线列表里没有「${opts.route}」`));
+    await until(() => !!document.querySelector('.yg-player'), null, 60000, '播放页出来').catch(fail);
+    if (opts.step) {
+      const total = await evaluate(() => Number(document.querySelector('.yg-player').dataset.total));
+      const target = opts.step === 'last' ? total : opts.step === '起手' ? 0 : Number(opts.step);
+      if (!Number.isInteger(target) || target < 0 || target > total) await fail(new Error(`--step ${opts.step} 不在 0（起手）–${total} 里`));
+      for (;;) {
+        const now = await evaluate(() => Number(document.querySelector('.yg-player').dataset.step));
+        if (now >= target) break;
+        if (opts.keys) {
+          for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39 });
+        } else if (!(await clickButton('下一步'))) await fail(new Error(`第 ${now} 步上点不了「下一步」`));
+        await until((n) => Number(document.querySelector('.yg-player').dataset.step) > n, now, 10000, `翻到第 ${now + 1} 步`).catch(fail);
+      }
+    }
+  }
+  const overflowX = await evaluate(() => { const x = document.querySelector('.yg'); return x.scrollWidth > x.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1; });
   const height = await evaluate(() => document.querySelector('.yg').scrollHeight);
   await sleep(600);
   // --design 保持 1280×860 的视口（和设计稿同样大），--mobile 保持一屏手机；平时把视口拉到内容那么高
   if (!opts.design && !opts.mobile) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 200, 4000) }); await sleep(500); }
+  else if (opts.mobile && opts.route) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 100, 5000) }); await sleep(500); }
   await until(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity), null, 5000, '动画走完').catch(() => {});
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   await writeFile(`${opts.evidence}/${opts.name}.png`, Buffer.from(shot.data, 'base64'));
