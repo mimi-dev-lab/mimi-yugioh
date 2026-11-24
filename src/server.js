@@ -32,7 +32,7 @@ const ROUTES = (async () => {
       return { routes };
     } finally { files.close(); }
   } catch (e) {
-    const reason = /^没有 .*cards\.cdb/.test(e.message) ? `引擎数据不在 ${ENGINE}（${e.message}）` : e.message;
+    const reason = e.code === 'ENGINE_MISSING' ? `引擎数据不在 ${ENGINE}（${e.message}）` : e.message;
     console.error(`路线重放失败：${reason}`);
     return { error: reason };
   }
