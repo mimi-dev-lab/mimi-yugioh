@@ -2,16 +2,10 @@
 (src/server.js, on this machine) and gives its answer back unchanged. It works nothing out, reads no data files and
 starts no process.
 
-GET  /hand               → GET  /hand                  (the hand in progress: prompt and legal options, board, step log, clock)
-POST /hand/<sub>         → POST /hand/<sub>            (every write, one route; only the paths in HAND_WRITES go through, any other
-                                                         is a 404 here and never reaches the service; the body goes through as it is)
-                                                         start: deal a new hand (a seed in the body replays that hand); choose: answer the prompt;
-                                                         hint: ask for the next step (counts against the score); end: end the turn
-GET  /home               → GET  /home                  (首页: every hand as a point, personal best, per-type averages, the benchmark-hand curve)
-GET  /cards              → GET  /cards                 (every card of the deck: Master Duel name, role, the three things)
+GET  /deck               → GET  /deck                  (卡组一览: every card with its names, role, count, effect and how it interrupts)
 GET  /card-image?code=N  → GET  /card-image?code=N     (one card picture, as JSON with base64; the code has to be digits)
-GET  /quiz               → GET  /quiz                  (记卡: how many cards are due)
-POST /quiz/<sub>         → POST /quiz/<sub>            (only the paths in QUIZ_WRITES go through; next: the next question, answer: answer it)
+
+The tutorial only reads: there are no writes to let through.
 
 YUGIOH_URL (default http://127.0.0.1:4519) says where the service is; it has to be on this machine.
 """
@@ -25,17 +19,15 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
 DEFAULT_URL = "http://127.0.0.1:4519"
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
-# The writes this plugin lets through. Adding one here needs a gateway restart.
-HAND_WRITES = ("start", "choose", "hint", "end")
-QUIZ_WRITES = ("next", "answer")
-TIMEOUT_S = 30  # the service only plays one hand in memory and reads its own data folder on this machine
+# Adding a route here needs a gateway restart.
+TIMEOUT_S = 30  # the service answers from memory and reads card pictures from its own data folder on this machine
 
 
 def service_url() -> str:
@@ -46,14 +38,13 @@ def service_url() -> str:
     return url.rstrip("/")
 
 
-def forward(method: str, path: str, body: bytes | None = None) -> tuple[int, dict]:
+def forward(method: str, path: str) -> tuple[int, dict]:
     """The service's status and JSON answer; a service that is down or answers badly becomes a 502."""
     try:
         base = service_url()
     except ValueError as e:
         return 500, {"error": str(e)}
-    request = urllib.request.Request(base + path, data=body, method=method,
-                                     headers={"content-type": "application/json"} if body is not None else {})
+    request = urllib.request.Request(base + path, method=method)
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as r:
             status, raw = r.status, r.read()
@@ -67,29 +58,9 @@ def forward(method: str, path: str, body: bytes | None = None) -> tuple[int, dic
         return 502, {"error": f"游戏王的服务回了看不懂的内容（HTTP {status}）"}
 
 
-@router.get("/hand")
-async def hand():
-    status, body = await asyncio.to_thread(forward, "GET", "/hand")
-    return JSONResponse(body, status_code=status)
-
-
-@router.post("/hand/{sub}")
-async def hand_write(sub: str, request: Request):
-    if sub not in HAND_WRITES:
-        return JSONResponse({"error": f"没有这个接口：/hand/{sub}"}, status_code=404)
-    status, body = await asyncio.to_thread(forward, "POST", f"/hand/{sub}", await request.body())
-    return JSONResponse(body, status_code=status)
-
-
-@router.get("/home")
-async def home():
-    status, body = await asyncio.to_thread(forward, "GET", "/home")
-    return JSONResponse(body, status_code=status)
-
-
-@router.get("/cards")
-async def cards():
-    status, body = await asyncio.to_thread(forward, "GET", "/cards")
+@router.get("/deck")
+async def deck():
+    status, body = await asyncio.to_thread(forward, "GET", "/deck")
     return JSONResponse(body, status_code=status)
 
 
@@ -99,18 +70,4 @@ async def card_image(code: str):
     if not code.isdigit() or len(code) > 10:
         return JSONResponse({"error": "卡号要是数字"}, status_code=400)
     status, body = await asyncio.to_thread(forward, "GET", f"/card-image?code={code}")
-    return JSONResponse(body, status_code=status)
-
-
-@router.get("/quiz")
-async def quiz():
-    status, body = await asyncio.to_thread(forward, "GET", "/quiz")
-    return JSONResponse(body, status_code=status)
-
-
-@router.post("/quiz/{sub}")
-async def quiz_write(sub: str, request: Request):
-    if sub not in QUIZ_WRITES:
-        return JSONResponse({"error": f"没有这个接口：/quiz/{sub}"}, status_code=404)
-    status, body = await asyncio.to_thread(forward, "POST", f"/quiz/{sub}", await request.body())
     return JSONResponse(body, status_code=status)

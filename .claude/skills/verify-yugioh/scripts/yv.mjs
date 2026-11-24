@@ -1,13 +1,10 @@
 #!/usr/bin/env node
-// 游戏王服务的验证实例：起一个临时的服务（PORT=0、临时数据目录、自己编的卡图），可选地先用固定种子发一手，查它健不健康，用完清掉。
+// 游戏王服务的验证实例：起一个临时的服务（PORT=0、临时数据目录、自己编的卡图），查它健不健康，用完清掉。
 // 插件页由同目录的 plugin-verify 驱动（它先调这里的 launch）。用法见上一级的 SKILL.md。
-//   yv launch [--hand-seed N] [--images <目录>]  起服务，打出「就绪：<地址>」「run: <id>」「证据目录：<目录>」。--hand-seed：开页面之前先发这个种子的一手
-//                                                （37 发含白之落胤的起手）；--images：复制这个目录里的真卡图（<卡号>.webp），默认用编的单色小图
-//                                                --made-up-hands N：开服务之前往数据目录的 hands.jsonl 写 N 条编的结算（每 5 条里有 1 条基准手；1 = 只有一手），首页有数据可画
+//   yv launch [--images <目录>]       起服务，打出「就绪：<地址>」「run: <id>」「证据目录：<目录>」。--images：复制这个目录里的真卡图（<卡号>.webp），默认用编的单色小图
 //   yv doctor [--run <id>]          这次值不值得驱动（只读；退出码 0 = 值得）
 //   yv cleanup [--run <id>] [--all] 停这次起的服务（pid 和命令行都对得上才停），删临时目录，证据留下
-//   yv api <路径> [--run <id>]       只读的第二个视图：GET 这次的服务（例如 /hand），打出 JSON
-//   yv data <文件> [--tail N]        这次数据目录里的日志的最后几行（hands.jsonl：写进去了没有，副作用的证据）
+//   yv api <路径> [--run <id>]       只读的第二个视图：GET 这次的服务（例如 /deck），打出 JSON
 //   yv runs                         还有哪些
 import { spawn, execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -22,7 +19,6 @@ const REPO = resolve(HERE, '../../../..');
 const SERVER = join(REPO, 'src/server.js');
 const RUNS = join(tmpdir(), 'yugioh-verify'); // 每次一个子目录：数据目录、服务日志
 const EVIDENCE = process.env.YV_EVIDENCE ?? join(homedir(), 'work/personal/.verify/yugioh'); // 证据：cleanup 不删
-const ENGINE = process.env.YUGIOH_ENGINE ?? join(homedir(), '.cache/mimi-yugioh/engine'); // 公开的卡库和脚本，./ci 的 engine 下载
 const REAL_DATA = join(homedir(), '.mimi-yugioh');
 const LIVE_PORT = 4519;
 // 编的卡图：1×1 的无损 webp（单色），不是真卡图；真的用 --images 给目录
@@ -64,25 +60,7 @@ async function waitFor(fn, ms, what) {
   }
 }
 
-// 编的结算记录（只给首页画图用）：固定的伪随机，每次一样；用时和场面随手数变好，各类起手的水平不同（烙印融合最差、烂手没有场面可差）
-function madeUpHands(n) {
-  const kinds = [['white-albaz', 0.92, 120], ['branded-fusion', 0.62, 215], ['other', 0.74, 170], ['brick', 1, 70]];
-  let a = 12345;
-  const rnd = () => { a = (Math.imul(a, 1103515245) + 12345) >>> 0; return a / 2 ** 32; };
-  return Array.from({ length: n }, (_, i) => {
-    const [handType, level, secs] = kinds[Math.floor(rnd() * kinds.length)];
-    const progress = n > 1 ? i / (n - 1) : 0;
-    const fieldScore = Math.round(Math.min(100, Math.max(15, 100 * (level + (1 - level) * 0.5 * progress + (rnd() - 0.5) * 0.3))));
-    const seconds = Math.round(Math.max(25, secs * (1.15 - 0.3 * progress) + (rnd() - 0.5) * 70));
-    const speedBonus = fieldScore >= 90 ? Math.round(20 * Math.min(1, Math.max(0, (300 - seconds) / 240))) : 0;
-    const benchmarkHand = n > 1 && i % 5 === 4;
-    return { type: 'hand', v: 1, id: `made-up-${i + 1}`, seed: i + 1, hand: [], handType, benchmarkHand, startedAt: 1700000000000 + i * 600000, durationMs: seconds * 1000, hints: 0, fieldScore, speedBonus, speedCounted: fieldScore >= 90, hintFactor: 1, total: fieldScore + speedBonus };
-  });
-}
-
 async function launch(opts) {
-  if (!existsSync(join(ENGINE, 'VERSION'))) die(`没有引擎数据 ${ENGINE}：先 node scripts/prepare-engine.js "${ENGINE}"`);
-  const handSeed = opts['hand-seed'] === undefined ? null : Number(opts['hand-seed']);
   await mkdir(RUNS, { recursive: true });
   const dir = await mkdtemp(join(RUNS, `${new Date().toISOString().slice(0, 10)}-`));
   const id = basename(dir);
@@ -97,24 +75,19 @@ async function launch(opts) {
     if (real && existsSync(real)) copyFileSync(real, join(images, `${code}.webp`));
     else if (!opts.images) writeFileSync(join(images, `${code}.webp`), FAKE_WEBP);
   }
-  if (opts['made-up-hands'] !== undefined) writeFileSync(join(data, 'hands.jsonl'), madeUpHands(Number(opts['made-up-hands'])).map((r) => `${JSON.stringify(r)}\n`).join(''));
   const serverLog = join(dir, 'server.log');
   const out = openSync(serverLog, 'a');
   const server = spawn(process.execPath, [SERVER], { cwd: REPO, detached: true, stdio: ['ignore', out, out],
-    env: { ...process.env, PORT: '0', YUGIOH_DATA: data, YUGIOH_ENGINE: ENGINE } });
+    env: { ...process.env, PORT: '0', YUGIOH_DATA: data } });
   server.unref();
   try {
     const url = await waitFor(async () => readFileSync(serverLog, 'utf8').match(/http:\/\/127\.0\.0\.1:\d+/)?.[0], 15_000, `服务打出地址（看 ${serverLog}）`);
     await waitFor(async () => (await fetch(`${url}/health`)).ok, 15_000, '/health 200');
-    if (handSeed !== null) {
-      const res = await fetch(`${url}/hand/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seed: handSeed }) });
-      if (!res.ok) throw new Error(`发牌失败（HTTP ${res.status}）：${await res.text()}`);
-    }
     const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim();
-    const run = { id, dir, evidence, url, repo: REPO, sha, launchedAt: new Date().toISOString(), handSeed, data, serverLog, server: server.pid };
+    const run = { id, dir, evidence, url, repo: REPO, sha, launchedAt: new Date().toISOString(), data, serverLog, server: server.pid };
     await writeFile(join(dir, 'run.json'), JSON.stringify(run, null, 2));
     await writeFile(join(evidence, 'run.json'), JSON.stringify(run, null, 2));
-    console.log(`就绪：${url}（卡图 ${opts.images ? '真的' : '编的'}，${handSeed === null ? '还没发牌' : `已发种子 ${handSeed} 的一手`}，代码 ${sha}）\nrun: ${id}\n证据目录：${evidence}`);
+    console.log(`就绪：${url}（卡图 ${opts.images ? '真的' : '编的'}，代码 ${sha}）\nrun: ${id}\n证据目录：${evidence}`);
   } catch (error) {
     try { process.kill(-server.pid, 'SIGTERM'); } catch { /* 已经停了 */ }
     rmSync(dir, { recursive: true, force: true });
@@ -142,7 +115,6 @@ async function stop(run) {
     for (let i = 0; i < 50 && alive(run.server); i++) await sleep(100);
   }
   if (existsSync(run.serverLog) && existsSync(run.evidence)) await copyFile(run.serverLog, join(run.evidence, 'server.log'));
-  if (existsSync(join(run.data, 'hands.jsonl')) && existsSync(run.evidence)) await copyFile(join(run.data, 'hands.jsonl'), join(run.evidence, 'hands.jsonl'));
   rmSync(run.dir, { recursive: true, force: true });
   console.log(`停了 ${run.id}，证据留在 ${run.evidence}`);
 }
@@ -162,15 +134,8 @@ async function api(opts, [path]) {
   process.exitCode = res.ok ? 0 : 1;
 }
 
-function data(opts, [file]) {
-  if (!['hands.jsonl', 'active.json'].includes(file)) die('yv data 只看 hands.jsonl、active.json');
-  const path = join(runOf(opts).data, file);
-  const lines = existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean) : [];
-  console.log(lines.slice(-Number(opts.tail ?? 5)).join('\n'));
-}
-
 const [cmd, ...rest] = process.argv.slice(2);
 const { opts, pos } = parse(rest);
-const COMMANDS = { launch, doctor, cleanup, api: () => api(opts, pos), data: () => data(opts, pos), runs: () => console.log(ids().join('\n') || '（没有）') };
-if (!COMMANDS[cmd]) die('子命令：launch [--hand-seed N] [--images 目录] [--made-up-hands N] | doctor | api /路径 | data <文件> [--tail N] | cleanup [--all] | runs（都可带 --run <id>）');
+const COMMANDS = { launch, doctor, cleanup, api: () => api(opts, pos), runs: () => console.log(ids().join('\n') || '（没有）') };
+if (!COMMANDS[cmd]) die('子命令：launch [--images 目录] | doctor | api /路径 | cleanup [--all] | runs（都可带 --run <id>）');
 await COMMANDS[cmd](opts);

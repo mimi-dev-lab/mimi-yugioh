@@ -211,9 +211,9 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
 }
 
 // 一手牌的引擎种子：从发牌的种子推出来，同一个种子同一副洗牌
-export const engineSeed = (seed) => [0, 1, 2, 3].map((i) => BigInt((seed + i) >>> 0));
+const engineSeed = (seed) => [0, 1, 2, 3].map((i) => BigInt((seed + i) >>> 0));
 
-// 开一手牌的会话：用户打牌、搜索、重放路线、提示都走这一个入口，所以同一手起手、同一个种子，几边的引擎洗牌和每一步的提示都一样。
+// 开一手牌的会话：重放路线走这个入口，同一手起手、同一个种子，引擎洗牌和每一步的提示都一样。
 // 起手以外的主卡组 = 主卡组 − 起手，按卡组数据里的顺序交给引擎（引擎按种子洗）；不给种子就用 1
 export function openHandSession(engine, deck, hand, seed = 1) {
   const rest = expand(deck.main);
@@ -225,5 +225,3 @@ export function openHandSession(engine, deck, hand, seed = 1) {
   return startSession(engine, { hand, deck: rest, extra: expand(deck.extra), seed: engineSeed(seed) });
 }
 
-// 场面的指纹：各区域的卡（不看顺序），用来比较两个局面是不是同一个
-export const stateKey = (board) => ['hand', 'monsters', 'spellTraps', 'grave', 'banished'].map((z) => board[z].map((c) => c.code).sort((x, y) => x - y).join(',')).join('|');

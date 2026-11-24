@@ -19,20 +19,21 @@ export function checkDeck(deck, { limit = maxCopies, mainSize = 40, extraSize = 
     if (!card) { problems.push(`${code} 不在卡表里`); continue; }
     if (n > limit(code)) problems.push(`${card.jp}（${code}）${n} 张，禁限表上限 ${limit(code)}`);
     for (const key of ['jp', 'md', 'does', 'cost', 'limit']) if (typeof card[key] !== 'string' || !card[key].trim()) problems.push(`${card.jp ?? code} 缺 ${key}`);
-    if (!deck.roles.includes(card.role)) problems.push(`${card.jp}（${code}）的角色 ${card.role} 不在 ${deck.roles.join('、')} 里`);
+    if (!deck.roles.some((r) => r.name === card.role)) problems.push(`${card.jp}（${code}）的作用 ${card.role} 不在 ${deck.roles.map((r) => r.name).join('、')} 里`);
     if (!Number.isInteger(card.interrupts) || card.interrupts < 0) problems.push(`${card.jp}（${code}）的打断数不是非负整数`);
+    else if (typeof card.interruptHow !== 'string' || (card.interrupts > 0) !== (card.interruptHow.trim() !== '')) problems.push(`${card.jp}（${code}）的打断数 ${card.interrupts} 和「对手回合怎么打断」对不上：有打断就要写怎么打断，没有就留空`);
   }
   for (const code of Object.keys(deck.cards)) if (!counts.has(Number(code))) problems.push(`${deck.cards[code].jp}（${code}）在卡表里但不在卡组里`);
   return problems;
 }
 
-// 起手类型：规则在卡组数据的 handTypes 里，按顺序第一个命中的算；都没命中，有别的起手卡是 other，一张都没有是 brick
-export function classifyHand(deck, hand) {
-  for (const type of deck.handTypes) if (type.has.some((code) => hand.includes(code))) return type.id;
-  return hand.some((code) => deck.cards[code]?.role === '起手') ? 'other' : 'brick';
-}
-
-// 起手类型的显示名：卡组数据里有名字的用它，其余是「其他起手」和「烂手」
-export function handTypeName(deck, id) {
-  return deck.handTypes.find((t) => t.id === id)?.name ?? (id === 'brick' ? '烂手' : '其他起手');
+// 卡组一览（GET /deck）：每张卡一条，带它在主卡组还是额外卡组、几张；按作用（deck.roles 的先后）分组，组内照卡组数据里的顺序
+export function deckOverview(deck) {
+  const entries = [...deck.main.map((e) => ({ ...e, zone: 'main' })), ...deck.extra.map((e) => ({ ...e, zone: 'extra' }))];
+  const cards = entries.map(({ code, count, zone }) => {
+    const { md, jp, role, does, cost, limit, interrupts, interruptHow } = deck.cards[code];
+    return { code, md, jp, role, zone, count, does, cost, limit, interrupts, interruptHow };
+  });
+  const rank = (c) => deck.roles.findIndex((r) => r.name === c.role);
+  return { name: deck.name, source: deck.source, roles: deck.roles, cards: cards.sort((a, b) => rank(a) - rank(b)) };
 }

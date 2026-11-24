@@ -64,7 +64,7 @@ test('不认识的规则名报错', () => {
 const GOOD_API = 'import urllib.request\nLOCAL_HOSTS = ("127.0.0.1",)\nimport os\nos.environ.get("YUGIOH_URL")\n';
 const GOOD_JS = 'import { ROUTES_AREA } from "@hermes/plugin-sdk";\nimport { createElement as h } from "react";\nconst CSS = `.a { width: 100%; }`;\n';
 
-test('plugin：页面 import 别的东西、自己发请求、写外部网址、展开中写百分比或「还差」，后端起子进程、读文件、写外部地址，都抓得到', () => {
+test('plugin：页面 import 别的东西、自己发请求、写外部网址、写百分比或「还差」，后端起子进程、读文件、写外部地址，都抓得到', () => {
   const ok = repo({ 'plugin/webapp/plugin.js': GOOD_JS, 'plugin/dashboard/plugin_api.py': GOOD_API });
   assert.deepEqual(run('plugin', ok), []); // 样式表里的 100% 不算
   const bad = repo({
@@ -75,12 +75,10 @@ test('plugin：页面 import 别的东西、自己发请求、写外部网址、
   for (const want of [/import 了 lodash/, /不自己发请求/, /写了网址/, /百分比、场面估值或「还差」/, /起子进程或另开网络连接/, /读文件/, /写了不是本机的地址/, /YUGIOH_URL/]) assert.match(problems, want);
 });
 
-test('plugin：结算屏那一段可以写百分比，段外照旧不许', () => {
+test('plugin：哪一段都不许写百分比（以前结算屏、首页那两段的豁免没了），样式表里的照旧不算', () => {
   const api = { 'plugin/dashboard/plugin_api.py': GOOD_API };
-  const inside = `${GOOD_JS}// ---- settlement (x)\nconst a = "你 78%";\n// ---- end of settlement ----\n`;
-  assert.deepEqual(run('plugin', repo({ 'plugin/webapp/plugin.js': inside, ...api })), []);
-  const outside = `${inside}const b = "还差 80%";\n`;
-  assert.match(run('plugin', repo({ 'plugin/webapp/plugin.js': outside, ...api })).join('\n'), /百分比、场面估值或「还差」/);
+  const settlement = `${GOOD_JS}// ---- settlement (x)\nconst a = "你 78%";\n// ---- end of settlement ----\n`;
+  assert.match(run('plugin', repo({ 'plugin/webapp/plugin.js': settlement, ...api })).join('\n'), /百分比、场面估值或「还差」/);
 });
 
 test('plugin：缺文件时说明缺哪个', () => {

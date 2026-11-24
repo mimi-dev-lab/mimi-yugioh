@@ -30,42 +30,13 @@ export function indicesFor(prompt, response) {
   throw new Error(`看不懂的回应 ${JSON.stringify(response)}`);
 }
 
-// 同一张卡在这个提示里有几个同动作的选项（一张卡几个效果）时，回应要带效果描述号 desc 才指得准；只有一个就不带
-export const descOf = (options, o) => (o.description !== undefined && options.filter((x) => x.action === o.action && x.code === o.code).length > 1 ? { desc: o.description } : {});
+// 一步 = 主阶段的一个命令，或连锁窗口里发动一个效果；它后面的选卡、选格子、放行都算在这一步里。路线的「每一步之后的场面」按这个切
+const startsStep = (prompt, indices) => prompt.kind === 'idle' || (prompt.kind === 'chain' && prompt.options[indices[0]]?.action === 'chain');
 
-// indicesFor 的反过来：用户（或搜索）在提示里选的下标 → 语义回应。选项下标会随起手、种子变，语义回应不变，所以路线、缓存和「是不是在最好路线上」都用它
-// 同一张卡在列表里有几张时，选哪一张不影响结果，回应里只记密码；逐张选里的「取消」没有对应的路线写法，记成 { unselect } 只用来比较
-export function responseFor(prompt, indices) {
-  const chosen = indices.map((i) => prompt.options[i]);
-  const one = chosen[0];
-  const desc = descOf(prompt.options, one);
-  switch (prompt.kind) {
-    case 'idle': return one.code === undefined ? one.action : { idle: one.action, code: one.code, ...desc };
-    case 'chain': return one.action === 'pass' ? 'pass' : { chain: one.code, ...desc };
-    case 'yes-no': return one.action;
-    case 'cards': return { pick: chosen.map((o) => o.code) };
-    case 'pick-one': return one.action === 'finish' ? { finishPick: true } : one.action === 'unselect' ? { unselect: one.code } : { pick: [one.code] };
-    case 'option': return { option: indices[0] };
-    case 'place': return { place: indices[0] };
-    case 'position': return { position: indices[0] };
-    default: throw new Error(`没法把 ${prompt.kind} 提示的选择写成回应`);
-  }
-}
+const ACTION_NAMES = { summon: '召唤', 'monster-set': '盖放怪兽', 'special-summon': '特殊召唤', 'position-change': '改变表示形式', 'spell-set': '盖放', activate: '发动', 'to-battle': '进入战斗阶段', 'end-turn': '结束回合' };
 
-// 两个回应是不是同一个选择：选卡的顺序不算
-const normalize = (r) => JSON.stringify(r?.pick ? { ...r, pick: [...r.pick].sort((x, y) => x - y) } : r);
-export const sameResponse = (a, b) => normalize(a) === normalize(b);
-
-// 用户的选择和路线上的回应算不算同一个：在 sameResponse 之外，放哪一格、什么表示形式也不计（搜索只试第一个，用户选别的格子不算偏离；这是近似，换格子偶尔会影响后面的路线）
-export const sameChoice = (a, b) => (a?.place !== undefined && b?.place !== undefined) || (a?.position !== undefined && b?.position !== undefined) || sameResponse(a, b);
-
-// 一步 = 主阶段的一个命令，或连锁窗口里发动一个效果；它后面的选卡、选格子、放行都算在这一步里。用户的操作记录和路线的「每一步之后的场面」都按这个切
-export const startsStep = (prompt, indices) => prompt.kind === 'idle' || (prompt.kind === 'chain' && prompt.options[indices[0]]?.action === 'chain');
-
-export const ACTION_NAMES = { summon: '召唤', 'monster-set': '盖放怪兽', 'special-summon': '特殊召唤', 'position-change': '改变表示形式', 'spell-set': '盖放', activate: '发动', 'to-battle': '进入战斗阶段', 'end-turn': '结束回合' };
-
-// 用户选了这些选项，操作记录、提示和路线每步的文字怎么写
-export function labelFor(deck, prompt, indices) {
+// 路线每步的文字：这一步里的每个选择怎么写
+function labelFor(deck, prompt, indices) {
   const md = (code) => deck.cards[code]?.md ?? String(code);
   const chosen = indices.map((i) => prompt.options[i]);
   const one = chosen[0];
@@ -81,7 +52,7 @@ export function labelFor(deck, prompt, indices) {
 }
 
 // 一步的文字：发起的动作 + 选了哪些卡；「不发动」「放在第几格」「选第几项」「选完」这类机械确认折叠掉。labels 是这一步每个选择的 labelFor
-export function summarizeLabels(labels) {
+function summarizeLabels(labels) {
   const picks = [...new Set(labels.slice(1).filter((t) => /^选 /.test(t)).flatMap((t) => t.slice(2).split('、')))];
   const shown = picks.length > 3 ? `${picks.slice(0, 3).join('、')} 等 ${picks.length} 张` : picks.join('、');
   return `${labels[0]}${shown ? ` · 选 ${shown}` : ''}`;
@@ -89,9 +60,9 @@ export function summarizeLabels(labels) {
 
 const describeOptions = (prompt) => prompt.options.map((o) => [o.action, o.code].filter((x) => x !== undefined).join(' ')).join(' | ');
 
-// 默认用路线自己写的起手；传 hand 就换成别的起手（结算时拿用户真实的起手重放，起手里没有的卡对不上就抛错）；seed 是发牌的种子（不给用 1）。boards 是按 startsStep 切的每一步之后的场面
-export async function playRoute(engine, deck, route, { seed, hand = route.hand } = {}) {
-  const session = await openHandSession(engine, deck, hand, seed);
+// 用路线自己写的起手开局；seed 是洗牌的种子（不给用 1），路线不该依赖洗牌。boards 是按 startsStep 切的每一步之后的场面
+export async function playRoute(engine, deck, route, { seed } = {}) {
+  const session = await openHandSession(engine, deck, route.hand, seed);
   try {
     const boards = [];
     const labels = []; // 每一步每个选择的文字
