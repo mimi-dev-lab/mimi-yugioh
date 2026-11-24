@@ -1,4 +1,4 @@
-// 线上冒烟（只读）：部署的版本对不对、本机的游戏王服务能不能打开、首页读不读得到记录、引擎数据和卡组用到的卡图在不在。不写数据目录，不开始一手。
+// 线上冒烟（只读）：部署的版本对不对、本机的游戏王服务能不能打开、卡组一览读不读得到、卡组用到的卡图在不在。不写数据目录。
 // 用法：node scripts/smoke.js [--sha <期望的 sha>]（不给就是 origin/main）。见 README「上线清单」与 DESIGN.md「在 mini 上常驻」
 import { execFileSync } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
@@ -10,8 +10,6 @@ import { BRANDED } from '../src/decks/branded.js';
 // 下面几个位置只给测试换，默认是 mini 上的真实位置。服务只听本机，没有别的入口（给用户的入口是 Hermes 里的插件）
 const DEPLOY_DIR = process.env.YUGIOH_DEPLOY_DIR ?? join(homedir(), 'Library/Application Support/MimiYugioh');
 const BASE = (process.env.YUGIOH_SMOKE_BASE ?? 'http://127.0.0.1:4519').replace(/\/+$/, '');
-const DATA = process.env.YUGIOH_DATA ?? join(homedir(), '.mimi-yugioh');
-const ENGINE = process.env.YUGIOH_ENGINE ?? join(DATA, 'engine');
 const LOG = process.env.YUGIOH_LOG ?? join(homedir(), 'Library/Logs/mimi-yugioh.log');
 const LOG_WARN_BYTES = 10 * 1024 * 1024; // 日志不轮转；超过 10 MB 提醒，到时候再定
 const WAIT_MS = 30_000; // 刚 kickstart 完服务要一会儿才起来：第一条请求连不上时最多等这么久
@@ -42,11 +40,10 @@ export async function smoke(sha) {
   if (deployed === sha) say('通过', `部署的版本 ${sha.slice(0, 7)}`);
   else say('失败', `部署的版本是 ${deployed.slice(0, 7) || '（没有 DEPLOYED）'}，期望 ${sha.slice(0, 7)}`);
 
-  // /health 是服务活着；/home 读结算日志；/cards 是卡组数据。只打出状态和个数，不打出记录的内容
+  // /health 是服务活着；/deck 是卡组一览（页面的第一个页签）
   const checks = [
     ['health', (b) => b?.ok === true || '回应不是 {ok:true}'],
-    ['home', (b) => Array.isArray(b?.points) || '200 但不是首页的回应（没有 points）'],
-    ['cards', (b) => (b?.cards && Object.keys(b.cards).length > 0) || '200 但没有卡组数据'],
+    ['deck', (b) => (Array.isArray(b?.cards) && b.cards.length > 0) || '200 但没有卡组一览'],
   ];
   for (const [i, [path, ok]] of checks.entries()) {
     const began = Date.now();
@@ -54,13 +51,8 @@ export async function smoke(sha) {
     const verdict = status === 200 ? ok(body) : null;
     if (status !== 200) say('失败', `${BASE}/${path} ${status || '连不上'}${body?.error ? `：${body.error}` : ''}`);
     else if (verdict !== true) say('失败', `${BASE}/${path} ${verdict}`);
-    else say('通过', `${BASE}/${path} 200（${Date.now() - began} ms${path === 'home' ? `，${body.hands} 手记录` : ''}）`);
+    else say('通过', `${BASE}/${path} 200（${Date.now() - began} ms${path === 'deck' ? `，${body.cards.length} 种卡` : ''}）`);
   }
-
-  // 引擎数据（prepare-engine 下载的卡库和脚本）：没有的话服务能起来，但第一次开始一手才会报错，所以这里查
-  const version = await readFile(join(ENGINE, 'VERSION'), 'utf8').catch(() => null);
-  if (version) say('通过', `引擎数据在 ${ENGINE}`);
-  else say('失败', `${ENGINE}/VERSION 不在：先跑 node scripts/prepare-engine.js`);
 
   // 卡图经服务读（和插件页面走的是同一条路）：卡组用到的每张都要有；缺了页面只是改写卡名，所以只提醒
   const missing = [];

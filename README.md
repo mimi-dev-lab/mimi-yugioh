@@ -1,21 +1,22 @@
 # mimi-yugioh
 
-游戏王 Master Duel 卡组训练，给用户一个人用，先学「烙印」：Hermes 插件 + 一个只听本机的服务。规则、检查和设计见 [AGENTS.md](AGENTS.md)、[DESIGN.md](DESIGN.md)。规格是 #1。
+游戏王 Master Duel 的烙印教程 wiki，给用户一个人看：卡组一览（每张卡的卡图、简中名、日文名、作用、效果说明），以后加上逐步播放的展开路线和起手速查。形状是 Hermes 插件 + 一个只听本机的服务；路线由规则引擎重放验证。规则、检查和设计见 [AGENTS.md](AGENTS.md)、[DESIGN.md](DESIGN.md)。规格是 #27（取代 #1 的计时练习）。
 
 ```sh
-node scripts/prepare-engine.js                 # 下载引擎数据（卡库和卡牌脚本）到 ~/.mimi-yugioh/engine
+node scripts/prepare-engine.js                 # 下载引擎数据（卡库和卡牌脚本）到 ~/.mimi-yugioh/engine（路线重放测试用）
 YUGIOH_DATA=$(mktemp -d) npm start             # 起服务（127.0.0.1:4519）
 curl -s 127.0.0.1:4519/health
+curl -s 127.0.0.1:4519/deck                    # 卡组一览
 ./ci                                           # 全部检查
 ```
 
 ## 部署
 
-在 mac mini 上由 launchd 常驻（`jp.lifan.mimi-yugioh`，`launchd/jp.lifan.mimi-yugioh.plist`），只听 `127.0.0.1:4519`，跑部署目录 `~/Library/Application Support/MimiYugioh/` 里的那份。`npm run deploy`（部署 `origin/main`；`npm run deploy -- <sha>` 部署别的提交；`npm run deploy -- --dry-run` 只导出核对、打出真跑时会做的事，什么都不写）导出、核对、装依赖（`npm ci --omit=dev`）、换上、只重启自己的任务、最后跑冒烟；`npm run smoke` 单独查线上（只读）。数据（日志、引擎数据、卡图）在 `~/.mimi-yugioh/`，不在部署目录里，部署不动它。细节见 DESIGN.md「在 mini 上常驻」。
+在 mac mini 上由 launchd 常驻（`jp.lifan.mimi-yugioh`，`launchd/jp.lifan.mimi-yugioh.plist`），只听 `127.0.0.1:4519`，跑部署目录 `~/Library/Application Support/MimiYugioh/` 里的那份。`npm run deploy`（部署 `origin/main`；`npm run deploy -- <sha>` 部署别的提交；`npm run deploy -- --dry-run` 只导出核对、打出真跑时会做的事，什么都不写）导出、核对、装依赖（`npm ci --omit=dev`）、换上、只重启自己的任务、最后跑冒烟；`npm run smoke` 单独查线上（只读）。数据（引擎数据、卡图，还有旧版留下的日志）在 `~/.mimi-yugioh/`，不在部署目录里，部署不动它。细节见 DESIGN.md「在 mini 上常驻」。
 
 ## 插件
 
-`plugin/` 是 Hermes 的磁盘插件 `yugioh`：页面 `plugin/webapp/plugin.js`（侧栏「游戏王」，路由 `/yugioh`），后端 `plugin/dashboard/plugin_api.py`（只把请求转给 `YUGIOH_URL`，默认 `http://127.0.0.1:4519`，必须是本机）。`scripts/plugin-setup --live` 只做两条软链：后端 `~/.hermes/plugins/yugioh → 本仓 plugin/`，页面 `~/.hermes/desktop-plugins/yugioh → 本仓 plugin/webapp`（链整个文件夹）；`--home <目录>` 链进别的 HERMES_HOME（验证用），`--remove` 拆掉；目标处已有别的东西就停下。注意链接指向**本仓的 checkout**（`~/work/personal/repos/mimi-yugioh`），不是部署目录：这个 checkout 要一直在，插件的改动要在这里 `git pull` 后才到线上。页面改了以后：⌘K → Reload desktop plugins；后端（`plugin_api.py`）改了要重启网关。
+`plugin/` 是 Hermes 的磁盘插件 `yugioh`：页面 `plugin/webapp/plugin.js`（侧栏「游戏王」，路由 `/yugioh`），后端 `plugin/dashboard/plugin_api.py`（只把请求转给 `YUGIOH_URL`，默认 `http://127.0.0.1:4519`，必须是本机）。`scripts/plugin-setup --live` 只做两条软链：后端 `~/.hermes/plugins/yugioh → 本仓 plugin/`，页面 `~/.hermes/desktop-plugins/yugioh → 本仓 plugin/webapp`（链整个文件夹）；`--home <目录>` 链进别的 HERMES_HOME（验证用），`--remove` 拆掉；目标处已有别的东西就停下。注意链接指向**本仓的 checkout**（`~/work/personal/repos/mimi-yugioh`），不是部署目录：这个 checkout 要一直在，插件的改动要在这里 `git pull` 后才到线上。页面改了以后：⌘K → Reload desktop plugins；后端（`plugin_api.py`）改了要重启网关（#28 把后端的路径换成了 `/deck`、`/card-image`：部署 #28 时要让用户在独立终端跑一次 `hermes gateway restart`，不然页面取不到卡组一览）。
 
 ## 上线清单
 
@@ -54,11 +55,11 @@ scripts/plugin-setup --live
 **5. 重启网关（用户跑）。** 银月和 worker 都不能跑（会杀掉自己的进程）。让用户在**独立的终端**里跑一句：`hermes gateway restart`（后端在重启时才加载）。
 查：`hermes gateway status` 起来了；用户的 Hermes 桌面端侧栏出现「游戏王」。
 
-**6. 在真 Hermes 里验证（银月）。** 打开「游戏王」：首页画出来、记卡页签有到期张数；点「开始一手」、点一张卡、结束回合，看到结算屏，截图（卡图是真图）。登录后 `/api/plugins/yugioh/health` 是 200。**这一手会写进线上日志 `~/.mimi-yugioh/hands.jsonl`**（首页出现第 1 个点）：留着，汇报里告诉用户这是验证打的第一手；要删由用户说。
-查：`tail -n 1 ~/.mimi-yugioh/hands.jsonl` 有这一手；`npm run smoke` 通过，且「N 手记录」比上线前多 1。
+**6. 在真 Hermes 里验证（银月）。** 打开「游戏王」：第一个页签「卡组一览」按作用分组画出每张卡（卡图是真图），点一张卡出效果说明；手机上经 tailnet 打开同一页也能看；截图。登录后 `/api/plugins/yugioh/deck` 是 200。只读，不写线上数据。
+查：`npm run smoke` 通过。
 
 **回退**（哪一步出问题就从那一步往回退；数据一直在 `~/.mimi-yugioh/`，哪一步退都不删它）：
 
 - 插件：从 `hermes/config.yaml` 的 `plugins.enabled` 拿掉 `yugioh`，`scripts/plugin-setup --live --remove`，让用户在独立终端跑 `hermes gateway restart`。查：侧栏没有「游戏王」，`~/.hermes/plugins/yugioh` 不在了。
 - 服务：`launchctl bootout gui/$(id -u)/jp.lifan.mimi-yugioh && rm ~/Library/LaunchAgents/jp.lifan.mimi-yugioh.plist`。查：`curl -s http://127.0.0.1:4519/health` 连不上。要回到上一个版本而不是停掉：`npm run deploy -- <上一个 sha>`。
-- 数据：`~/.mimi-yugioh/` 里是用户的练习记录，确认不用了再删，删之前要用户说；`engine/` 和 `images/` 是可再生的（重跑第 1 步）。
+- 数据：`~/.mimi-yugioh/` 里的 `hands.jsonl`、`quiz.jsonl` 是旧版的练习记录，服务已不读，确认不用了再删，删之前要用户说；`engine/` 和 `images/` 是可再生的（重跑第 1 步）。

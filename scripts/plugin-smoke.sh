@@ -1,8 +1,7 @@
 #!/bin/sh
 # ./ci 的插件冒烟：游戏王插件在临时的网页工作区（只开 Webapp 的 Hermes 网关，插件用本仓的 plugin/，后端转给编的数据起的游戏王服务）里，
-# 从侧栏点「游戏王」：先看首页和另两个页签；点「开始一手」进展开中屏（计时、操作记录、手牌、「提示 分数 ×0.8」、结束回合，没有百分比和「还差」），
-# 立刻结束回合看结算；再换一手固定种子（37，含白之落胤）的：点卡看三件事、点「发动」、回答引擎的提示，操作记录多出一步，写着花了什么换来什么；点「提示」（次数变 1）、结束回合看完整的结算屏（分数拆解、曲线、两边终场、逐步对照）、点「重打这一手」回到同样的 5 张卡。
-# 再点「记卡」页签：开始记卡、用数字键答题、出对错和这张卡的三件事。
+# 从侧栏点「游戏王」：首页是教程外壳，第一个页签「卡组一览」按作用分组列出每张卡（简中名、日文名）；点一张卡看效果说明和对手回合怎么打断；
+# 桌面宽和手机宽各走一遍；另两个页签是占位。页面上不能有打牌、评分、记卡、进步曲线的字样，也没有百分比。
 # 每次的网络记录里不能有不同源的请求。照验证技能（.claude/skills/verify-yugioh）的 plugin-verify。
 # 不碰线上：端口、数据目录都是这次临时的，卡图是编的单色小图，不连 NAS；证据放临时目录，过了就删，没过留着并打出路径。
 # YUGIOH_SMOKE_KEEP=<目录>：过了也把截图拷到那个目录。
@@ -43,69 +42,32 @@ lacks() {
   done
 }
 
+# 旧功能的字样：页面上哪儿都不能有
+OLD="开始一手 继续这一手 结束回合 总分 场面分 速度加成 提示 记卡 进步 个人最好 基准 到期 %"
 "$V" up || exit 1
 ev=$(ls -d "$YV_EVIDENCE"/*/ | head -1)
-shot home
-has home "游戏王" "首页" "记卡" "记录" "已打 0 手" "每一手：用时 × 场面" "开始一手" "个人最好" "各类起手" "真实进步" "速度加成区" "还没有记录"
-lacks home "继续这一手"
-shot cards --tab 记卡
-has cards "记卡" "张卡到期" "开始记卡"
-shot log --tab 记录
-has log "记录"
-# 点「开始一手」：展开中屏。展开中不显示离最好差多少：没有百分比、「还差」、估值
-shot start --design --start
-has start "第 1 手 · 用时" "用时" "提示" "0 次 · ×1.0" "分数 ×0.8" "操作记录" "花了 → 换来" "轮到你" "召唤权 未用" "手牌 5" "结束回合" "场面分在结束回合后才揭晓"
-lacks start "%" "还差" "估值" "场面值"
-# 立刻结束回合：结算出来（总分、场面分、速度加成、提示系数）
-shot ended --design --resume --end
-has ended "总分" "场面分" "速度加成" "提示 0 次" "再来一手" "重打这一手" "每一步之后的场面" "你的终场" "逐步对照"
-"$V" down >/dev/null 2>&1
-
-# 首页有数据时：编的 12 手（含基准手，基准手不画点）。散点、个人最好、各类起手的平均、最值得练、基准手曲线；速度加成区按线性规则，不画 1:30 / 2:30 / 3:30 分档
-"$V" up --made-up-hands 12 || exit 1
-ev=$(ls -dt "$YV_EVIDENCE"/*/ | head -1)
-shot home-data --design
-has home-data "已打 12 手" "每一手：用时 × 场面" "最好" "刚才" "个人最好" "场面" "速度" "各类起手" "%" "真实进步" "60 秒内 +20" "线性降为 0" "开始一手"
-lacks home-data "1:30" "2:30" "3:30" "还没有记录"
-"$V" down >/dev/null 2>&1
-
-# 固定种子 37：含白之落胤的起手。卡名写在卡图下方，点卡看角色和三件事，发动一个效果、回答引擎的提示，操作记录多出一步
-"$V" up --hand-seed 37 || exit 1
-ev=$(ls -dt "$YV_EVIDENCE"/*/ | head -1)
-shot detail --design --resume --select 天底的使徒
-has detail "手牌 5" "白之落胤" "抽牌小丑与封锁鸟" "白之圣女 艾克利西亚" "天底的使徒" "超融合" "起手" "干什么" "条件代价" "限制"
-lacks detail "%" "还差" "估值"
-shot prompt --design --resume --select 白之落胤 --do 发动
-has prompt "发动 白之落胤 · 选 1 张额外的卡：送去墓地" "三英的相剑师" "×2"
-shot played --design --resume --answer 14
-has played "发动 白之落胤 · 选 三英的相剑师" "花了 → 换来" "手牌 −1（白之落胤）" "场上 +" "轮到你" "本回合额外卡组只能特殊召唤 8 星融合 / 同调怪兽（白之落胤）"
-lacks played "%" "还差" "估值" "不发动 →" "放在 怪兽区"
-# 提示：点一次，提示次数变 1（照提示走了下一步）；再结束回合：结算屏的四个区块都在，提示系数 ×0.8、标出用提示的步；点「重打这一手」发的是同样 5 张卡
-shot hinted --design --resume --hint 1
-has hinted "1 次 · ×0.8"
-lacks hinted "%" "还差" "估值"
-shot settled --design --resume --answer 14 --end --replay
-has settled "总分" "场面分" "速度加成" "提示 1 次" "0.8" "第 2 步用了提示" "每一步之后的场面" "最好终场" "你的终场" "逐步对照" "最好" "你" "用提示" "走偏" "基准：" "白之落胤 1 卡初动起手平均" "再来一手" "重打这一手"
-lacks settled "1:30" "2:30" "3:30"
-has settled-replay "手牌 5" "白之落胤" "抽牌小丑与封锁鸟" "白之圣女 艾克利西亚" "天底的使徒" "超融合" "0 次 · ×1.0"
-# 额外卡组、墓地、除外区：重打的这一手（同样 5 张卡）里先只用页面点击走 Game8 白之落胤路线的前 2 步，点开「额外卡组」的卡列表（带绿点的卡现在有操作），点黑衣龙之艾克利西亚，详情区出现「额外卡组特殊召唤」；
-# 再走第 3、4 步（用这个按钮同调；黑衣龙把自己除外），除外区里出现被除外的黑衣龙，墓地的列表也点得开；最后从第 5 步走完整条路线，结束回合，终场和 Game8 一致
-shot extra-list --design --resume --route white-albaz --route-steps 2 --open 额外卡组
-has extra-list "额外卡组（" "带绿点的卡现在有操作可做" "黑衣龙之艾克利西亚" "三英的相剑师" "关上"
-lacks extra-list "%" "还差" "估值"
-shot extra-op --design --resume --open 额外卡组 --pick-in 黑衣龙之艾克利西亚
-has extra-op "黑衣龙之艾克利西亚" "额外卡组特殊召唤"
-shot banished-list --design --resume --route white-albaz --route-from 3 --route-steps 4 --open 除外区
-has banished-list "除外区（1）" "黑衣龙之艾克利西亚"
-shot grave-list --design --resume --open 墓地
-has grave-list "墓地（" "白之落胤" "白之圣女 艾克利西亚"
-shot walked --design --resume --route white-albaz --route-from 5 --end
-has walked "总分" "场面分" "基准：" "你的终场" "引导之圣女 库妸㽗" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "黑衣龙之艾克利西亚"
-# 记卡：开始、答一道题（数字键选、回车提交），出对错、卡的三件事和下次到期；再答一道，到期张数跟着少
-shot quiz --design --tab 记卡 --quiz-start --quiz-kind identify
-has quiz "这张卡叫什么？是什么角色？" "本题已用" "这张卡的答题用时" "还剩" "提交" "Master Duel 卡名：？" "角色（可多选）" "起手" "延伸" "终端" "打断" "手坑" "回收"
-lacks quiz "%" "答对了" "答错了"
-shot quiz-answered --design --tab 记卡 --quiz-answer 2
-has quiz-answered "条件代价" "干什么" "限制" "再考" "下一题" "2 / "
+shot deck
+has deck "游戏王 · 烙印教程" "卡组一览" "展开路线" "起手速查" "主卡组 40 张" "额外卡组 15 张" "Game8（2026-11-20 版）" \
+  "启动" "检索" "融合素材" "终场" "手坑" "白之落胤" "白き竜の落胤" "冰剑龙 镜翠幻种" "灰流丽" "打断 1" "×3" "额外" "点一张卡看效果说明"
+# shellcheck disable=SC2086
+lacks deck $OLD
+shot card --select "冰剑龙 镜翠幻种"
+has card "冰剑龙 镜翠幻种" "氷剣竜ミラジェイド" "终场" "额外卡组 ×1" "干什么" "条件代价" "限制" "对手回合" "终场时能打断 1 次：" "关上"
+lacks card "点一张卡看效果说明"
+shot card-none --select 白之落胤
+has card-none "白之落胤" "启动" "主卡组 ×2" "终场时不提供打断"
+shot phone --mobile
+has phone "卡组一览" "启动" "白之落胤" "白き竜の落胤"
+# shellcheck disable=SC2086
+lacks phone $OLD
+shot phone-card --mobile --select 灰流丽
+has phone-card "灰流丽" "灰流うらら" "手坑" "干什么" "从手牌发动，不算终场的打断" "关上"
+shot routes --tab 展开路线
+has routes "「展开路线」还没做"
+shot quick --tab 起手速查
+has quick "「起手速查」还没做"
+for name in deck card phone phone-card; do
+  grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
+done
 status=0
-echo "游戏王插件在网页工作区里画出来了：首页和另两个页签；开始一手、点卡看三件事、发动、回答引擎的提示、操作记录写着花了什么换来什么、点提示、结束回合出完整的结算屏、重打这一手；展开中没有百分比、「还差」、估值；记卡页签开始、用数字键答两道题、出对错和三件事"
+echo "游戏王插件在网页工作区里画出来了：卡组一览按作用分组（简中名、日文名、张数、打断数），点卡出效果说明和对手回合怎么打断，桌面宽和手机宽都能用；另两个页签是占位；没有旧功能的字样"

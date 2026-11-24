@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// plugin-verify 的 shot 用的浏览器脚本：用本机的无头 Chromium（不装依赖）打开临时网页工作区，像用户一样从侧栏点「游戏王」（默认是「总览」页签），
-// 可选地切页签、开始 / 继续一手、点一张卡、点它的操作、回答引擎的提示、结束回合，写 <name>.png / .txt / .json（网络记录）。
-// --route <id>：照卡组数据里的一条展开路线（src/decks/branded-routes.js），只用页面点击一步步走（点卡、点操作按钮、点浮层里的选项、点「进结束阶段」），
-// 额外卡组、墓地、除外区里的卡先点开区域的卡列表再点卡；每个回应点完等页面变了再走下一个。
-// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, tab, start, resume, select, do, answer, prefer, route, routeFrom, routeSteps, open, pickIn, hint, end, replay, compare }>'
+// plugin-verify 的 shot 用的浏览器脚本：用本机的无头 Chromium（不装依赖）打开临时网页工作区，像用户一样从侧栏点「游戏王」（默认是「卡组一览」页签），
+// 可选地切页签、在卡组一览里点一张卡，写 <name>.png / .txt / .json（网络记录）。
+// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, mobile, tab, select, compare }>'
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -75,7 +73,8 @@ async function main() {
   await send('Page.enable');
   await send('Network.enable');
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
-  const view = opts.design ? { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false } : { width: 1600, height: 900, deviceScaleFactor: 1, mobile: false };
+  // --design：设计稿的 1280×860；--mobile：手机宽（390×844，按手机模拟）；都不给：1600 宽的桌面
+const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } : opts.design ? { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false } : { width: 1600, height: 900, deviceScaleFactor: 1, mobile: false };
   await send('Emulation.setDeviceMetricsOverride', view);
   for (const [name, value] of opts.cookies) await send('Network.setCookie', { name, value, url: `${opts.base}/`, httpOnly: true });
   await send('Page.navigate', { url: `${opts.base}/#/` });
@@ -97,202 +96,34 @@ async function main() {
     return true;
   }, null, 120000, '侧栏出现「游戏王」（网页工作区连上了后端）');
 
-  // 页面的根是 .yg；画完 = data-ready 为真（卡信息和进行中的一手都问过了）
+  // 页面的根是 .yg；画完 = data-ready 为真（卡组一览问过了）
   const drawn = () => until(() => { const x = document.querySelector('.yg'); return !!x && x.dataset.ready === 'true'; }, null, 60000, '游戏王页面画出来');
   await drawn();
-  if (opts.design) { await clickButton('Hide sidebar'); await sleep(1500); }
+  if (opts.design || opts.mobile) { await clickButton('Hide sidebar'); await sleep(1500); }
+  // 网页工作区自己的「Update ready」提示框会盖住页面顶部：有就点它的关闭（只点那个框里不是「See what's new」的按钮），不碰别的
+  await evaluate(() => {
+    const box = [...document.querySelectorAll('div')].find((d) => d.innerText?.startsWith('Update ready') && d.querySelector('button'));
+    [...(box?.querySelectorAll('button') ?? [])].find((b) => !/See what/.test(b.innerText))?.click();
+  });
   const fail = async (e) => {
     await writeFile(`${opts.evidence}/${opts.name}.failed.txt`, await evaluate(() => document.querySelector('.yg')?.innerText ?? '(没有页面)'));
     throw e;
   };
-  if (opts.tab && opts.tab !== '首页') {
+  if (opts.tab && opts.tab !== '卡组一览') {
     if (!(await clickButton(opts.tab))) throw new Error(`页面上没有页签「${opts.tab}」`);
     await until((t) => [...document.querySelectorAll('.yg-tab.on')].some((b) => b.innerText === t), opts.tab, 10000, `「${opts.tab}」页签打开`);
   }
-  const playing = (what) => until(() => !!document.querySelector('.yg-play .yg-time'), null, 30000, what);
-  if (opts.start) {
-    if (!(await clickButton('开始一手'))) throw new Error('页面上没有「开始一手」');
-    await playing('进入展开中屏');
-  }
-  if (opts.resume) {
-    if (!(await clickButton('继续这一手'))) throw new Error('页面上没有「继续这一手」（服务里没有进行中的一手？）');
-    await playing('进入展开中屏');
-  }
-  // 点桌面上一张卡（按卡名：aria-label）；操作按钮在右边的面板里，按钮名是操作名
+  // 卡组一览里点一张卡（按卡名：aria-label），等说明区出这张卡
   if (opts.select) {
-    const clicked = await evaluate((n) => { const b = [...document.querySelectorAll('.yg-board button.yg-card')].find((x) => x.getAttribute('aria-label') === n); if (!b) return false; b.click(); return true; }, opts.select);
-    if (!clicked) throw new Error(`桌面上没有卡「${opts.select}」`);
-    await until((n) => document.querySelector('.yg-detail .yg-title')?.innerText === n, opts.select, 10000, `详情区显示「${opts.select}」`);
-  }
-  if (opts.do) {
-    const rows = () => document.querySelectorAll('.yg-table .td.dim').length;
-    const before = await evaluate(rows);
-    if (!(await clickButton(opts.do))) throw new Error(`详情区没有操作「${opts.do}」`);
-    try {
-      // 点完要么出了引擎的提示，要么记录多了一步（不用提示就办完的操作）
-      await until((n) => !!document.querySelector('.yg-modal') || document.querySelectorAll('.yg-table .td.dim').length > n, before, 20000, '操作生效（出提示或记录多一行）');
-    } catch (e) { await fail(e); }
-  }
-  // 回答引擎的提示：每次取第一个选项（要选多张时点够 min 张再点「确定」；逐张选时取到「选完」），最多 N 个
-  if (opts.answer) {
-    for (let i = 0; i < opts.answer; i++) {
-      const has = await evaluate(() => !!document.querySelector('.yg-modal [role=dialog][aria-label="引擎的选择"]'));
-      if (!has) break;
-      const done = await evaluate((prefer) => {
-        const box = document.querySelector('.yg-modal [role=dialog][aria-label="引擎的选择"]');
-        const title = box.querySelector('.yg-prompt-title').innerText;
-        const confirm = [...box.querySelectorAll('button')].find((b) => /^确定/.test(b.innerText) && !b.disabled);
-        if (confirm) { confirm.click(); return title; }
-        // --prefer：优先点名字（卡名或按钮文字）在这个列表里的选项，用来照着一条路线走
-        const isChain = title.startsWith('连锁'); // 连锁窗口不照 prefer 点（卡名会让它连锁发动），一律「不发动」
-        const wanted = isChain ? null : [...box.querySelectorAll('button')].find((b) => !b.disabled && !b.classList.contains('sel') && prefer.includes((b.querySelector('.yg-name')?.innerText ?? b.innerText).trim()));
-        if (wanted) { wanted.click(); return `${title}（点 ${wanted.innerText.trim()}）`; }
-        const finish = [...box.querySelectorAll('button')].find((b) => b.innerText === '选完');
-        const opt = box.querySelector('button.yg-opt:not(.sel)');
-        const need = title.match(/选 (\d+)/);
-        if (need && box.querySelectorAll('button.yg-opt.sel').length < Number(need[1]) && opt) { opt.click(); return `${title}（点一张）`; }
-        // 连锁、是否发动：取「不发动」（取第一个会越连越长）；其余取「选完」或第一个选项
-        const decline = [...box.querySelectorAll('button')].find((b) => b.innerText === '不发动');
-        const first = decline ?? finish ?? opt ?? box.querySelector('button.yg-btn.primary, button.yg-btn.wide, button.yg-btn');
-        if (!first) return null;
-        first.click();
-        return title;
-      }, opts.prefer ?? []);
-      if (!done) break;
-      await sleep(500);
-    }
-    await until(() => !document.querySelector('.yg-modal [aria-label="引擎的选择"]'), null, 20000, '引擎的提示都答完了').catch(fail);
-  }
-  // 照路线走：每个回应换成页面上的点击。找不到要点的东西就报错，写明是哪一步哪个回应
-  if (opts.route) {
-    const { BRANDED } = await import(fileURLToPath(new URL('../../../../src/decks/branded.js', import.meta.url)));
-    const route = BRANDED.routes.find((r) => r.id === opts.route);
-    if (!route) throw new Error(`没有路线 ${opts.route}`);
-    const md = (code) => BRANDED.cards[code].md;
-    const snapshot = () => evaluate(() => JSON.stringify([document.querySelector('.yg-modal')?.innerHTML ?? '', document.querySelector('.yg-table')?.innerText ?? '', document.querySelector('.yg-detail')?.innerHTML ?? '', document.querySelector('.yg-handrow')?.innerHTML ?? '']));
-    // 点了之后等页面变了（浮层、操作记录、详情区、手牌任一处），再留一小会儿让它画完
-    const changed = async (before, what) => {
-      const end = Date.now() + 20000;
-      while ((await snapshot()) === before) {
-        if (Date.now() > end) throw new Error(`点了「${what}」页面没有变化`);
-        await sleep(150);
-      }
-      await sleep(200);
-    };
-    const click = (js, arg) => evaluate(`(a) => { ${js} }`, arg);
-    const clickIn = async (what, js, arg) => {
-      const before = await snapshot();
-      const ok = await click(js, arg);
-      if (!ok) throw new Error(`页面上点不到「${what}」`);
-      await changed(before, what);
-    };
-    // 主阶段对一张卡做一个动作：卡可能在手牌 / 场上，也可能要先打开额外卡组、墓地、除外区的列表
-    const opText = { activate: (t) => t.startsWith('发动'), 'special-summon': (t) => t.includes('特殊召唤'), summon: (t) => t === '召唤', 'monster-set': (t) => t.startsWith('盖放'), 'spell-set': (t) => t.startsWith('盖放') };
-    const doIdle = async (r, where) => {
-      const name = md(r.code);
-      const places = [null, '额外卡组', '墓地', '除外区'];
-      for (const zone of places) {
-        if (zone) { // 先打开这个区域的列表
-          const opened = await evaluate((z) => { const b = [...document.querySelectorAll('.yg-board button.yg-zbtn, .yg-board .yg-grave button.yg-card')].find((x) => (z === '墓地' ? x.closest('.yg-grave') : x.getAttribute('aria-label') === z)); if (!b || b.disabled) return false; b.click(); return true; }, zone);
-          if (!opened) continue;
-          await sleep(300);
-        }
-        const picked = await evaluate(({ name, zone }) => {
-          const scope = zone ? document.querySelector('.yg-modal') : document.querySelector('.yg-board');
-          const b = [...scope.querySelectorAll('button.yg-card')].filter((x) => x.getAttribute('aria-label') === name && (zone || !x.closest('.yg-grave')))[0];
-          if (!b) return false;
-          b.click();
-          return true;
-        }, { name, zone });
-        if (!picked) { if (zone) await evaluate(() => { [...document.querySelectorAll('.yg-modal button')].find((b) => b.innerText === '关上')?.click(); }); continue; }
-        await sleep(300);
-        const labels = await evaluate(() => [...document.querySelectorAll('.yg-ops button')].filter((b) => !b.disabled).map((b) => b.innerText.trim()));
-        const hit = labels.find(opText[r.idle]);
-        if (hit) { await clickIn(`${name} ${hit}`, 'const b = [...document.querySelectorAll(".yg-ops button")].find((x) => x.innerText.trim() === a); if (!b) return false; b.click(); return true;', hit); return; }
-      }
-      throw new Error(`${where}：点不到「${name}」的操作 ${r.idle}`);
-    };
-    const modalButton = () => `const b = [...document.querySelectorAll(".yg-modal button")].find((x) => !x.disabled && x.innerText.trim() === a); if (!b) return false; b.click(); return true;`;
-    const optionByName = `const b = [...document.querySelectorAll(".yg-modal button.yg-opt")].find((x) => x.querySelector(".yg-name")?.innerText.trim() === a); if (!b) return false; b.click(); return true;`;
-    for (const [n, step] of route.steps.slice(0, opts.routeSteps ?? route.steps.length).entries()) {
-      if (n + 1 < (opts.routeFrom ?? 1)) continue;
-      const where = `第 ${n + 1} 步「${step.text}」`;
-      for (const r of step.do) {
-        if (r === 'finish') { // 剩下的连锁窗口一个个点「不发动」，直到我方回合结束、浮层消失
-          for (let i = 0; i < 40 && (await evaluate(() => !!document.querySelector('.yg-modal'))); i++) await clickIn(`${where} 不发动`, modalButton(), '不发动');
-          continue;
-        }
-        if (r === 'pass' || r === 'no') await clickIn(`${where} 不发动`, modalButton(), '不发动');
-        else if (r === 'yes') await clickIn(`${where} 发动`, modalButton(), '发动');
-        else if (r === 'end-turn') await clickIn(`${where} 进结束阶段`, 'const b = [...document.querySelectorAll(".yg-final button")].find((x) => !x.disabled && x.innerText.trim() === "进结束阶段"); if (!b) return false; b.click(); return true;');
-        else if (r.idle) await doIdle(r, where);
-        else if (r.chain) await clickIn(`${where} 连锁 ${md(r.chain)}`, optionByName, md(r.chain));
-        else if (r.pick) {
-          for (const code of r.pick) await clickIn(`${where} 选 ${md(code)}`, optionByName, md(code));
-          const confirm = await evaluate(() => [...document.querySelectorAll('.yg-modal button')].some((x) => /^确定/.test(x.innerText) && !x.disabled));
-          if (confirm) await clickIn(`${where} 确定`, 'const b = [...document.querySelectorAll(".yg-modal button")].find((x) => /^确定/.test(x.innerText) && !x.disabled); b.click(); return true;');
-        } else if (r.finishPick) await clickIn(`${where} 选完`, modalButton(), '选完');
-        else if (r.option !== undefined) await clickIn(`${where} 第 ${r.option + 1} 项`, 'const bs = [...document.querySelectorAll(".yg-modal button.yg-btn.wide")]; if (!bs[a]) return false; bs[a].click(); return true;', r.option);
-        else if (r.place !== undefined || r.position !== undefined) {
-          if ((r.place ?? r.position) !== 0) throw new Error(`${where}：页面驱动只支持第一个格子 / 表示形式`);
-          await clickIn(`${where} 放置 / 表示形式`, 'const b = document.querySelector(".yg-modal button.yg-btn.wide"); if (!b) return false; b.click(); return true;');
-        } else throw new Error(`${where}：看不懂的回应 ${JSON.stringify(r)}`);
-      }
-    }
-    if (!opts.routeSteps) await until(() => !document.querySelector('.yg-modal'), null, 20000, '路线走完，没有悬着的提示').catch(fail);
-  }
-  // --open 额外卡组|墓地|除外区：点开这个区域的卡列表（停在列表上截图）；--pick-in 卡名：在列表里点这张卡，列表关上、详情区显示它
-  if (opts.open) {
-    const opened = await evaluate((z) => { const b = [...document.querySelectorAll('.yg-board button.yg-zbtn, .yg-board .yg-grave button.yg-card')].find((x) => (z === '墓地' ? x.closest('.yg-grave') : x.getAttribute('aria-label') === z)); if (!b || b.disabled) return false; b.click(); return true; }, opts.open);
-    if (!opened) throw new Error(`桌面上点不开「${opts.open}」（没有卡？）`);
-    await until((z) => document.querySelector('.yg-modal')?.getAttribute('aria-label') === (z === '墓地' ? '墓地' : z), opts.open, 10000, `「${opts.open}」的卡列表打开`);
-  }
-  if (opts.pickIn) {
-    const clicked = await evaluate((n) => { const b = [...document.querySelectorAll('.yg-modal button.yg-card')].find((x) => x.getAttribute('aria-label') === n); if (!b) return false; b.click(); return true; }, opts.pickIn);
-    if (!clicked) throw new Error(`卡列表里没有卡「${opts.pickIn}」`);
-    await until((n) => document.querySelector('.yg-detail .yg-title')?.innerText === n && !document.querySelector('.yg-modal'), opts.pickIn, 10000, `详情区显示「${opts.pickIn}」`);
-  }
-  // 记卡页签：--quiz-start 点「开始记卡」出第一题（--quiz-kind 指定题型就一直换到出这种）；--quiz-answer N 像用户那样答 N 题：按数字键 1 选第一项、
-  // identify 再按 5 选第一个角色、回车提交、等反馈出来，还有下一题就回车翻页。最后停在答完的反馈上
-  if (opts.quizStart || opts.quizAnswer) {
-    const kind = () => evaluate(() => document.querySelector('.yg-quiz')?.dataset.kind ?? null);
-    const startQuiz = async () => {
-      await until(() => [...document.querySelectorAll('button')].some((b) => b.innerText.trim() === '开始记卡' && !b.disabled), null, 20000, '「开始记卡」能点了（没有到期的卡时它是灰的）');
-      await clickButton('开始记卡');
-      await until(() => !!document.querySelector('.yg-qopt'), null, 20000, '题出来');
-    };
-    await startQuiz();
-    for (let i = 0; opts.quizKind && (await kind()) !== opts.quizKind; i++) {
-      if (i > 40) throw new Error(`换了 40 次也没出 ${opts.quizKind} 题`);
-      await clickButton('结束');
-      await until(() => !document.querySelector('.yg-qopt'), null, 10000, '回到记卡首页');
-      await startQuiz();
-    }
-    const press = (key) => evaluate((k) => { window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); return true; }, key);
-    for (let i = 0; i < (opts.quizAnswer ?? 0); i++) {
-      await press('1');
-      if ((await kind()) === 'identify') await press('5');
-      await sleep(300);
-      await press('Enter');
-      await until(() => !!document.querySelector('.yg-feedback') || !!document.querySelector('.yg-error'), null, 20000, '答题的反馈出来（或报错）').catch(fail);
-      if (i + 1 < opts.quizAnswer) { await press('Enter'); await until(() => !document.querySelector('.yg-feedback') && !!document.querySelector('.yg-qopt'), null, 20000, '下一题出来'); }
-    }
-  }
-  // 提示：点「提示」按钮 N 次，每次等页面上的提示次数加一（点了照提示走，可能出引擎的提示浮层）
-  for (let i = 0; i < (opts.hint ?? 0); i++) {
-    const clicked = await evaluate(() => { const b = [...document.querySelectorAll('.yg-final button')].find((x) => x.innerText.trim().startsWith('提示')); if (!b || b.disabled) return false; b.click(); return true; });
-    if (!clicked) throw new Error('页面上没有能点的「提示」按钮');
-    await until((n) => document.querySelector('.yg-clock')?.innerText.includes(`${n} 次 · ×`), i + 1, 30000, `提示次数变成 ${i + 1}`).catch(fail);
-  }
-  if (opts.end) {
-    if (!(await clickButton('结束回合'))) throw new Error('页面上没有「结束回合」');
-    await until(() => !!document.querySelector('[aria-label="结算"]') || !!document.querySelector('.yg-error'), null, 30000, '结算出来（或报错）').catch(fail);
+    const clicked = await evaluate((n) => { const b = [...document.querySelectorAll('.yg-deck button.yg-tile')].find((x) => x.getAttribute('aria-label') === n); if (!b) return false; b.click(); return true; }, opts.select);
+    if (!clicked) await fail(new Error(`卡组一览里没有卡「${opts.select}」`));
+    await until((n) => document.querySelector('.yg-detail .yg-title')?.innerText === n, opts.select, 10000, `说明区显示「${opts.select}」`).catch(fail);
   }
   const overflowX = await evaluate(() => { const x = document.querySelector('.yg'); return x.scrollWidth > x.clientWidth + 1; });
   const height = await evaluate(() => document.querySelector('.yg').scrollHeight);
   await sleep(600);
-  // --design 保持 1280×860 的视口（和设计稿同样大）；平时把视口拉到内容那么高
-  if (!opts.design) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 200, 4000) }); await sleep(500); }
+  // --design 保持 1280×860 的视口（和设计稿同样大），--mobile 保持一屏手机；平时把视口拉到内容那么高
+  if (!opts.design && !opts.mobile) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 200, 4000) }); await sleep(500); }
   await until(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity), null, 5000, '动画走完').catch(() => {});
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   await writeFile(`${opts.evidence}/${opts.name}.png`, Buffer.from(shot.data, 'base64'));
@@ -302,15 +133,6 @@ async function main() {
   const foreign = urls.filter((u) => !u.startsWith(`${opts.base}/`));
   const hostLoad = all.filter(([u, after]) => !after && !u.startsWith(`${opts.base}/`)).map(([u]) => u);
   await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, requests: urls.length, foreign, hostLoad, urls }, null, 1));
-  // 重打这一手：在结算屏上点它，等回到展开中屏，另存一张（同样的 5 张牌）
-  if (opts.replay) {
-    if (!(await clickButton('重打这一手'))) throw new Error('结算屏上没有「重打这一手」');
-    await playing('重打这一手进入展开中屏');
-    await sleep(600);
-    const again = await send('Page.captureScreenshot', { format: 'png' });
-    await writeFile(`${opts.evidence}/${opts.name}-replay.png`, Buffer.from(again.data, 'base64'));
-    await writeFile(`${opts.evidence}/${opts.name}-replay.txt`, await evaluate(() => document.querySelector('.yg').innerText));
-  }
   // 并排对照：设计稿 PNG 在左、这张在右，用 data: 地址在一个页面里拼好再截一张
   if (opts.compare) {
     const design = (await readFile(opts.compare)).toString('base64');

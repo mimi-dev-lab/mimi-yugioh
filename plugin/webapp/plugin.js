@@ -74,7 +74,8 @@ function Detail({ rest, card, onClose }) {
       fact("干什么", card.does),
       fact("条件代价", card.cost),
       fact("限制", card.limit),
-      fact("对手回合", card.interrupts > 0 ? `能打断 ${card.interrupts} 次：${card.interruptHow}` : "留在场上时不打断")));
+      fact("对手回合", card.interrupts > 0 ? `终场时能打断 ${card.interrupts} 次：${card.interruptHow}`
+        : card.role === "手坑" ? "从手牌发动，不算终场的打断" : "终场时不提供打断")));
 }
 
 // ---- 卡组一览: the deck grouped by role, the clicked card's effect beside (below on a phone) ----
