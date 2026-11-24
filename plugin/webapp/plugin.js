@@ -61,7 +61,7 @@ function Detail({ rest, card, onClose }) {
         h("div", { className: "yg-row wrap" },
           h("span", { className: "yg-chip on" }, card.role),
           h("span", { className: "yg-chip" }, `${ZONE_NAME[card.zone]} ×${card.count}`)),
-        h("button", { className: "yg-btn small yg-close", onClick: onClose }, "关上"))),
+        h("button", { className: "yg-btn small yg-close", onClick: onClose, "aria-label": "关上" }, "× 关上"))),
     h("div", { className: "yg-facts" },
       fact("干什么", card.does),
       fact("条件代价", card.cost),
