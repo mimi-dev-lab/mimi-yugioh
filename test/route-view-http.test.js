@@ -24,6 +24,8 @@ describe('路线接口：GET /routes、GET /route?id=', () => {
       assert.deepEqual(body.routes.filter((r) => !isGame8(r)).map((r) => r.needs.md), ['惨绝戏之导化 阿卢绯尔', '白之圣女 艾克利西亚', '烙印之气炎', '烙印之气炎', '天底的使徒']);
       const nadir = body.routes.find((r) => r.id === 'nadir-servant');
       assert.equal(nadir.interrupts, 3); // 终场：赫之圣女 卡尔塔西亚 1 + 盖着的落胤与圣女 1 + 烙印断罪 1
+      const shrouded = body.routes.find((r) => r.id === 'high-spirits-shrouded');
+      assert.equal(shrouded.interrupts, 3); // 终场：冰剑龙 镜翠幻种 1 + 赫之圣女 卡尔塔西亚 1 + 铁兽鸟 墨丘利耶 1（场上也能用），库妸㽗、黑衣龙之艾克利西亚 0
       assert.deepEqual(body.routes.filter(isGame8).map((r) => r.id), ['white-albaz', 'branded-fusion']);
       for (const r of body.routes.filter(isGame8)) assert.equal(r.source.date, '2026-11-20');
       for (const r of body.routes.filter((x) => !isGame8(x))) assert.match(r.source.url, /^https:\/\/(www\.bilibili\.com\/opus\/|docs\.ihex\.dev\/)/);
