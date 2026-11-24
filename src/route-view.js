@@ -36,16 +36,13 @@ function viewBoard(deck, board, diff) {
 // 终场汇总：场上每张卡、剩余手牌、打断数 = 终场在场各卡 interrupts 之和，每个打断靠哪张卡、怎么打断（同一张卡有几张就合在一条里）
 export function endSummary(deck, endBoard) {
   const board = viewBoard(deck, endBoard);
-  const breakers = new Map();
-  for (const c of [...board.monsters, ...board.spellTraps]) {
-    const { interrupts, interruptHow } = deck.cards[c.code];
-    if (interrupts > 0) breakers.set(c.code, { ...cardOf(deck, c.code), copies: (breakers.get(c.code)?.copies ?? 0) + 1, perCard: interrupts, interruptHow });
-  }
-  const list = [...breakers.values()].map((b) => ({ code: b.code, md: b.md, jp: b.jp, copies: b.copies, interrupts: b.perCard * b.copies, interruptHow: b.interruptHow }));
-  return {
-    monsters: board.monsters, spellTraps: board.spellTraps, hand: board.hand, grave: board.grave, banished: board.banished,
-    interrupts: list.reduce((n, b) => n + b.interrupts, 0), breakers: list,
-  };
+  const copies = new Map();
+  for (const c of [...board.monsters, ...board.spellTraps]) copies.set(c.code, (copies.get(c.code) ?? 0) + 1);
+  const breakers = [...copies].flatMap(([code, n]) => {
+    const { interrupts = 0, interruptHow } = deck.cards[code] ?? {}; // 卡组外的卡（token）不提供打断
+    return interrupts > 0 ? [{ ...cardOf(deck, code), copies: n, interrupts: interrupts * n, interruptHow }] : [];
+  });
+  return { ...board, interrupts: breakers.reduce((n, b) => n + b.interrupts, 0), breakers };
 }
 
 // 重放一条路线，返回页面要的全部数据。重放走不通会抛错（带步号），由调用方决定怎么回

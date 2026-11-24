@@ -36,4 +36,12 @@ describe('路线展示数据：教程和引擎不一致、重放不通', () => {
     assert.equal(end.interrupts, 2);
     assert.deepEqual(end.breakers.map((b) => [b.md, b.copies, b.interrupts]), [['冰剑龙 镜翠幻种', 2, 2]]);
   });
+
+  test('卡组外的卡（token）在场：不抛错，打断当 0，名字退回密码', () => {
+    const board = { hand: [], monsters: [{ code: 44146295, sequence: 0 }, { code: 99999999, sequence: 1 }], spellTraps: [], grave: [], banished: [] };
+    const end = endSummary(BRANDED, board);
+    assert.equal(end.interrupts, 1);
+    assert.deepEqual(end.breakers.map((b) => b.code), [44146295]);
+    assert.equal(end.monsters[1].md, '99999999');
+  });
 });
