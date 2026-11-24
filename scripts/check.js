@@ -14,8 +14,8 @@ const jsFiles = (root, dir) => filesIn(root, dir, /\.js$/);
 // 去掉整行注释和块注释（注释里提到 process.env 不算用了它）
 const withoutComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
-// 依赖白名单：规则引擎和间隔复习（#9 加了 ts-fsrs）
-const ALLOWED_DEPS = new Set(['ocgcore-wasm', 'ts-fsrs']);
+// 依赖白名单：只有规则引擎（记卡删掉以后 ts-fsrs 也去掉了）
+const ALLOWED_DEPS = new Set(['ocgcore-wasm']);
 // 旧应用（2026-02 的 Next.js + Supabase + Cloudflare）不许回来
 const LEGACY_FILES = ['next.config.ts', 'next.config.js', 'next.config.mjs', 'wrangler.toml', 'supabase', 'app', 'components', 'migrations', 'Dockerfile', 'docker-compose.yml'];
 const LEGACY_DEPS = /^(next|react|react-dom|@supabase\/.*|wrangler|@cloudflare\/.*|tailwindcss|radix-ui)$/;
@@ -49,16 +49,13 @@ const API_BAD = [
   [/\b(open|read_text|read_bytes)\(|\bPath\(/, '读文件：数据在服务那边，这里只转发'],
   [/https?:\/\/(?!127\.0\.0\.1\b|localhost\b|\[::1\])[\w.-]+/, '写了不是本机的地址'],
 ];
-// 页面不自己发请求、不引外部东西；「场面估值」一类的字样展开中不许出现（规格 #1：展开中不显示离最好还差多少）
+// 页面不自己发请求、不引外部东西
 const PAGE_BAD = [
   [/\bfetch\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|\bimport\s*\(/, '页面只经 ctx.rest 调本插件的后端，不自己发请求、不动态 import'],
   [/https?:\/\//, '页面里写了网址：不引外部字体、图片，不往外发请求'],
 ];
-// 页面文字里不许出现的字样（样式表里的 100% 之类不算）：规格 #1 要保留解谜感，展开中不显示离最好还差多少
-// 结算屏（plugin.js 里 `// ---- settlement` 到 `// ---- end of settlement` 之间）是结束回合以后才画的，首页（`// ---- home` 到 `// ---- end of home`）不在展开中，都可以写百分比，不查这两段
+// 页面文字里不许出现的字样（样式表里的 100% 之类不算）：教程没有评分，页面上不出现百分比、场面估值、「还差」
 const PAGE_TEXT_BAD = /还差|估值|\d\s*%|百分/;
-const SETTLEMENT_REGION = /\/\/ ---- settlement[\s\S]*?\/\/ ---- end of settlement[^\n]*/;
-const HOME_REGION = /\/\/ ---- home[\s\S]*?\/\/ ---- end of home[^\n]*/; // 首页也画百分比（每手的场面分、各类起手的平均），不在展开中屏里
 // 卡组数据（src/decks/）里的出处链接是引用，不是请求；服务不发请求由 boundary 的 node:https / fetch 规则兜着，对 src/ 下所有文件都生效
 const OUTBOUND_EXEMPT = /^src\/decks\//;
 // 线上的东西：常驻服务的端口、tailnet 地址、真实数据目录
@@ -88,7 +85,7 @@ const RULES = {
     const js = withoutComments(read(root, PLUGIN_JS));
     for (const m of importsOf(js)) if (!PLUGIN_MODULES.has(m)) out.push(`${PLUGIN_JS} import 了 ${m}：页面只许 import 网页工作区给的 ${[...PLUGIN_MODULES].join('、')}`);
     for (const [re, why] of PAGE_BAD) if (re.test(js)) out.push(`${PLUGIN_JS}：${why}`);
-    if (PAGE_TEXT_BAD.test(read(root, PLUGIN_JS).replace(SETTLEMENT_REGION, '').replace(HOME_REGION, '').replace(/const CSS = `[\s\S]*?`;/, ''))) out.push(`${PLUGIN_JS}：页面文字里有百分比、场面估值或「还差」：展开中屏不显示这些（结算在结束回合以后）`);
+    if (PAGE_TEXT_BAD.test(read(root, PLUGIN_JS).replace(/const CSS = `[\s\S]*?`;/, ''))) out.push(`${PLUGIN_JS}：页面文字里有百分比、场面估值或「还差」：教程没有评分，不显示这些`);
     const py = stripPy(read(root, PLUGIN_API));
     for (const [re, why] of API_BAD) if (re.test(py)) out.push(`${PLUGIN_API}：${why}`);
     if (!/YUGIOH_URL/.test(py) || !/LOCAL_HOSTS/.test(py)) out.push(`${PLUGIN_API}：转发的地址要由 YUGIOH_URL 定，并且只许本机（LOCAL_HOSTS）`);

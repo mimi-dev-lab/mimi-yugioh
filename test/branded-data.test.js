@@ -3,11 +3,10 @@ import { describe, test } from 'node:test';
 import { openEngineFiles } from '../src/engine-files.js';
 import { BANLIST_DATE, maxCopies } from '../src/banlist.js';
 import { BRANDED } from '../src/decks/branded.js';
-import { checkDeck, classifyHand, expand } from '../src/deck.js';
+import { checkDeck, expand } from '../src/deck.js';
 import { ENGINE_DIR } from './helpers.js';
 
-const ALBAZ = 73819701; const FUSION = 44362883; const ALUBER = 62962630; const ASH = 14558127; const LOCK_BIRD = 94145021;
-const SUPER_POLY = 48130397; const MAXX_C = 23434538; const FUWALOS = 42141493; const ALBAZ_PLAIN = 68468459; const SARCOPHAGUS = 75500286;
+const ALBAZ = 73819701; const FUSION = 44362883; const ASH = 14558127; const MIRRORJADE = 44146295;
 const clone = () => structuredClone(BRANDED);
 
 describe('烙印卡组数据', () => {
@@ -18,11 +17,13 @@ describe('烙印卡组数据', () => {
     assert.deepEqual(checkDeck(BRANDED), []);
   });
 
-  test('每张卡都有简中名、日文名、角色、三件事、打断数', () => {
+  test('每张卡都有简中名、日文名、作用、三件事、打断数；有打断的写了怎么打断，没有的留空', () => {
+    assert.deepEqual(BRANDED.roles, ['启动', '检索', '融合素材', '终场', '手坑']);
     for (const [code, card] of Object.entries(BRANDED.cards)) {
       for (const key of ['jp', 'md', 'does', 'cost', 'limit']) assert.ok(card[key]?.trim(), `${code} 缺 ${key}`);
-      assert.ok(BRANDED.roles.includes(card.role), `${code} 角色 ${card.role}`);
+      assert.ok(BRANDED.roles.includes(card.role), `${code} 作用 ${card.role}`);
       assert.ok(Number.isInteger(card.interrupts) && card.interrupts >= 0, `${code} 打断数`);
+      assert.equal(card.interrupts > 0, card.interruptHow.trim() !== '', `${code} 打断数和怎么打断`);
     }
   });
 
@@ -44,16 +45,20 @@ describe('烙印卡组数据', () => {
     assert.equal(maxCopies(ALBAZ), 3);
   });
 
-  test('检查会抓出问题：烙印融合 2 张、少一张主卡、缺简中名、角色不在表里、打断数不是整数', () => {
+  test('检查会抓出问题：烙印融合 2 张、少一张主卡、缺简中名、作用不在表里、打断数不是整数、打断数和怎么打断对不上', () => {
     const over = clone(); over.main.find((e) => e.code === FUSION).count = 2; over.main.find((e) => e.code === ASH).count = 1;
     assert.match(checkDeck(over).join('\n'), /烙印融合.*2 张，禁限表上限 1/);
     assert.match(checkDeck(over).join('\n'), /主卡组 39 张/);
     const noName = clone(); noName.cards[ALBAZ].md = '';
     assert.match(checkDeck(noName).join('\n'), /白き竜の落胤 缺 md/);
     const badRole = clone(); badRole.cards[ALBAZ].role = '乱写';
-    assert.match(checkDeck(badRole).join('\n'), /角色 乱写/);
+    assert.match(checkDeck(badRole).join('\n'), /作用 乱写/);
     const badInterrupts = clone(); badInterrupts.cards[ALBAZ].interrupts = '1';
     assert.match(checkDeck(badInterrupts).join('\n'), /打断数/);
+    const noHow = clone(); noHow.cards[MIRRORJADE].interruptHow = '';
+    assert.match(checkDeck(noHow).join('\n'), /氷剣竜ミラジェイド.*打断数 1 和「对手回合怎么打断」对不上/);
+    const strayHow = clone(); strayHow.cards[ALBAZ].interruptHow = '乱写';
+    assert.match(checkDeck(strayHow).join('\n'), /白き竜の落胤.*打断数 0 和「对手回合怎么打断」对不上/);
     const missing = clone(); delete missing.cards[ALBAZ];
     assert.match(checkDeck(missing).join('\n'), /不在卡表里/);
   });
@@ -65,29 +70,5 @@ describe('烙印卡组数据', () => {
       assert.ok(route.hand.includes(route.needs));
       for (const code of route.hand) assert.ok(main.includes(code));
     }
-  });
-});
-
-describe('起手分类', () => {
-  const hand = (...codes) => codes;
-  test('含白之落胤 → 白之落胤 1 卡初动', () => {
-    assert.equal(classifyHand(BRANDED, hand(ALBAZ, ASH, LOCK_BIRD, SUPER_POLY, SARCOPHAGUS)), 'white-albaz');
-  });
-  test('含烙印融合 → 烙印融合 1 卡初动', () => {
-    assert.equal(classifyHand(BRANDED, hand(FUSION, ASH, LOCK_BIRD, SUPER_POLY, SARCOPHAGUS)), 'branded-fusion');
-  });
-  test('同时有白之落胤和烙印融合，白之落胤优先', () => {
-    assert.equal(classifyHand(BRANDED, hand(FUSION, ALBAZ, ASH, LOCK_BIRD, SUPER_POLY)), 'white-albaz');
-  });
-  test('只有别的起手卡（阿卢绯尔、阿尔白斯之落胤）→ 其他', () => {
-    assert.equal(classifyHand(BRANDED, hand(ALUBER, ASH, LOCK_BIRD, SUPER_POLY, SARCOPHAGUS)), 'other');
-    assert.equal(classifyHand(BRANDED, hand(ALBAZ_PLAIN, ASH, ASH, MAXX_C, FUWALOS)), 'other');
-  });
-  test('只有赫之烙印（要墓地有目标才能用）算烂手', () => {
-    assert.equal(classifyHand(BRANDED, hand(82738008, ASH, ASH, MAXX_C, FUWALOS)), 'brick');
-  });
-  test('一张起手卡都没有（手坑、超融合、黄金柜）→ 烂手', () => {
-    assert.equal(classifyHand(BRANDED, hand(ASH, ASH, MAXX_C, LOCK_BIRD, FUWALOS)), 'brick');
-    assert.equal(classifyHand(BRANDED, hand(SUPER_POLY, SUPER_POLY, SARCOPHAGUS, ASH, LOCK_BIRD)), 'brick');
   });
 });
