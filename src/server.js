@@ -6,6 +6,7 @@ import { deckOverview } from './deck.js';
 import { BRANDED } from './decks/branded.js';
 import { openEngine } from './duel-session.js';
 import { openEngineFiles } from './engine-files.js';
+import { checkLookup, lookupView } from './lookup.js';
 import { replayRoute, routeListItem } from './route-view.js';
 import { openStore } from './store.js';
 
@@ -15,6 +16,9 @@ const DATA = process.env.YUGIOH_DATA ?? join(homedir(), '.mimi-yugioh');
 // 引擎数据（卡库、脚本）：路线要用它重放；默认在数据目录里，测试和 ./ci 指到复用的缓存目录
 const ENGINE = process.env.YUGIOH_ENGINE ?? join(DATA, 'engine');
 const OVERVIEW = deckOverview(BRANDED);
+// 起手速查只能指向已有的路线：数据有问题（指向不存在的路线、起手里没有写的卡……）服务就起不来
+const lookupProblems = checkLookup(BRANDED);
+if (lookupProblems.length) throw new Error(`起手速查数据有问题：\n${lookupProblems.join('\n')}`);
 
 const store = openStore(DATA);
 
@@ -29,7 +33,7 @@ const ROUTES = (async () => {
       for (const def of BRANDED.routes) {
         try { routes.push(await replayRoute(engine, BRANDED, def)); } catch (e) { throw new Error(`路线「${def.name}」重放不通：${e.message}`); }
       }
-      return { routes };
+      return { routes, lookup: lookupView(BRANDED, routes) };
     } finally { files.close(); }
   } catch (e) {
     const reason = e.code === 'ENGINE_MISSING' ? `引擎数据不在 ${ENGINE}（${e.message}）` : e.message;
@@ -45,10 +49,10 @@ async function route(req, pathname, query) {
     case 'GET /health': return [200, { ok: true }];
     // 卡组一览：每张卡的卡名（Master Duel 简中、日文）、作用、张数、效果说明（三件事）和对手回合怎么打断，按作用分组排好。不含卡图
     case 'GET /deck': return [200, OVERVIEW];
-    // 展开路线：列表（需要的起手卡、终场打断数、来源、验证日期）和单条（每一步的说明、场面快照、和上一步的差异、终场汇总）
+    // 展开路线：列表（需要的起手卡、终场打断数、来源、验证日期；另带起手速查 lookup：关键卡 → 路线，缺卡改走哪条）和单条（每一步的说明、场面快照、和上一步的差异、终场汇总）
     case 'GET /routes': {
-      const { routes, error } = await ROUTES;
-      return error ? [503, { error }] : [200, { routes: routes.map(routeListItem) }];
+      const { routes, lookup, error } = await ROUTES;
+      return error ? [503, { error }] : [200, { routes: routes.map(routeListItem), lookup }];
     }
     case 'GET /route': {
       const { routes, error } = await ROUTES;
