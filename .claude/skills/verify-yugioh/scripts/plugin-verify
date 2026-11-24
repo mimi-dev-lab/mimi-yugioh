@@ -351,7 +351,7 @@ def main() -> int:
     s.add_argument("--select", metavar="卡名", help="in 卡组一览, click the card with this name (its effect panel opens)")
     s.add_argument("--route", metavar="ID或名字", help="open 展开路线 and click this route (its id, or part of its name); the player opens at 起手 (step 0)")
     s.add_argument("--jump", metavar="ID", help="with --tab 起手速查: click the lookup button that points at this route id; it jumps to that route's player (step 0)")
-    s.add_argument("--step", metavar="N|起手|last", help="with --route: walk the player to step N (0 or 起手 = the opening hand, or the last step) by clicking 下一步")
+    s.add_argument("--step", metavar="N|起手|last", help="with --route or --jump: walk the player to step N (0 or 起手 = the opening hand, or the last step) by clicking 下一步")
     s.add_argument("--keys", action="store_true", help="with --step: press the right arrow key instead of clicking 下一步")
     s.add_argument("--compare", metavar="PNG", help="also write NAME-compare.png: the design PNG on the left, this screenshot on the right")
     s.set_defaults(f=cmd_shot)

@@ -48,8 +48,8 @@ export const LOOKUP = [
     card: C.highSpirits,
     routes: [{ route: 'high-spirits-fuwalos', with: C.fuwalos }, { route: 'high-spirits-shrouded', with: C.shroudedAlbion }],
     fallbacks: [
-      { lack: C.fuwalos, have: [C.highSpirits, C.shroudedAlbion], route: 'high-spirits-shrouded', how: '烙印之气炎要给对方看的怪兽改用龙族的黑衣龙 阿尔比昂，送去墓地的改成灰烬龙 落尘劣种' },
-      { lack: C.shroudedAlbion, have: [C.highSpirits, C.fuwalos], route: 'high-spirits-fuwalos', how: '烙印之气炎要给对方看的怪兽改用鸟兽族的软绵雀精，送去墓地的改成击铁龙 猎宝机装' },
+      { lack: C.fuwalos, have: [C.highSpirits, C.shroudedAlbion], route: 'high-spirits-shrouded', how: '烙印之气炎给对方看黑衣龙 阿尔比昂、从额外卡组把灰烬龙 落尘劣种送去墓地，再弃黑衣龙 阿尔比昂检索白之落胤；前几步和白之落胤线一样，中段不同：黑衣龙之艾克利西亚除外自己，改叫铁兽鸟 墨丘利耶，结束阶段由灰烬龙从卡组特殊召唤库妸㽗；终场多一只铁兽鸟 墨丘利耶' },
+      { lack: C.shroudedAlbion, have: [C.highSpirits, C.fuwalos], route: 'high-spirits-fuwalos', how: '烙印之气炎给对方看软绵雀精、从额外卡组把击铁龙 猎宝机装送去墓地，再弃软绵雀精检索白之落胤；拿到白之落胤之后的步骤和白之落胤线完全一样' },
     ],
   },
 ];

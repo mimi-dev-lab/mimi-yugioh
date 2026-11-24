@@ -192,12 +192,11 @@ function Player({ rest, id, onBack }) {
     last ? h(EndSummary, { rest, end: route.end }) : null);
 }
 
-function RoutesView({ rest, id, setId }) {
-  const [routes, setRoutes] = useState(null);
-  const [error, setError] = useState("");
-  useEffect(() => { rest("/routes").then((r) => setRoutes(r.routes)).catch((e) => setError(message(e))); }, [rest]);
+// `loaded` is the shared GET /routes result: { data, error } (data null until it arrives)
+function RoutesView({ rest, loaded, id, setId }) {
   if (id) return h(Player, { rest, id, onBack: () => setId(null) });
-  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+  if (loaded.error) return h("div", { className: "yg-error", role: "alert" }, loaded.error);
+  const routes = loaded.data?.routes;
   if (!routes) return h("p", { className: "yg-lab" }, "读取路线…");
   return h("div", { className: "yg-routes" },
     h("p", { className: "yg-lab yg-sum" }, "每条路线的每一步都在规则引擎里重放过，场面是引擎的结果。点一条逐步看。"),
@@ -223,11 +222,9 @@ function JumpButton({ route, onOpen, extra }) {
       extra ?? null));
 }
 
-function LookupView({ rest, onOpen }) {
-  const [lookup, setLookup] = useState(null);
-  const [error, setError] = useState("");
-  useEffect(() => { rest("/routes").then((r) => setLookup(r.lookup)).catch((e) => setError(message(e))); }, [rest]);
-  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+function LookupView({ rest, loaded, onOpen }) {
+  if (loaded.error) return h("div", { className: "yg-error", role: "alert" }, loaded.error);
+  const lookup = loaded.data?.lookup;
   if (!lookup) return h("p", { className: "yg-lab" }, "读取速查…");
   return h("div", { className: "yg-lookup" },
     h("p", { className: "yg-lab yg-sum" }, "手里有哪张关键卡，就走哪条路线；缺某张卡时看「缺」那几行。点路线名，打开那条路线的逐步播放。每条路线都在规则引擎里重放过。"),
@@ -253,6 +250,10 @@ function YugiohApp({ rest }) {
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const [routeId, setRouteId] = useState(null); // the route open in 展开路线 (null = the list); 起手速查 sets it to jump there
+  const [routes, setRoutes] = useState({ data: null, error: "" }); // one GET /routes shared by 展开路线 and 起手速查 (a 503 shows only in those two tabs)
+  useEffect(() => {
+    rest("/routes").then((data) => setRoutes({ data, error: "" })).catch((e) => setRoutes({ data: null, error: message(e) }));
+  }, [rest]);
   useEffect(() => {
     (async () => {
       try { setDeck(await rest("/deck")); } catch (e) { setError(message(e)); }
@@ -261,12 +262,12 @@ function YugiohApp({ rest }) {
   }, [rest]);
 
   let main = null;
-  if (tab === "展开路线") main = h(RoutesView, { rest, id: routeId, setId: setRouteId });
-  else if (tab === "起手速查") main = h(LookupView, { rest, onOpen: (id) => { setRouteId(id); setTab("展开路线"); } });
+  if (tab === "展开路线") main = h(RoutesView, { rest, loaded: routes, id: routeId, setId: setRouteId });
+  else if (tab === "起手速查") main = h(LookupView, { rest, loaded: routes, onOpen: (id) => { setRouteId(id); setTab("展开路线"); } });
   else if (deck) main = h(DeckView, { rest, deck });
   return h("div", { className: "yg", "data-ready": ready ? "true" : "false" },
     h("header", { className: "yg-head" }, h("h1", null, "游戏王 · 烙印教程"),
-      h("nav", { className: "yg-tabs" }, TABS.map((t) => h("button", { key: t, className: `yg-tab${tab === t ? " on" : ""}`, onClick: () => { setRouteId(null); setTab(t); } }, t)))),
+      h("nav", { className: "yg-tabs" }, TABS.map((t) => h("button", { key: t, className: `yg-tab${tab === t ? " on" : ""}`, onClick: () => setTab(t) }, t)))),
     error ? h("div", { className: "yg-error", role: "alert" }, error) : null,
     main);
 }

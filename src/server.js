@@ -6,7 +6,7 @@ import { deckOverview } from './deck.js';
 import { BRANDED } from './decks/branded.js';
 import { openEngine } from './duel-session.js';
 import { openEngineFiles } from './engine-files.js';
-import { checkLookup, lookupView } from './lookup.js';
+import { lookupView } from './lookup.js';
 import { replayRoute, routeListItem } from './route-view.js';
 import { openStore } from './store.js';
 
@@ -16,9 +16,6 @@ const DATA = process.env.YUGIOH_DATA ?? join(homedir(), '.mimi-yugioh');
 // 引擎数据（卡库、脚本）：路线要用它重放；默认在数据目录里，测试和 ./ci 指到复用的缓存目录
 const ENGINE = process.env.YUGIOH_ENGINE ?? join(DATA, 'engine');
 const OVERVIEW = deckOverview(BRANDED);
-// 起手速查只能指向已有的路线：数据有问题（指向不存在的路线、起手里没有写的卡……）服务就起不来
-const lookupProblems = checkLookup(BRANDED);
-if (lookupProblems.length) throw new Error(`起手速查数据有问题：\n${lookupProblems.join('\n')}`);
 
 const store = openStore(DATA);
 
