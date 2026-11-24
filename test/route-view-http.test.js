@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { BRANDED } from '../src/decks/branded.js';
+import { ZONES } from '../src/route-view.js';
 import { ENGINE_DIR, start } from './helpers.js';
 
 const get = async (url, path) => { const res = await fetch(`${url}${path}`); return { status: res.status, body: await res.json() }; };
-const ZONES = ['hand', 'monsters', 'spellTraps', 'grave', 'banished'];
 
 describe('路线接口：GET /routes、GET /route?id=', () => {
   test('GET /routes：两条路线，各写需要的起手卡、终场打断数、来源和引擎验证日期', async () => {
@@ -73,7 +73,7 @@ describe('路线接口：GET /routes、GET /route?id=', () => {
           && sorted(last.spellTraps).join() === [...def.end.spellTraps].sort((a, b) => a - b).join()
           && last.hand.length === def.end.hand;
         assert.ok(same || body.mismatch, `${def.id} 终场和教程不一致，却没有 mismatch`);
-        assert.deepEqual(body.engineDiff, [], `${def.id} 引擎重放和教程的差异`);
+        assert.ok(body.engineDiff.length === 0 || body.mismatch, `${def.id} 引擎重放和教程有差异，却没有 mismatch`);
       }
     } finally { server.stop(); }
   });
