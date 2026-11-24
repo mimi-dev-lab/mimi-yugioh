@@ -4,12 +4,12 @@ import { BRANDED } from '../src/decks/branded.js';
 import { diffEnd, playRoute } from '../src/route.js';
 import { openTestEngine } from './helpers.js';
 
-describe('烙印的两条 Game8 路线在引擎里重放', () => {
+describe('烙印的展开路线在引擎里重放', () => {
   let engine;
   before(async () => { engine = await openTestEngine(); });
 
   for (const route of BRANDED.routes) {
-    test(`${route.name}：走通，终场和 Game8 一致，脚本报错 0`, async () => {
+    test(`${route.name}：走通，终场和出处教程一致，脚本报错 0`, async () => {
       const { endBoard, scriptErrors } = await playRoute(engine, BRANDED, route);
       assert.deepEqual(scriptErrors, []);
       assert.deepEqual(diffEnd(route, endBoard), []);

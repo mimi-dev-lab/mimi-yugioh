@@ -20,7 +20,7 @@
 - ✔ 最后一步（`--step last`）：多出「终场汇总」：对手回合能打断几次、每个打断靠哪张卡怎么打断、场上的怪兽和魔陷、剩余手牌。
 - 手机宽（`--mobile`）：花了 → 换来上下排，卡小一号，不出横向滚动条（冒烟查 `overflowX`）。
 - 数据来自服务启动时的引擎重放（`YUGIOH_ENGINE`，`yv launch` 默认用 `~/.cache/mimi-yugioh/engine`）；引擎数据缺失时 `/routes` 回 503，页面在页签里显示错误。
-- 不查：mismatch 的橙框（现在两条路线都和教程一致，没有这个状态；接口测试 `test/route-view.test.js` 用构造的路线守着机制）。
+- 不查：mismatch 的橙框（现在每条路线都和教程一致，没有这个状态；接口测试 `test/route-view.test.js` 用构造的路线守着机制）。
 
 ## 卡图
 - 页面经 `GET /card-image?code=` 拿 JSON(base64)，拼成 data: 地址；没有这张图时在卡图位置写卡名。
