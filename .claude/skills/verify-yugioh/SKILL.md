@@ -10,7 +10,7 @@ description: 在真的游戏王插件页上证明行为：用编的数据起一�
 - `yv.mjs`（下文 `yv`）：起一个临时的游戏王服务（`PORT=0`、临时数据目录、编的卡图）；`doctor` 查它、`api` 看第二个视图、`cleanup` 清掉。
 - `plugin-verify`（下文 `P`）：先 `yv launch`，再起一个只开 Webapp 的临时 Hermes 网关（插件用本仓的 `plugin/`，后端的 `YUGIOH_URL` 指向那个临时实例），用无头 Chromium 像用户一样点。
 
-只用 Node 22、python3、本机已有的无头 Chromium（`~/Library/Caches/ms-playwright` 的 headless shell，`XV_CHROME` 可换）和 Hermes（`hermes` 在 PATH 或 `~/.local/bin`），不装依赖。登录的 cookie 由 mac-mini 检出里的 `bin/panel-login --webapp` 签（`MAC_MINI_REPO` 可换）；Hermes 的运行时（约 640 MB）第一次装进 `~/Library/Caches/yugioh-verify/runtime`，tv-theater 的验证已经装过时直接用那份（`YUGIOH_VERIFY_RUNTIME` 可换）。引擎数据（卡库和脚本）读 `~/.cache/mimi-yugioh/engine`（`YUGIOH_ENGINE` 可换），没有就先 `node scripts/prepare-engine.js "$HOME/.cache/mimi-yugioh/engine"`。
+只用 Node 22、python3、本机已有的无头 Chromium（`~/Library/Caches/ms-playwright` 的 headless shell，`XV_CHROME` 可换）和 Hermes（`hermes` 在 PATH 或 `~/.local/bin`），不装依赖。登录的 cookie 由 mac-mini 检出里的 `bin/panel-login --webapp` 签（`MAC_MINI_REPO` 可换）；Hermes 的运行时（约 640 MB）第一次装进 `~/Library/Caches/yugioh-verify/runtime`，tv-theater 的验证已经装过时直接用那份（`YUGIOH_VERIFY_RUNTIME` 可换）。
 
 **临时数据是硬规矩**：实例只读这次临时目录，从不读 `~/.mimi-yugioh`，不连 mini 上常驻的 `127.0.0.1:4519`，不碰用户的网页工作区（9120）和面板（9119），不跑 `plugin-setup --live`（它碰线上）。`./ci` 里的冒烟用编的单色小图，不连 NAS。
 

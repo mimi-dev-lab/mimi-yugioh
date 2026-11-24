@@ -18,10 +18,11 @@ describe('烙印卡组数据', () => {
   });
 
   test('每张卡都有简中名、日文名、作用、三件事、打断数；有打断的写了怎么打断，没有的留空', () => {
-    assert.deepEqual(BRANDED.roles, ['启动', '检索', '融合素材', '终场', '手坑']);
+    assert.deepEqual(BRANDED.roles.map((r) => r.name), ['启动', '检索', '融合素材', '终场', '手坑']);
+    for (const r of BRANDED.roles) assert.ok(r.note?.trim(), `${r.name} 缺含义`);
     for (const [code, card] of Object.entries(BRANDED.cards)) {
       for (const key of ['jp', 'md', 'does', 'cost', 'limit']) assert.ok(card[key]?.trim(), `${code} 缺 ${key}`);
-      assert.ok(BRANDED.roles.includes(card.role), `${code} 作用 ${card.role}`);
+      assert.ok(BRANDED.roles.some((r) => r.name === card.role), `${code} 作用 ${card.role}`);
       assert.ok(Number.isInteger(card.interrupts) && card.interrupts >= 0, `${code} 打断数`);
       assert.equal(card.interrupts > 0, card.interruptHow.trim() !== '', `${code} 打断数和怎么打断`);
     }
@@ -61,6 +62,21 @@ describe('烙印卡组数据', () => {
     assert.match(checkDeck(strayHow).join('\n'), /白き竜の落胤.*打断数 0 和「对手回合怎么打断」对不上/);
     const missing = clone(); delete missing.cards[ALBAZ];
     assert.match(checkDeck(missing).join('\n'), /不在卡表里/);
+  });
+
+  test('终场里的卡和超融合、卡尔塔西亚能在对手回合打断，落胤与圣女留到对手回合发动；阿尔白斯之落胤自己不打断', () => {
+    const c = BRANDED.cards;
+    assert.deepEqual([c[30271097].role, c[30271097].interrupts], ['终场', 1]);
+    assert.match(c[30271097].interruptHow, /盖着留到对手回合/);
+    assert.deepEqual([c[48130397].role, c[48130397].interrupts], ['融合素材', 1]);
+    assert.match(c[48130397].interruptHow, /盖着留到对手回合/);
+    assert.equal(c[95515789].interrupts, 1);
+    assert.match(c[95515789].interruptHow, /对手回合/);
+    assert.doesNotMatch(c[68468459].limit, /打断/);
+  });
+
+  test('效果说明里的名字和 md 名一致：没有「阿不思」「艾克莉西娅」', () => {
+    for (const [code, card] of Object.entries(BRANDED.cards)) for (const key of ['does', 'cost', 'limit', 'interruptHow']) assert.doesNotMatch(card[key], /阿不思|艾克莉西娅/, `${code} 的 ${key}`);
   });
 
   test('路线的起手都在主卡组里，必要卡在起手里，起手 5 张', () => {

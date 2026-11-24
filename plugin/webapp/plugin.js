@@ -13,14 +13,6 @@ import { ROUTES_AREA, SIDEBAR_NAV_AREA } from "@hermes/plugin-sdk";
 import { createElement as h, useState, useEffect } from "react";
 
 const TABS = ["卡组一览", "展开路线", "起手速查"];
-// one line under each role's heading (GLOSSARY.md「作用」)
-const ROLE_NOTE = {
-  启动: "一张就能开始展开",
-  检索: "把别的卡拿进手牌，或先送去墓地备用",
-  融合素材: "当融合素材、帮忙融合召唤，或是展开中途经过的融合怪兽",
-  终场: "展开完留在场上，对手回合起作用",
-  手坑: "对手回合从手牌发动",
-};
 const ZONE_NAME = { main: "主卡组", extra: "额外卡组" };
 
 const message = (e) => String(e?.message ?? e).replace(/^\d+:\s*/, "");
@@ -93,9 +85,9 @@ function DeckView({ rest, deck }) {
       h("p", { className: "yg-lab yg-sum" }, `${deck.name} · 主卡组 ${total("main")} 张 · 额外卡组 ${total("extra")} 张 · 卡表来自 `,
         h("a", { href: deck.source.url, target: "_blank", rel: "noopener noreferrer" }, `${deck.source.name}（${deck.source.date} 版）`)),
       deck.roles.map((role) => {
-        const cards = deck.cards.filter((c) => c.role === role);
-        return h("section", { key: role, className: "yg-group", "aria-label": role },
-          h("div", { className: "yg-line" }, h("h2", null, role), h("span", { className: "yg-lab" }, `${cards.reduce((n, c) => n + c.count, 0)} 张 · ${ROLE_NOTE[role] ?? ""}`)),
+        const cards = deck.cards.filter((c) => c.role === role.name);
+        return h("section", { key: role.name, className: "yg-group", "aria-label": role.name },
+          h("div", { className: "yg-line" }, h("h2", null, role.name), h("span", { className: "yg-lab" }, `${cards.reduce((n, c) => n + c.count, 0)} 张 · ${role.note}`)),
           h("div", { className: "yg-tiles" }, cards.map((c) => h(Tile, { key: c.code, rest, card: c, selected: c.code === code, onClick: () => setCode(c.code === code ? null : c.code) }))));
       })),
     h(Detail, { rest, card, onClose: () => setCode(null) }));

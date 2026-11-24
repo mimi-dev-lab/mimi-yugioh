@@ -5,7 +5,7 @@ author: "mimi-dev-lab"
 requires_hermes: ">=0.22"
 tags: [dashboard]
 # A shell only: the web workspace page (webapp/plugin.js, linked as ~/.hermes/desktop-plugins/yugioh) and one thin backend
-# (dashboard/plugin_api.py) that forwards to the yugioh service on this machine. Rules and scores are worked out by src/, not here.
+# (dashboard/plugin_api.py) that forwards to the yugioh service on this machine. The deck data is served by src/, not worked out here.
 # register() adds no tools or hooks.
 provides_tools: []
 provides_hooks: []

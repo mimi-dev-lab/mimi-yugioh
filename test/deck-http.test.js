@@ -13,14 +13,18 @@ describe('卡组一览和卡图：HTTP 接口', () => {
       const { status, body } = await get(server.url, '/deck');
       assert.equal(status, 200);
       assert.equal(body.name, '烙印');
-      assert.deepEqual(body.roles, ['启动', '检索', '融合素材', '终场', '手坑']);
+      assert.deepEqual(body.roles.map((r) => r.name), ['启动', '检索', '融合素材', '终场', '手坑']);
+      for (const r of body.roles) {
+        assert.deepEqual(Object.keys(r).sort(), ['name', 'note'], '作用的字段');
+        assert.ok(r.note.trim(), `${r.name} 缺含义`);
+      }
       assert.match(body.source.url, /^https:\/\/game8\.jp\//);
       const count = (zone) => body.cards.filter((c) => c.zone === zone).reduce((n, c) => n + c.count, 0);
       assert.equal(count('main'), 40);
       assert.equal(count('extra'), 15);
       for (const c of body.cards) {
         assert.deepEqual(Object.keys(c).sort(), ['code', 'cost', 'count', 'does', 'interruptHow', 'interrupts', 'jp', 'limit', 'md', 'role', 'zone'], `${c.code} 的字段`);
-        assert.ok(body.roles.includes(c.role), `${c.md} 的作用 ${c.role}`);
+        assert.ok(body.roles.some((r) => r.name === c.role), `${c.md} 的作用 ${c.role}`);
         // 打断能力：有打断次数就写了怎么打断，没有就是空的
         assert.equal(c.interrupts > 0, c.interruptHow !== '', `${c.md} 的打断数 ${c.interrupts} 和说明「${c.interruptHow}」对不上`);
       }
@@ -32,7 +36,7 @@ describe('卡组一览和卡图：HTTP 接口', () => {
       assert.equal(body.cards.find((c) => c.code === 14558127).role, '手坑'); // 灰流丽
       assert.equal(body.cards.find((c) => c.code === 45883110).md, '引导之圣女 库妸㽗'); // 生僻字照 md_name 的码位
       // 按作用分组排好：同一作用的卡挨在一起，组的先后照 roles
-      const order = body.cards.map((c) => body.roles.indexOf(c.role));
+      const order = body.cards.map((c) => body.roles.findIndex((r) => r.name === c.role));
       assert.deepEqual(order, [...order].sort((a, b) => a - b));
     } finally { server.stop(); }
   });

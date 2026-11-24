@@ -4,8 +4,8 @@
 
 - 仓在 `mimi-dev-lab` 组织下，**公开**。不往仓里放卡图、整篇抓来的文章或任何密钥；卡图在 NAS（见 wiki），展开路线写成我们自己的结构化数据并注明出处链接
 - 身份：commit `Li Fan <12878764+lifaninjp@users.noreply.github.com>`
-- 现状：2026-02 的旧 Next.js 应用已在 #2 删掉。新版做成 Hermes 插件，形态照 `lifaninjp/finance`：本机服务（`src/`，只听 `127.0.0.1:4519`）+ 只做外壳的插件（`plugin/`，#6 建，名字「游戏王」、路由 `/yugioh`）。规格是 #1，选定的设计稿在 `~/work/.preview/yugioh/design-r3/`
-- 先读 [DESIGN.md](DESIGN.md)（结构、数据目录、环境变量）和 [GLOSSARY.md](GLOSSARY.md)（起手、场面值、场面分、基准手、决定点……）
+- 现状：2026-02 的旧 Next.js 应用已在 #2 删掉。新版做成 Hermes 插件，形态照 `lifaninjp/finance`：本机服务（`src/`，只听 `127.0.0.1:4519`）+ 只做外壳的插件（`plugin/`，#6 建，名字「游戏王」、路由 `/yugioh`）。规格是 #27（#1 的计时练习已取代），选定的设计稿在 `~/work/.preview/yugioh/design-r3/`
+- 先读 [DESIGN.md](DESIGN.md)（结构、数据目录、环境变量）和 [GLOSSARY.md](GLOSSARY.md)（教程、卡组一览、作用、三件事、打断数、展开、起手、终场……）
 - 运行：`YUGIOH_DATA=$(mktemp -d) npm start`；引擎数据先 `node scripts/prepare-engine.js`。测试 `npm test`（Node 22+）。合并前的全部检查是 `./ci`（先 `export PATH=/usr/local/bin:/opt/homebrew/bin:$PATH`）
 - 环境变量一律 `YUGIOH_…` 前缀（`PORT` 除外）
 

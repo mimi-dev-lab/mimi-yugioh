@@ -9,8 +9,7 @@ import { openStore } from './store.js';
 const PORT = Number(process.env.PORT ?? 4519);
 // 数据目录在仓外，不进 git；服务只读里面的卡图 images/
 const DATA = process.env.YUGIOH_DATA ?? join(homedir(), '.mimi-yugioh');
-const DECK = BRANDED;
-const OVERVIEW = deckOverview(DECK);
+const OVERVIEW = deckOverview(BRANDED);
 
 const store = openStore(DATA);
 
