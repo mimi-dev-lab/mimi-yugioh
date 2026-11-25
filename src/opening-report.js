@@ -2,7 +2,7 @@
 // 纯函数：只看传进来的行和卡组数据，不读时间、不读文件；同样的行得到同样的文字（毫秒只在「总耗时」里出现，它来自行里记的 ms）。
 import { expand } from './deck.js';
 import { keyCardsIn } from './opening-sim.js';
-import { cardOf } from './route-view.js';
+import { cardOf } from './deck.js';
 import { MAX_BRANCH, MAX_COMBOS, MAX_DISCREPANCY } from './search.js';
 
 export const MIN_LIFT_HANDS = 10; // 「每张卡在手时」只列至少在这么多手里出现过的卡（手数太少，平均不稳）

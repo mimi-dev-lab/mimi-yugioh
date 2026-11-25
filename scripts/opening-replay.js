@@ -7,7 +7,7 @@ import { openEngine } from '../src/duel-session.js';
 import { openEngineFiles } from '../src/engine-files.js';
 import { checkReplay, replayRow } from '../src/opening-sim.js';
 import { JSONL_PATH, parseJsonl } from '../src/opening-report.js';
-import { cardOf } from '../src/route-view.js';
+import { cardOf } from '../src/deck.js';
 import { engineDirFrom, failerFor } from './opening-common.js';
 
 const fail = failerFor('opening-replay');

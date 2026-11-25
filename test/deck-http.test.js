@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { BRANDED } from '../src/decks/branded.js';
 import { dataDir, start } from './helpers.js';
 
 const get = async (url, path) => { const res = await fetch(`${url}${path}`); return { status: res.status, body: await res.json() }; };
@@ -23,7 +24,9 @@ describe('卡组一览和卡图：HTTP 接口', () => {
       assert.equal(count('main'), 40);
       assert.equal(count('extra'), 15);
       for (const c of body.cards) {
-        assert.deepEqual(Object.keys(c).sort(), ['code', 'cost', 'count', 'does', 'interruptHow', 'interrupts', 'jp', 'limit', 'md', 'role', 'zone'], `${c.code} 的字段`);
+        const levelKey = Object.keys(BRANDED.levels[c.code] ?? {}); // 怪兽多一个 level / rank / link，魔法陷阱没有
+        assert.deepEqual(Object.keys(c).sort(), ['code', 'cost', 'count', 'does', 'interruptHow', 'interrupts', 'jp', 'limit', 'md', 'role', 'zone', ...levelKey].sort(), `${c.code} 的字段`);
+        assert.deepEqual(levelKey.map((k) => c[k]), Object.values(BRANDED.levels[c.code] ?? {}), `${c.code} 的等级`);
         assert.ok(body.roles.some((r) => r.name === c.role), `${c.md} 的作用 ${c.role}`);
         // 打断能力：有打断次数就写了怎么打断，没有就是空的
         assert.equal(c.interrupts > 0, c.interruptHow !== '', `${c.md} 的打断数 ${c.interrupts} 和说明「${c.interruptHow}」对不上`);

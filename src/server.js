@@ -2,6 +2,7 @@
 import http from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { buildRouteAnim } from './anim-page.js';
 import { deckOverview } from './deck.js';
 import { BRANDED } from './decks/branded.js';
 import { openEngine } from './duel-session.js';
@@ -9,6 +10,7 @@ import { openEngineFiles } from './engine-files.js';
 import { lookupView } from './lookup.js';
 import { replayRoute, routeListItem } from './route-view.js';
 import { openStore } from './store.js';
+import { readHyperframes } from './vendor-files.js';
 
 const PORT = Number(process.env.PORT ?? 4519);
 // 数据目录在仓外，不进 git；服务只读里面的卡图 images/
@@ -39,6 +41,17 @@ const ROUTES = (async () => {
   }
 })();
 
+// 路线动画页：第一次要才拼（带卡图和 HyperFrames 运行时，几 MB），按路线 id 缓存；卡图在数据目录里换了要重启服务才会变
+let VENDOR = null;
+const ANIMS = new Map();
+function animFor(route) {
+  if (!ANIMS.has(route.id)) {
+    VENDOR ??= readHyperframes();
+    ANIMS.set(route.id, buildRouteAnim({ route, readImage: (code) => store.readImage(code), vendor: VENDOR }));
+  }
+  return ANIMS.get(route.id);
+}
+
 const json = (res, status, value) => { const text = JSON.stringify(value); res.writeHead(status, { 'content-type': 'application/json' }).end(text); }; // 先序列化再写头：序列化出错时还能回 500
 
 async function route(req, pathname, query) {
@@ -56,6 +69,13 @@ async function route(req, pathname, query) {
       if (error) return [503, { error }];
       const found = routes.find((r) => r.id === query.get('id'));
       return found ? [200, found] : [404, { error: '没有这条路线' }];
+    }
+    // 路线动画：{ src（data:text/html 地址，插件页放进 SandboxedFrame）, starts / ends（位置 0 = 起手、1..N = 第几步的开始帧、结束帧，秒）, duration, stage }
+    case 'GET /route-anim': {
+      const { routes, error } = await ROUTES;
+      if (error) return [503, { error }];
+      const found = routes.find((r) => r.id === query.get('id'));
+      return found ? [200, animFor(found)] : [404, { error: '没有这条路线' }];
     }
     // 卡图：JSON 里放 base64，插件后端原样转发、页面拼成 data: 地址（ctx.rest 只会读 JSON）。没有这张图是 404，页面改写卡名
     case 'GET /card-image': {

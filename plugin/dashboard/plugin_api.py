@@ -5,6 +5,7 @@ starts no process.
 GET  /deck               → GET  /deck                  (卡组一览: every card with its names, role, count, effect and how it interrupts)
 GET  /routes             → GET  /routes                (展开路线 list: needs, interrupts at the end, source, verification date; and `lookup`, the 起手速查 data)
 GET  /route?id=X         → GET  /route?id=X            (one route: every step with the engine's board and what changed, the end summary; the id is lowercase letters, digits and hyphens)
+GET  /route-anim?id=X    → GET  /route-anim?id=X       (the route animation: a data: page for the plugin's sandboxed frame, plus the start / end second of every step; same id check as /route)
 GET  /card-image?code=N  → GET  /card-image?code=N     (one card picture, as JSON with base64; the code has to be digits)
 
 The tutorial only reads: there are no writes to let through.
@@ -78,6 +79,15 @@ async def route(id: str):
     if not id or len(id) > 64 or not all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in id):
         return JSONResponse({"error": "路线 id 只许小写字母、数字和连字符"}, status_code=400)
     status, body = await asyncio.to_thread(forward, "GET", f"/route?id={id}")
+    return JSONResponse(body, status_code=status)
+
+
+@router.get("/route-anim")
+async def route_anim(id: str):
+    """Same id check as /route. The answer is a few MB of JSON (a self-contained page with the card pictures inlined)."""
+    if not id or len(id) > 64 or not all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in id):
+        return JSONResponse({"error": "路线 id 只许小写字母、数字和连字符"}, status_code=400)
+    status, body = await asyncio.to_thread(forward, "GET", f"/route-anim?id={id}")
     return JSONResponse(body, status_code=status)
 
 
