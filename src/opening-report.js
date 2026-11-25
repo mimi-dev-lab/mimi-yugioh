@@ -11,6 +11,13 @@ export const COMMON_ENDS = 3; // 每组列几种常见终场
 export const BRICK_CARDS = 5; // 卡手里比平时更常出现的卡，列几张
 export const BRICK_MIN_HANDS = 3; // 一张卡在卡手里至少出现这么多手才进上面那个榜
 
+// 第一版（commit e801814）的结果，报告「返工说明」一节拿它和这次对照。第一版的打断数不看卡的发动条件（把终场在场各卡的 interrupts 直接相加），
+// 那份 JSONL 已被重跑的结果替换，数字从它原样抄在这里（git show e801814:docs/opening-analysis.jsonl 能重算）。只有总种子、上限、手数都一样时才对照
+export const FIRST_VERSION = {
+  commit: 'e801814', masterSeed: 20261126, maxNodes: 100000, total: 500,
+  distribution: { 0: 12, 1: 68, 2: 187, '3+': 233 }, avgInterrupts: 2.392, avgHandLeft: 2.818, better: 30, uncovered: 440, mercurierOnField: 63,
+};
+
 // 读 JSONL：一行一手，空行跳过，按 index 排序；同一个 index 出现两次报错
 export function parseJsonl(text) {
   const rows = text.split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l));
@@ -99,7 +106,7 @@ export const MD_PATH = 'docs/opening-analysis.md';
 // 报告里附完整步骤的新路线候选：搜索比已知路线好的在前，其次是已知路线都走不通的，取前 CANDIDATE_DETAIL 手
 export const candidateDetails = ({ candidates }) => [...candidates.better, ...candidates.uncovered].slice(0, CANDIDATE_DETAIL);
 
-export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) {
+export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS, firstVersion = FIRST_VERSION } = {}) {
   const s = analyze(rows, deck, { minLiftHands });
   const md = (code) => cardOf(deck, code).md;
   const out = [];
@@ -113,10 +120,28 @@ export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) 
   line('## 怎么跑的');
   line();
   line(`- 手数：${s.total} 手。总种子 ${s.masterSeed}，每手的发牌种子由它按 mulberry32 派生；每手把 40 张主卡组按这个种子洗牌，取前 5 张当先攻起手，引擎里剩下的牌用同一个种子洗。`);
-  line('- 评价：场面值 = 10 × 我方回合结束时终场在场各卡的打断数之和 + 1 × 剩余手牌数（打断数照卡组数据里每张卡的 `interrupts`，见 DESIGN「卡组数据」）。下面「打断数」都指终场的打断数之和。');
+  line('- 评价：场面值 = 10 × 我方回合结束时终场的打断数 + 1 × 剩余手牌数。打断数按卡组数据里每张卡的打断数和发动条件算（`src/interrupts.js`，见 DESIGN「卡组数据」）：例如铁兽鸟 墨丘利耶要场上有以阿尔白斯之落胤为素材的融合怪兽才算（在手牌、在场上都算），盖着的超融合每张要弃一张手牌。下面「打断数」都指终场的打断数。');
   line(`- 每手两路取更好的：一路是规则引擎里的有限偏离深度优先搜索（上限 ${s.maxNodes} 个节点，见最后一节），一路是把卡组数据里的 ${Object.keys(rows[0]?.routeValues ?? {}).length} 条已知展开路线用这手的起手和种子各重放一遍（对不上引擎提示的就算走不了）。`);
   line(`- 最好值来源：${Object.entries(s.sources).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([k, n]) => `${k === 'search' ? '搜索' : `路线 ${k}`} ${n} 手`).join('，')}（搜索和路线同值记搜索）。`);
   line();
+
+  const fv = firstVersion;
+  if (fv && fv.masterSeed === s.masterSeed && fv.maxNodes === s.maxNodes && fv.total === s.total) {
+    line('## 返工说明');
+    line();
+    line(`第一版（commit ${fv.commit}）的打断数不看卡的发动条件，把终场在场各卡的打断数直接相加，结果被高估：例如只通常召唤铁兽鸟 墨丘利耶、盖两张超融合的终场记了 3 个打断，可墨丘利耶要场上有以阿尔白斯之落胤为素材的融合怪兽才能发动，那个终场一只融合怪兽都没有。第一版 ${fv.total} 手里终场场上有墨丘利耶的有 ${fv.mercurierOnField} 手。`);
+    line();
+    line('这一版把每张有打断的卡的条件照卡片原文写进卡组数据，路线终场汇总、起手速查、搜索和本模拟共用 `src/interrupts.js` 算；搜索的评价跟着变了，所以全部手用同一个总种子和上限重跑（不是拿第一版的终场重新打分）。第一版的分布原样列在下面：');
+    line();
+    table(['打断数', '第一版手数', '第一版占比', '这一版手数', '这一版占比'], ['0', '1', '2', '3+'].map((k) => [k, fv.distribution[k], pct(fv.distribution[k], fv.total), s.distribution[k], pct(s.distribution[k], s.total)]));
+    table(['', '第一版', '这一版'], [
+      ['卡手率（0 打断）', pct(fv.distribution[0], fv.total), pct(s.distribution[0], s.total)],
+      ['平均打断数', f2(fv.avgInterrupts), f2(s.avgInterrupts)],
+      ['平均剩余手牌', f2(fv.avgHandLeft), f2(s.avgHandLeft)],
+      ['新路线候选（搜索比走得通的已知路线好）', `${fv.better} 手`, `${s.candidates.better.length} 手`],
+      ['已知路线都走不通、搜索有打断', `${fv.uncovered} 手`, `${s.candidates.uncovered.length} 手`],
+    ]);
+  }
 
   line('## 打断数分布');
   line();

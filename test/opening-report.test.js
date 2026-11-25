@@ -135,6 +135,19 @@ describe('报告文字：同一份 JSONL 同一份报告', () => {
     assert.match(text, /\{"idle":"activate","code":73819701\}/);
   });
 
+  test('返工说明：总种子、上限、手数和第一版一样时，第一版的分布原样列出并和这次对照；对不上就不写', () => {
+    const fv = { commit: 'abc1234', masterSeed: 20261126, maxNodes: 5000, total: 8, distribution: { 0: 1, 1: 1, 2: 2, '3+': 4 }, avgInterrupts: 2.5, avgHandLeft: 3, better: 5, uncovered: 2, mercurierOnField: 3 };
+    const text = buildReport(ROWS, BRANDED, { firstVersion: fv });
+    assert.match(text, /## 返工说明/);
+    assert.match(text, /commit abc1234/);
+    assert.match(text, /\| 0 \| 1 \| 12\.5% \| 3 \| 37\.5% \|/);
+    assert.match(text, /\| 3\+ \| 4 \| 50\.0% \| 2 \| 25\.0% \|/);
+    assert.match(text, /\| 平均打断数 \| 2\.50 \| 1\.50 \|/);
+    assert.ok(text.indexOf('## 返工说明') < text.indexOf('## 打断数分布'));
+    assert.doesNotMatch(buildReport(ROWS, BRANDED, { firstVersion: { ...fv, maxNodes: 100000 } }), /返工说明/);
+    assert.doesNotMatch(buildReport(ROWS, BRANDED), /返工说明/); // 默认的第一版是 500 手、上限 100000
+  });
+
   test('没有任何手超上限、没有候选时也能生成（写「没有」）', () => {
     const plain = ROWS.filter((r) => r.index >= 4).map((r) => ({ ...r, capped: false }));
     const t = buildReport(plain, BRANDED, { minLiftHands: 1 });
