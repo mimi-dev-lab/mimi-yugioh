@@ -6,6 +6,7 @@
 // 每条路线另带：source（出处 { name, url, date }，date 是页面版本日期）、verified（引擎重放验证的日期）、mismatch（教程和引擎结果不一致处的说明，一致就不写这个字段）。
 export const C = {
   albaz: 73819701, // 白之落胤
+  albazOrig: 68468459, // 阿尔白斯之落胤（白之落胤规则上算它；11-24 公告后白之落胤只能带 1 张，路线里第一次要用的那张改用它）
   whiteSaint: 55273560, // 白之圣女 艾克利西亚
   quem: 45883110, // 引导之圣女 库妸㽗
   cartesia: 95515789, // 赫之圣女 卡尔塔西亚
@@ -65,7 +66,7 @@ const lubellionFusionToTurnEnd = [
 ];
 
 // 烙印融合线和阿卢绯尔线共用的几步（第二次融合的素材不同，各自写）
-const fusionSummonsAlbion = { text: '发动烙印融合：用卡组的白之落胤和卡尔塔西亚融合召唤烙印龙阿尔比昂', do: [act(C.brandedFusion), place, 'pass', pick(C.albionBranded), pick(C.albaz), pick(C.cartesia), place, position] };
+const fusionSummonsAlbion = { text: '发动烙印融合：用卡组的阿尔白斯之落胤和卡尔塔西亚融合召唤烙印龙阿尔比昂', do: [act(C.brandedFusion), place, 'pass', pick(C.albionBranded), pick(C.albazOrig), pick(C.cartesia), place, position] };
 const granguignolSendsDevours = { text: '格兰吉尼奥尔①：从额外卡组把吞喰圣痕之龙送去墓地', do: ['yes', 'pass', pick(C.dragonDevours), 'pass'] };
 const devoursSearchesVirtuous = { text: '结束阶段：墓地的吞喰圣痕之龙检索落胤与圣女', do: ['yes', 'pass', pick(C.virtuous)] };
 const virtuousSendsTitaniklad = { text: '发动落胤与圣女：送灰烬龙 落尘劣种去墓地，破坏烙印龙阿尔比昂', do: [chain(C.virtuous), place, { option: 0 }, pick(C.titaniklad), pick(C.albionBranded), 'pass', 'pass'] };
@@ -105,7 +106,7 @@ export const ROUTES = [
     end: { monsters: [C.granguignol, C.albaz, C.whiteSaint], spellTraps: [C.retribution], hand: 4 },
     steps: [
       fusionSummonsAlbion,
-      { text: '烙印龙阿尔比昂①：用墓地的白之落胤和卡尔塔西亚融合召唤赫焉龙 格兰吉尼奥尔', do: ['yes', 'pass', pick(C.granguignol), pick(C.albaz), pick(C.cartesia), place, position] },
+      { text: '烙印龙阿尔比昂①：用墓地的阿尔白斯之落胤和卡尔塔西亚融合召唤赫焉龙 格兰吉尼奥尔', do: ['yes', 'pass', pick(C.granguignol), pick(C.albazOrig), pick(C.cartesia), place, position] },
       granguignolSendsDevours,
       endTurn,
       devoursSearchesVirtuous,
@@ -134,7 +135,7 @@ export const ROUTES = [
       endTurn,
       devoursSearchesVirtuous,
       virtuousSendsTitaniklad,
-      { text: '墓地的灰烬龙：从卡组特殊召唤第二张白之落胤', do: [chain(C.titaniklad), 'pass', pick(C.albaz), { option: 1 }, place, position] },
+      { text: '墓地的灰烬龙：从卡组特殊召唤白之落胤', do: [chain(C.titaniklad), 'pass', pick(C.albaz), { option: 1 }, place, position] },
       albazCallsSaint,
       albionSetsRetribution,
       finish,

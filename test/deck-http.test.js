@@ -29,7 +29,7 @@ describe('卡组一览和卡图：HTTP 接口', () => {
         assert.equal(c.interrupts > 0, c.interruptHow !== '', `${c.md} 的打断数 ${c.interrupts} 和说明「${c.interruptHow}」对不上`);
       }
       const albaz = body.cards.find((c) => c.code === 73819701);
-      assert.deepEqual([albaz.md, albaz.jp, albaz.role, albaz.zone, albaz.count, albaz.interrupts, albaz.interruptHow], ['白之落胤', '白き竜の落胤', '启动', 'main', 2, 0, '']);
+      assert.deepEqual([albaz.md, albaz.jp, albaz.role, albaz.zone, albaz.count, albaz.interrupts, albaz.interruptHow], ['白之落胤', '白き竜の落胤', '启动', 'main', 1, 0, '']);
       const mirrorjade = body.cards.find((c) => c.code === 44146295);
       assert.deepEqual([mirrorjade.role, mirrorjade.zone, mirrorjade.interrupts], ['终场', 'extra', 1]);
       assert.match(mirrorjade.interruptHow, /除外/);
