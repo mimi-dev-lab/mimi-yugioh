@@ -125,7 +125,7 @@ shot hover-end --route white-albaz --step last --hover "冰剑龙 镜翠幻种" 
 popup hover-end close
 shot tap-route --mobile --route white-albaz --tap 白之落胤 --within .yg-board --close
 popup tap-route close
-has tap-route "× 关上"
+grep -qF "× 关上" "$ev/tap-route.json" || { echo "tap-route 的弹窗里没有「× 关上」，见 $ev/tap-route.json"; exit 1; }
 shot tap-deck --mobile --tab 起手速查 --tap 白之落胤 --within .yg-lookup --close
 popup tap-deck close
 for name in hover-deck hover-route hover-lookup hover-end tap-route tap-deck; do
