@@ -1,3 +1,4 @@
+import { STAGE } from '../src/anim-stage.js';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { BRANDED } from '../src/decks/branded.js';
@@ -19,7 +20,7 @@ describe('路线动画接口：GET /route-anim?id=', () => {
         body.ends.forEach((end, i) => { assert.ok(end > body.starts[i] && end <= body.duration); if (i) assert.ok(body.starts[i] >= body.ends[i - 1]); });
         const html = Buffer.from(body.src.split(',')[1], 'base64').toString('utf8');
         assert.ok(html.includes('Content-Security-Policy') && html.includes('__hyperframes='), def.id);
-        assert.deepEqual(body.stage, { w: 800, h: 700 });
+        assert.deepEqual(body.stage, STAGE);
       }
     } finally { server.stop(); }
   });

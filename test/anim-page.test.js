@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { CSP, buildGuestHtml, buildRouteAnim, imageUri } from '../src/anim-page.js';
+import { STAGE } from '../src/anim-stage.js';
 import { ENGINE_SOURCE } from '../src/anim-engine.js';
 import { readHyperframes } from '../src/vendor-files.js';
 
@@ -10,7 +11,7 @@ const card = { code: 73819701, md: '白之落胤', jp: '白き竜の落胤', lev
 const board = (o = {}) => ({ hand: [], monsters: [], spellTraps: [], grave: [], banished: [], deck: [], extra: [], ...o });
 const route = {
   id: 'mini', name: 'mini', start: board({ hand: [{ ...card, sequence: 0 }], deck: new Array(2).fill(card) }),
-  steps: [{ n: 1, text: '召唤', actions: [], activated: [], diff: {}, moves: [{ ...card, from: 'hand', to: 'monsters', position: 'attack', summon: 'normal' }], board: board({ monsters: [{ ...card, sequence: 0, position: 'attack' }], deck: new Array(2).fill(card) }) }],
+  steps: [{ n: 1, text: '召唤', actions: [], activated: [], diff: {}, moves: [{ ...card, from: 'hand', fromSequence: 0, to: 'monsters', sequence: 0, position: 'attack', summon: 'normal' }], board: board({ monsters: [{ ...card, sequence: 0, position: 'attack' }], deck: new Array(2).fill(card) }) }],
   end: { breakers: [] },
 };
 const vendor = readHyperframes();
@@ -32,7 +33,7 @@ describe('路线动画页：本地、不联网', () => {
     assert.match(CSP, /default-src 'none'/);
     assert.doesNotMatch(CSP, /https?:|\*/);
     assert.ok(html.includes('__hyperframes=')); // 合成页（srcdoc 里）自带运行时
-    assert.deepEqual([anim.stage.w, anim.stage.h], [800, 700]);
+    assert.deepEqual(anim.stage, STAGE);
     assert.equal(anim.starts.length, 2);
     assert.equal(anim.ends.length, 2);
   });

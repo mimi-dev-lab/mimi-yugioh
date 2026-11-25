@@ -1,52 +1,18 @@
-// 路线动画生成器（纯函数）：读一条重放过的路线（GET /route 的内容），给每一步配动作和时间，产出合成页（HTML）和每一步的时间点。
-// 每张卡的动作来自每步的 `moves`（引擎的 MSG_MOVE：从哪个区到哪个区，按发生的顺序），不从 diff 推断；融合 / 同调等召唤的特效取自 move.summon，
-// 素材取自 move.material，同调光环的星数是怪兽的真实等级（move.level），发动的光和连锁号取自 `activated`，守备表示的怪兽横放（position）。
-// 每一步走完后，所有卡的位置和快照一致（planRoute 里对不上就抛错；test/route-anim.test.js 还用 frameAt 把每一步的结束帧和快照逐张对照）。
-// 动画本身是一张轨道表（见 anim-engine.js），这里不依赖 gsap；卡图由调用方给（密码 → data: 地址），没有图的卡画卡名牌。
-import { ENGINE_SOURCE } from './anim-engine.js';
+// 路线动画的计划（纯函数）：读一条重放过的路线（GET /route 的内容），给每一步配动作和时间，产出轨道表、每个位置的时间段和合成页的标记（HTML 片段）。
+// 每张卡的动作来自每步的 `moves`（引擎的 MSG_MOVE：从哪个区到哪个区、去哪一格，按发生的顺序），不从 diff 推断，落点的格子取自 move.sequence，不自己挑；
+// 融合 / 同调等召唤的特效取自 move.summon，素材取自 move.material，同调光环的星数是怪兽的真实等级（move.level），发动的光和连锁号取自 `activated`，
+// 守备表示的怪兽横放（position）。每一步走完后所有卡的位置和快照一致（planRoute 里对不上就抛错；test/anim-plan.test.js 还把每一步的结束帧和快照逐张对照）。
+// 动画本身是一张轨道表（见 anim-engine.js），不依赖 gsap；舞台的几何在 anim-stage.js，合成页的 HTML 在 anim-render.js。
+import {
+  CH, COLOR, CW, HY, MERGE, NOTICE, NOTICE_BANNER_H, PILE, PILES, SIDEWAYS_SCALE, SUMMON_TAG, SX0, MY, SY, COL_L, PITCH, STAGE, VISIBLE, ZONE_COLOR, ZONE_NAME, center, handPos, pilePos, slotPos, zOf,
+} from './anim-stage.js';
 
-// ---- 舞台：800×700 的场面（左右是额外卡组 / 除外和墓地 / 卡组，中间 5 格怪兽区和 5 格魔陷区，再下面一条空带放特效，最下面是手牌）----
-export const STAGE = { w: 800, h: 700 };
-export const CW = 80;
-export const CH = 116;
-const SX0 = 140;
-const PITCH = 110;
-const MY = 30;
-const SY = 222;
-const HY = 524;
-const BAND_Y = 396;
-const COL_L = 20;
-const COL_R = 700;
-const CX = 400;
-const MERGE = [CX, 452];
-const PILE = { extra: [COL_L, MY], banished: [COL_L, SY], grave: [COL_R, MY], deck: [COL_R, SY] };
-export const PILES = ['extra', 'banished', 'grave', 'deck'];
-const VISIBLE = ['hand', 'monsters', 'spellTraps', 'grave', 'banished']; // 有卡牌实体的区；deck / extra 是堆，卡进出时才画出来
-const ZONE_NAME = { deck: '卡组', extra: '额外', hand: '手牌', monsters: '怪兽', spellTraps: '魔陷', grave: '墓地', banished: '除外' };
-const COLOR = { cyan: '#22d3ee', amber: '#fbbf24', green: '#4ade80', coral: '#fb7185', violet: '#a78bfa', pink: '#f472b6', sky: '#7dd3fc', white: '#ffffff', mute: '#9a9aa2' };
-const ZONE_COLOR = { hand: COLOR.green, monsters: COLOR.cyan, spellTraps: COLOR.amber, grave: COLOR.coral, banished: COLOR.violet, deck: COLOR.mute, extra: COLOR.mute };
-const SUMMON_TAG = { fusion: ['融合召唤', COLOR.pink], synchro: ['同调召唤', COLOR.sky], xyz: ['超量召唤', COLOR.violet], link: ['连接召唤', COLOR.cyan], ritual: ['仪式召唤', COLOR.amber] };
 const MERGE_KINDS = Object.keys(SUMMON_TAG);
+
 
 const q = (n) => Math.round(n * 1000) / 1000;
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const EPS = 1e-6;
-
-// ---- 位置 ----
-const handPos = (i, n) => {
-  const pitch = Math.min(100, n > 1 ? 680 / (n - 1) : 100);
-  return [Math.round(CX - ((n - 1) * pitch + CW) / 2 + i * pitch), HY];
-};
-function slotPos(zone, sequence) {
-  if (sequence >= 5) {
-    if (zone !== 'monsters') throw new Error(`${ZONE_NAME[zone]}区的第 ${sequence} 格（场地区）动画还不支持`);
-    return [SX0 + (1 + (sequence - 5) * 2) * PITCH, BAND_Y + 4]; // 额外怪兽区：空带里中间偏左 / 偏右
-  }
-  return [SX0 + sequence * PITCH, zone === 'monsters' ? MY : SY];
-}
-const pilePos = (zone, index) => [PILE[zone][0] + Math.min(index, 6) * 3, PILE[zone][1] - Math.min(index, 6) * 0];
-const zOf = (zone, index) => (zone === 'grave' || zone === 'banished' ? 20 + index : 10);
-const center = (p) => [p[0] + CW / 2, p[1] + CH / 2];
 
 // ---- 轨道：每个元素的每个属性一串段，同一个属性的段在时间上不重叠（重叠就是生成器写错了，直接抛错）----
 function newTracks() {
@@ -68,6 +34,7 @@ function newTracks() {
   };
 }
 
+
 export function planRoute(route) {
   const tr = newTracks();
   const html = { cards: [], fx: [], labels: [] };
@@ -82,13 +49,13 @@ export function planRoute(route) {
   const instances = [];
   function mkCard(card) {
     const id = `c${instances.length}`;
-    const inst = { id, code: card.code, md: card.md, zone: null, slot: null, alive: true, x: 0, y: 0, rot: 0, free: 0 };
+    const inst = { id, code: card.code, md: card.md, slot: null, alive: true, x: 0, y: 0, rot: 0, sc: 1, free: 0 };
     instances.push(inst);
     html.cards.push(`<div id="${id}" class="card" data-code="${card.code}"><div id="${id}a" class="a i${card.code}" data-code="${card.code}" data-md="${esc(card.md)}">`
       + `<span class="pt">${esc(card.md)}</span><div id="${id}t" class="tint"></div><div id="${id}k" class="tb"></div><div id="${id}b" class="bk"></div><div id="${id}h" class="hl"></div></div>`
       + `<div id="${id}n" class="nm">${esc(card.md)}</div></div>`);
     tr.reg(id, { x: 0, y: 0, opacity: 0, z: 10 });
-    tr.reg(`${id}a`, { rotation: 0 });
+    tr.reg(`${id}a`, { rotation: 0, scale: 1 });
     for (const part of ['t', 'k', 'b', 'h', 'n']) tr.reg(`${id}${part}`, { opacity: 0 });
     state.set(inst, { tint: 0, tb: 0, back: 0, name: 0 });
     return inst;
@@ -135,7 +102,7 @@ export function planRoute(route) {
     tween(id, 'opacity', t + 0.05, 0.5, 0, 'o2');
   };
   const banner = (text, color, t, hold) => {
-    const id = fx(`<div id="${nid('bn')}" class="bn" style="background:${color};top:${BAND_Y}px"><span>${esc(text)}</span></div>`, { opacity: 0, scaleX: 0, x: 0 });
+    const id = fx(`<div id="${nid('bn')}" class="bn" style="background:${color};top:${NOTICE.y + (NOTICE.h - NOTICE_BANNER_H) / 2}px"><span>${esc(text)}</span></div>`, { opacity: 0, scaleX: 0, x: 0 });
     set(id, 'opacity', t, 1);
     tween(id, 'scaleX', t, 0.35, 1, 'ox');
     tween(id, 'opacity', t + hold, 0.3, 0, 'i2');
@@ -186,17 +153,19 @@ export function planRoute(route) {
   const pools = { hand: [], monsters: [], spellTraps: [], grave: [], banished: [] };
   const live = (inst) => inst.alive;
 
-  // 一步的目标摆位：每个区里按快照的顺序，每张卡配一个实例（同密码的取池里第一个没配过的），算出它最后的位置、层级、转角、暗化
+  // 一步的目标摆位：每个区里按快照的顺序，每张卡配一个实例，算出它最后的位置、层级、转角、暗化。
+  // 怪兽区 / 魔陷区：配的是引擎说「落在这一格」的那个实例（inst.slot 来自 move.sequence，没动的卡沿用上一步），对不上就抛错；手牌、墓地、除外按池里的顺序
   function layout(board, label) {
     const fin = new Map();
     for (const zone of VISIBLE) {
       const want = [...board[zone]].sort((a, b) => a.sequence - b.sequence);
       const have = pools[zone].filter(live);
       if (have.length !== want.length) throw new Error(`${label}：${ZONE_NAME[zone]}区里动画有 ${have.length} 张，快照是 ${want.length} 张`);
+      const slotted = zone === 'monsters' || zone === 'spellTraps';
       const used = new Set();
       const ordered = want.map((c) => {
-        const inst = have.find((i) => !used.has(i) && i.code === c.code);
-        if (!inst) throw new Error(`${label}：${c.md} 不在动画的${ZONE_NAME[zone]}区里`);
+        const inst = have.find((i) => !used.has(i) && i.code === c.code && (!slotted || i.slot === c.sequence));
+        if (!inst) throw new Error(`${label}：${c.md} 不在动画的${ZONE_NAME[zone]}区${slotted ? `第 ${c.sequence} 格（引擎的移动没把它放在这一格）` : '里'}`);
         used.add(inst);
         return inst;
       });
@@ -204,17 +173,21 @@ export function planRoute(route) {
       ordered.forEach((inst, i) => {
         const c = want[i];
         const pos = zone === 'hand' ? handPos(i, want.length) : zone === 'grave' || zone === 'banished' ? pilePos(zone, i) : slotPos(zone, c.sequence);
-        const position = c.position ?? 'attack';
-        fin.set(inst, {
-          zone, pos, z: zOf(zone, i), slot: zone === 'monsters' || zone === 'spellTraps' ? c.sequence : null,
-          rot: zone === 'monsters' && position !== 'attack' ? 90 : 0, back: (zone === 'monsters' || zone === 'spellTraps') && position === 'facedown' ? 1 : 0,
-          tint: zone === 'grave' ? 0.6 : 0, tb: zone === 'banished' ? 0.45 : 0, name: zone === 'grave' || zone === 'banished' ? 0 : 1,
-        });
+        fin.set(inst, { zone, pos, z: zOf(zone, i), slot: slotted ? c.sequence : null, ...look2(zone, c.position ?? 'attack') });
       });
     }
     return fin;
   }
 
+  // 一张卡在某个区、某个表示形式下的外观：转角 / 缩放（守备横放）、卡背、暗化（墓地）、紫罩（除外）、名字
+  const look2 = (zone, position) => {
+    const field = zone === 'monsters' || zone === 'spellTraps';
+    const sideways = zone === 'monsters' && position !== 'attack';
+    return {
+      rot: sideways ? 90 : 0, sc: sideways ? SIDEWAYS_SCALE : 1, back: field && position === 'facedown' ? 1 : 0,
+      tint: zone === 'grave' ? 0.6 : 0, tb: zone === 'banished' ? 0.45 : 0, name: zone === 'grave' || zone === 'banished' ? 0 : 1,
+    };
+  };
   const look = (inst) => state.get(inst);
   function setLook(inst, t, dur, want) {
     const cur = look(inst);
@@ -234,11 +207,12 @@ export function planRoute(route) {
     tween(inst.id, 'scale', t0, dur * 0.45, 1.14, 'o2');
     tween(inst.id, 'scale', t0 + dur * 0.45, dur * 0.55, o.endScale ?? 1, 'i2');
     if (dest.rot !== inst.rot) tween(`${inst.id}a`, 'rotation', t0, dur, dest.rot, 'io2');
+    if (dest.sc !== inst.sc) tween(`${inst.id}a`, 'scale', t0, dur, dest.sc, 'io2');
     const want = { tint: dest.tint, tb: dest.tb, back: dest.back, name: dest.name };
     setLook(inst, t0 + dur * 0.5, dur * 0.5, want);
     if (o.line !== false) line(center([inst.x, inst.y]), center(dest.pos), o.color ?? ZONE_COLOR[dest.zone] ?? COLOR.white, t0, dur);
     set(inst.id, 'z', t0 + dur, dest.z);
-    Object.assign(inst, { x: dest.pos[0], y: dest.pos[1], rot: dest.rot, free: t0 + dur });
+    Object.assign(inst, { x: dest.pos[0], y: dest.pos[1], rot: dest.rot, sc: dest.sc, free: t0 + dur });
     return t0 + dur;
   }
   const landFx = (zone, pos, t) => {
@@ -258,10 +232,12 @@ export function planRoute(route) {
       if (m.from === 'deck' || m.from === 'extra') { inst = mkCard(m); inst.born = m.from; }
       else {
         if (!VISIBLE.includes(m.from)) throw new Error(`${label}：${m.md} 从 ${m.from} 出发，动画不支持这个区`);
-        const k = pools[m.from].findIndex((i) => i.code === m.code && live(i));
+        const slotted = m.from === 'monsters' || m.from === 'spellTraps'; // 同密码有几张在场上时，按引擎说的出发格子找是哪一张
+        const k = pools[m.from].findIndex((i) => i.code === m.code && live(i) && (!slotted || i.slot === m.fromSequence));
         if (k < 0) throw new Error(`${label}：${m.md} 不在动画的${ZONE_NAME[m.from]}区里，引擎说它从那里出发`);
         [inst] = pools[m.from].splice(k, 1);
       }
+      inst.slot = m.to === 'monsters' || m.to === 'spellTraps' ? m.sequence : null;
       if (m.to === 'deck' || m.to === 'extra' || m.to === 'overlay') inst.alive = false;
       else if (VISIBLE.includes(m.to)) pools[m.to].push(inst);
       else throw new Error(`${label}：${m.md} 去 ${m.to}，动画不支持这个区`);
@@ -272,21 +248,18 @@ export function planRoute(route) {
     return out;
   }
 
-  // 去处：最后一次移动去快照里的位置；中途的一次（这一步里这张卡还会再动）找一个没人用的格子
-  function destOf(item, fin, taken) {
+  // 去处：怪兽区 / 魔陷区的格子取自引擎的 move.sequence（这一步里最后一次移动，快照的格子必须和它一致，layout 已查）；
+  // 中途的一次（这一步里这张卡还会再动）用同样的格子、表示形式取自这次移动；手牌、墓地、除外按引擎说的位置
+  function destOf(item, fin) {
     const { move, last, inst } = item;
-    if (move.to === 'deck' || move.to === 'extra' || move.to === 'overlay') return { zone: move.to, pos: PILE[move.to] ?? MERGE, z: 10, rot: 0, back: 0, tint: 0, tb: 0, name: 0, consumed: true };
+    if (move.to === 'deck' || move.to === 'extra' || move.to === 'overlay') return { zone: move.to, pos: PILE[move.to] ?? MERGE, z: 10, rot: 0, sc: 1, back: 0, tint: 0, tb: 0, name: 0, consumed: true };
     if (last) return { ...fin.get(inst), consumed: false };
     const zone = move.to;
-    const base = { zone, z: 10, rot: zone === 'monsters' && move.position && move.position !== 'attack' ? 90 : 0, back: 0, tint: zone === 'grave' ? 0.6 : 0, tb: zone === 'banished' ? 0.45 : 0, name: zone === 'grave' || zone === 'banished' ? 0 : 1 };
-    if (zone === 'monsters' || zone === 'spellTraps') {
-      let slot = 0;
-      while (taken.has(`${zone}${slot}`) && slot < 4) slot++;
-      taken.add(`${zone}${slot}`);
-      return { ...base, pos: slotPos(zone, slot) };
-    }
-    if (zone === 'hand') return { ...base, pos: handPos(Math.max(0, pools.hand.length - 1), Math.max(1, pools.hand.length)) };
-    return { ...base, pos: pilePos(zone, 0) };
+    const base = { zone, z: 10, ...look2(zone, move.position ?? 'attack'), back: 0 };
+    if (zone === 'monsters' || zone === 'spellTraps') return { ...base, slot: move.sequence, pos: slotPos(zone, move.sequence) };
+    const n = Math.max(1, pools.hand.length);
+    if (zone === 'hand') return { ...base, pos: handPos(Math.min(move.sequence, n - 1), n) };
+    return { ...base, pos: pilePos(zone, move.sequence) };
   }
 
   const segments = [];
@@ -300,7 +273,8 @@ export function planRoute(route) {
     segments.push({ label, start: q(start), dur: q(dur), mark: q(start + dur - 0.05), end: q(start + dur) });
     planned.push(moves);
   }
-  const record = (items) => items.map((it) => ({ id: it.inst.id, code: it.move.code, from: it.move.from, to: it.move.to }));
+  // 计划里每次移动的记录：落点的格子（怪兽区 / 魔陷区）和坐标，测试拿它和引擎的 move.sequence 对
+  const record = (items, dests) => items.map((it, i) => ({ id: it.inst.id, code: it.move.code, from: it.move.from, to: it.move.to, slot: dests[i].slot ?? null, pos: dests[i].pos }));
 
   // 张数标签：卡离开一个区（起飞后一会儿）、进入一个区（落地时）各改一次
   function note(move, tStart, tEnd) {
@@ -342,7 +316,7 @@ export function planRoute(route) {
       if (move.from === 'banished') zonePulse('banished', col, t0);
       tween(`${inst.id}n`, 'opacity', t0, 0.3, 0, 'l');
       state.set(inst, { ...look(inst), name: 0 });
-      fly(inst, t0, { zone: 'hand', pos: [mp[0] + spread, mp[1]], z: 100, rot: 0, back: 0, tint: look(inst).tint, tb: look(inst).tb, name: 0 }, { dur: 0.8, color: col, endScale: 0.8 });
+      fly(inst, t0, { zone: 'hand', pos: [mp[0] + spread, mp[1]], z: 100, rot: 0, sc: 1, back: 0, tint: look(inst).tint, tb: look(inst).tb, name: 0 }, { dur: 0.8, color: col, endScale: 0.8 });
     });
     // 召唤的几何：融合是三层收拢的菱形；同调等是一圈星，颗数是怪兽的真实等级（超量是阶级，连接是连接数）
     if (g.kind === 'fusion' || g.kind === 'ritual') {
@@ -385,7 +359,7 @@ export function planRoute(route) {
     tween(fl, 'opacity', G + 2.16, 0.45, 0, 'o3');
     // 召唤出来的怪兽：从额外卡组出来飞到聚拢点，再落到它的格子
     birth(summoned, G + 1.7);
-    fly(summoned.inst, G + 1.7, { zone: 'monsters', pos: mp, z: 120, rot: 0, back: 0, tint: 0, tb: 0, name: 0 }, { dur: 0.6, color: col, ease: 'o2' });
+    fly(summoned.inst, G + 1.7, { zone: 'monsters', pos: mp, z: 120, rot: 0, sc: 1, back: 0, tint: 0, tb: 0, name: 0 }, { dur: 0.6, color: col, ease: 'o2' });
     const nEnd = fly(summoned.inst, G + 2.6, sDest, { dur: 0.55, color: col, ease: 'io3' });
     impact(center(sDest.pos), col, nEnd);
     note(summoned.move, G + 1.7, nEnd);
@@ -408,7 +382,6 @@ export function planRoute(route) {
     const hand = [...route.start.hand].sort((a, b) => a.sequence - b.sequence);
     const items = simulate(hand.map((c) => ({ ...c, from: 'deck', to: 'hand' })), '起手');
     const fin = layout({ ...route.start, deck: [], extra: [] }, '起手');
-    for (const [inst, f] of fin) Object.assign(inst, { zone: f.zone, slot: f.slot });
     let end = T;
     items.forEach((item, i) => {
       const t = T + 0.6 + i * 0.3;
@@ -418,7 +391,7 @@ export function planRoute(route) {
       ring(center(dest.pos), COLOR.green, t + 0.65, { dur: 0.45, s0: 0.9, s1: 1.35 });
       note(item.move, t, t + 0.65);
     });
-    return { end, moves: record(items) };
+    return { end, moves: record(items, items.map((it) => fin.get(it.inst))) };
   });
 
   // ---- 每一步 ----
@@ -429,9 +402,7 @@ export function planRoute(route) {
       for (const zone of VISIBLE) before.push(...pools[zone]);
       const items = simulate(step.moves, label);
       const fin = layout(step.board, label);
-      const taken = new Set([...fin.values()].filter((f) => f.slot !== null).map((f) => `${f.zone}${f.slot}`));
-      for (const inst of before) if (inst.slot !== null && inst.slot !== undefined && inst.zone) taken.add(`${inst.zone}${inst.slot}`);
-      const dests = items.map((it) => destOf(it, fin, taken));
+      const dests = items.map((it) => destOf(it, fin));
 
       // 发动：这一步开始前就在手里 / 场上 / 墓地的卡先亮一下，连锁号按 activated 的顺序；这一步才出现的卡移动完了再亮
       let t = T + 0.15;
@@ -459,7 +430,6 @@ export function planRoute(route) {
       // 没动的卡：位置变了跟着重排（手牌重新居中等），转角、暗化跟快照
       const moved = new Set(items.map((i) => i.inst));
       for (const [inst, f] of fin) {
-        inst.zone = f.zone; inst.slot = f.slot;
         if (moved.has(inst)) continue;
         const at = Math.max(T + 0.3, inst.free);
         if (inst.x !== f.pos[0] || inst.y !== f.pos[1]) {
@@ -468,6 +438,7 @@ export function planRoute(route) {
           Object.assign(inst, { x: f.pos[0], y: f.pos[1], free: at + 0.55 });
         }
         if (f.rot !== inst.rot) { tween(`${inst.id}a`, 'rotation', at, 0.45, f.rot, 'io2'); inst.rot = f.rot; }
+        if (f.sc !== inst.sc) { tween(`${inst.id}a`, 'scale', at, 0.45, f.sc, 'io2'); inst.sc = f.sc; }
         setLook(inst, Math.max(at, inst.free), 0.3, { tint: f.tint, tb: f.tb, back: f.back, name: f.name });
         end = Math.max(end, inst.free, at + 0.55);
       }
@@ -500,7 +471,7 @@ export function planRoute(route) {
         }
         end = Math.max(end, tb + 0.3);
       }
-      return { end, moves: record(items) };
+      return { end, moves: record(items, dests) };
     });
   }
 
@@ -511,128 +482,3 @@ export function planRoute(route) {
   };
 }
 
-
-// ---- 合成页 HTML：运行时、引擎、轨道表、舞台标记；卡图用 CSS 类带进 data: 地址（每个密码一份）----
-const CSS = `
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:${STAGE.w}px;height:${STAGE.h}px;overflow:hidden;background:#000}
-body{font-family:"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Noto Sans JP","Microsoft YaHei",system-ui,sans-serif;color:#fff}
-#root{position:absolute;left:0;top:0;width:${STAGE.w}px;height:${STAGE.h}px;background:#000;overflow:hidden}
-#cam{position:absolute;left:0;top:0;width:${STAGE.w}px;height:${STAGE.h}px}
-.slot{position:absolute;width:${CW}px;height:${CH}px;border:1.5px solid #2a2a30;border-radius:4px;z-index:1}
-.slot.pile{border-color:#3a3a42}
-.slot.back{border:none}
-.slot.back i{position:absolute;inset:0;background:#0f0f14;border:1.5px solid #3a3a42;border-radius:4px}
-.slot.back i:nth-child(1){transform:translate(4px,4px)}
-.slot.back i:nth-child(2){transform:translate(2px,2px)}
-.slot.back b{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;border:2px solid #44444e;transform:rotate(45deg)}
-.sl{position:absolute;width:${CW}px;text-align:center;font-size:14px;line-height:18px;letter-spacing:2px;color:#6e6e78;z-index:6;pointer-events:none}
-.zl{position:absolute;width:${CW + 20}px;text-align:center;font-size:16px;line-height:20px;font-weight:700;color:#c9c9d0;z-index:6;pointer-events:none;letter-spacing:1px}
-.zl.hand{text-align:left;left:${COL_L}px}
-.zp{position:absolute;width:${CW + 6}px;height:${CH + 6}px;border:3px solid #fff;border-radius:6px;opacity:0;z-index:4;pointer-events:none}
-.card{position:absolute;left:0;top:0;width:${CW}px;height:${CH}px;opacity:0;z-index:10;pointer-events:none}
-.card .a{position:absolute;inset:0;border-radius:3px;background:#1c1c24 center/cover no-repeat;pointer-events:auto;cursor:default}
-.card .pt{display:none;position:absolute;left:4px;right:4px;top:6px;font-size:12px;line-height:14px;color:#c4c4cc;text-align:center;overflow:hidden;max-height:90px}
-.card .tint,.card .tb,.card .bk,.card .hl{position:absolute;inset:0;border-radius:3px;opacity:0;pointer-events:none}
-.card .tint{background:#000}
-.card .tb{background:#6d4fd6}
-.card .bk{background:#13131c;border:2px solid #3b3b4a}
-.card .bk::after{content:"";position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;border:2px solid #44444e;transform:rotate(45deg)}
-.card .hl{inset:-4px;border:3px solid ${COLOR.amber};border-radius:6px}
-.card .nm{position:absolute;left:-9px;width:${CW + 18}px;top:${CH + 4}px;text-align:center;font-size:15px;line-height:17px;font-weight:600;color:#f3f3f6;text-shadow:0 1px 2px #000,0 0 3px #000;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;pointer-events:none}
-.rg{position:absolute;opacity:0;z-index:4;pointer-events:none}
-.rg.sq{border-radius:4px}.rg:not(.sq):not(.dia){border-radius:50%}.rg.dia{border-radius:6px}
-.fl{position:absolute;width:${CW}px;height:${CH}px;opacity:0;z-index:4;border-radius:4px;pointer-events:none}
-.fl.cir{border-radius:50%;width:${CH}px;height:${CH}px;margin-left:-${(CH - CW) / 2}px}
-.tk{position:absolute;width:26px;height:3px;opacity:0;z-index:4;pointer-events:none}
-.ln{position:absolute;height:3px;opacity:0;z-index:3;background:linear-gradient(90deg,transparent,currentColor);border-radius:2px;transform-origin:0 50%;pointer-events:none}
-.dg{position:absolute;width:0;height:0;opacity:0;z-index:4;pointer-events:none}
-.dot{position:absolute;width:14px;height:14px;border-radius:50%}
-.bn{position:absolute;left:${COL_L}px;height:44px;z-index:40;opacity:0;display:flex;align-items:center;padding:0 20px;transform-origin:0 50%;pointer-events:none}
-.bn span{font-size:24px;font-weight:800;color:#000;letter-spacing:4px;white-space:nowrap}
-.spot{position:absolute;left:${SX0}px;top:${BAND_Y + 6}px;width:520px;height:100px;opacity:0;z-index:40;pointer-events:none}
-.spot .sth{position:absolute;left:0;top:4px;width:62px;height:90px;border-radius:3px;background:#1c1c24 center/cover no-repeat}
-.spot .sb{position:absolute;left:-12px;top:-4px;width:34px;height:34px;border-radius:50%;background:${COLOR.amber};color:#000;font-weight:800;font-size:19px;text-align:center;line-height:34px}
-.spot .sx{position:absolute;left:84px;top:14px}
-.spot .sk{font-size:15px;color:${COLOR.amber};letter-spacing:3px;font-weight:700}
-.spot .sn{font-size:28px;font-weight:800;margin-top:6px;white-space:nowrap}
-.cbadge{position:absolute;width:26px;height:26px;border-radius:50%;background:${COLOR.amber};color:#000;font-weight:800;font-size:15px;text-align:center;line-height:26px;z-index:60;opacity:0;pointer-events:none}
-.bkt{position:absolute;width:${CW}px;height:22px;line-height:22px;text-align:center;background:${COLOR.amber};color:#000;font-weight:800;font-size:14px;letter-spacing:3px;z-index:66;opacity:0;border-radius:3px;pointer-events:none}
-`;
-
-// 合成页里的交互：悬停 / 点一下把「哪张卡、在合成页里的位置」交给外层（外层 = 页面）；左右键转给外层；host 问「现在每张卡在哪」时回答（验证脚本用）
-const INTERACT = `
-(function () {
-  function rectOf(el) { var r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }
-  var cards = document.querySelectorAll('.card .a');
-  Array.prototype.forEach.call(cards, function (el) {
-    el.addEventListener('mouseenter', function () { parent.postMessage({ type: 'yg-card-hover', code: Number(el.dataset.code), rect: rectOf(el) }, '*'); });
-    el.addEventListener('mouseleave', function () { parent.postMessage({ type: 'yg-card-leave', code: Number(el.dataset.code) }, '*'); });
-    el.addEventListener('click', function () { parent.postMessage({ type: 'yg-card-tap', code: Number(el.dataset.code), rect: rectOf(el) }, '*'); });
-  });
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); parent.postMessage({ type: 'yg-key', key: e.key }, '*'); }
-  });
-  addEventListener('message', function (e) {
-    var d = e.data;
-    if (!d || d.src !== 'yg-host' || d.cmd !== 'rects') return;
-    var out = [];
-    Array.prototype.forEach.call(cards, function (el) { if (getComputedStyle(el.parentNode).visibility === 'visible') out.push({ code: Number(el.dataset.code), md: el.dataset.md, rect: rectOf(el) }); });
-    parent.postMessage({ type: 'yg-rects', cards: out }, '*');
-  });
-})();
-`;
-
-// 把 </script 和 <!-- 转义，免得内联脚本提前结束（JS 字符串 / 正则里这样写等价）
-export const inlineJs = (js) => js.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
-
-// plan + 卡图（密码 → data: 地址或 null）+ 运行时源码 → 合成页 HTML。运行时必须是自带的（含 __hyperframes=），播放器看到它就不会去 CDN 注入
-export function renderComposition(plan, { images = new Map(), runtime }) {
-  if (!runtime) throw new Error('合成页要带 HyperFrames 运行时');
-  const codes = [...new Set([...plan.codes, ...plan.instances.map((i) => i.code)])];
-  const imageCss = codes.map((code) => (images.get(code) ? `.a.i${code},.sth.i${code}{background-image:url(${images.get(code)})}` : `.a.i${code},.sth.i${code}{background-color:#2a2a36}.a.i${code} .pt{display:block}`)).join('\n');
-  const body = `<div id="root" data-composition-id="main" data-start="0" data-duration="${plan.duration}" data-width="${plan.stage.w}" data-height="${plan.stage.h}">
-<div id="cam">
-${plan.frames.join('\n')}
-${plan.html.fx.join('\n')}
-${plan.html.cards.join('\n')}
-${plan.html.labels.join('')}
-</div>
-</div>`;
-  return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=${plan.stage.w}, height=${plan.stage.h}">
-<script>${inlineJs(runtime)}</script>
-<style>${CSS}\n${imageCss}</style></head><body>
-${body}
-<script>
-window.__timelines = window.__timelines || {};
-${ENGINE_SOURCE}
-var TR = ${JSON.stringify(plan.tracks)};
-var INIT = ${JSON.stringify(plan.init)};
-window.__timelines["main"] = ygMakeTimeline(document, TR, INIT, ${plan.duration});
-</script>
-<script>${INTERACT}</script>
-</body></html>`;
-}
-
-// 页面要的时间点：每个位置（0 = 起手，1..N = 第几步）的开始、结束帧（结束帧 = 这一步走完、卡都停稳的那一刻）
-export const marksOf = (plan) => ({ starts: plan.segments.map((s) => s.start), ends: plan.segments.map((s) => s.mark), duration: plan.duration });
-
-// ---- 测试和验证用：某一刻每张卡在哪（不开浏览器；和合成页里的引擎同一份 valueAt）----
-export function frameAt(plan, t) {
-  const { valueAt } = new Function(`${ENGINE_SOURCE}; return { valueAt };`)();
-  const read = (id, prop, dflt) => {
-    const init = plan.init[id]?.[prop] ?? dflt;
-    return plan.tracks[id]?.[prop] ? valueAt(plan.tracks[id][prop], t, init, prop === 'z' || prop === 'text') : init;
-  };
-  return plan.instances.map((inst) => ({
-    id: inst.id, code: inst.code, md: inst.md,
-    x: read(inst.id, 'x', 0), y: read(inst.id, 'y', 0), opacity: read(inst.id, 'opacity', 1), z: read(inst.id, 'z', 10),
-    rotation: read(`${inst.id}a`, 'rotation', 0), tint: read(`${inst.id}t`, 'opacity', 0), tb: read(`${inst.id}k`, 'opacity', 0), back: read(`${inst.id}b`, 'opacity', 0), name: read(`${inst.id}n`, 'opacity', 1),
-  }));
-}
-export const textAt = (plan, id, t) => {
-  const { valueAt } = new Function(`${ENGINE_SOURCE}; return { valueAt };`)();
-  return plan.tracks[id]?.text ? valueAt(plan.tracks[id].text, t, plan.init[id]?.text, true) : plan.init[id]?.text;
-};
-export const GEOMETRY = { CW, CH, SX0, PITCH, MY, SY, HY, PILE, handPos, slotPos, pilePos };

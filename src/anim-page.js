@@ -1,4 +1,4 @@
-// 路线动画的页面（纯函数）：把合成页（route-anim.js）放进 <hyperframes-player>，外面再包一层「外壳页」，整个做成 data: 地址，
+// 路线动画的页面（纯函数）：把合成页（anim-render.js）放进 <hyperframes-player>，外面再包一层「外壳页」，整个做成 data: 地址，
 // 由插件页放进 SDK 的 SandboxedFrame（网页工作区的 CSP 不许插件页自己跑内联脚本，见 DESIGN.md「路线动画」）。
 //
 // 外壳页和插件页之间的消息（插件页 → 外壳页用 postMessage，外壳页 → 插件页用 parent.postMessage）：
@@ -12,13 +12,15 @@
 //                    插件页再加上框架自己的位置）、yg-key { key }（左右键转给插件页）、yg-rects { cards }
 // 不联网有三道：合成页自带 HyperFrames 运行时（播放器看到合成页已带运行时，就不会去 CDN 注入）；页面头上的 CSP 把 connect / 脚本 / 图片
 // 都限在页面内和 data:；本仓不放 gsap。卡图一律 data: 地址。
-import { inlineJs, marksOf, planRoute, renderComposition, STAGE } from './route-anim.js';
+import { planRoute } from './anim-plan.js';
+import { inlineJs, marksOf, renderComposition } from './anim-render.js';
+import { STAGE } from './anim-stage.js';
 
 export const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; media-src 'none'; frame-src 'self' about: data:; child-src about: data:";
 
 export function buildGuestHtml({ player, composition, stage }) {
-  // 合成页作为播放器的 srcdoc 属性：是一个 JS 字符串，</ 和 <!-- 转义（见 inlineJs）
-  const compJs = JSON.stringify(composition).replace(/<\//g, '<\\/').replace(/<!--/g, '<\\!--');
+  // 合成页作为播放器的 srcdoc 属性：是一个 JS 字符串，放进内联脚本前同样转义（inlineJs）
+  const compJs = inlineJs(JSON.stringify(composition));
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="${CSP}">
 <style>*{margin:0}html,body{width:100%;height:100%;background:#000;overflow:hidden}hyperframes-player{display:block;width:100%;height:100%}</style></head>

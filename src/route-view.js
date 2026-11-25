@@ -18,8 +18,8 @@ const positionName = (position) => (position & P.FACEUP_ATTACK ? 'attack' : posi
 // 怪兽区和魔陷区的卡带 position（attack / defense / facedown）
 const placed = (deck, zone, c) => ({ ...cardOf(deck, c.code), sequence: c.sequence, ...(zone === 'monsters' || zone === 'spellTraps' ? { position: positionName(c.position) } : {}) });
 
-// 一步里引擎发出的卡片移动：{ code, md, jp, level?/rank?/link?, from, to, sequence, position?, summon?, material?, chain? }。from / to 是区名（ZONES，Xyz 素材是 overlay）；
-// sequence 是引擎说的去处的区内位置（MSG_MOVE 的 to.sequence：怪兽区 0–4 主怪兽区、5–6 额外怪兽区，魔陷区同理，手牌、墓地等是进去之后的第几张）；
+// 一步里引擎发出的卡片移动：{ code, md, jp, level?/rank?/link?, from, to, fromSequence, sequence, position?, summon?, material?, chain? }。from / to 是区名（ZONES，Xyz 素材是 overlay）；
+// fromSequence 是出发处的区内位置（同密码的几张卡在场上时，靠它认是哪一张离开）；sequence 是引擎说的去处的区内位置（MSG_MOVE 的 to.sequence：怪兽区 0–4 主怪兽区、5–6 额外怪兽区，魔陷区同理，手牌、墓地等是进去之后的第几张）；
 // position 是去处在怪兽区、魔陷区时的表示形式；summon 是这只怪兽被召唤的方式（normal / special / fusion / synchro / xyz / link / ritual，取自引擎消息）；
 // material 是这张卡作为融合 / 同调等召唤的素材被移走；chain 是移动发生时正在连锁的第几环。只列我方的卡；起点终点都是对手那边的不列
 function movesOf(deck, events) {
@@ -27,7 +27,7 @@ function movesOf(deck, events) {
     if (e.from.controller !== e.to.controller) throw new Error(`${e.code} 在两个玩家之间移动，快照还没处理`);
     const to = zoneOf(e.to.location);
     return {
-      ...cardOf(deck, e.code), from: zoneOf(e.from.location), to, sequence: e.to.sequence,
+      ...cardOf(deck, e.code), from: zoneOf(e.from.location), to, fromSequence: e.from.sequence, sequence: e.to.sequence,
       ...(to === 'monsters' || to === 'spellTraps' ? { position: positionName(e.to.position) } : {}),
       ...(e.material ? { material: true } : {}), ...(e.summon === undefined ? {} : { summon: e.summon }), ...(e.chain === undefined ? {} : { chain: e.chain }),
     };

@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { before, describe, test } from 'node:test';
 import { BRANDED } from '../src/decks/branded.js';
-import { GEOMETRY, frameAt, planRoute, renderComposition, textAt } from '../src/route-anim.js';
+import { planRoute } from '../src/anim-plan.js';
+import { renderComposition } from '../src/anim-render.js';
+import { EMZ_Y, HY, MY, PILE, PITCH, SIDEWAYS_SCALE, SX0, SY, slotPos } from '../src/anim-stage.js';
 import { replayRoute } from '../src/route-view.js';
+import { frameAt, textAt } from './anim-helpers.js';
 import { openTestEngine } from './helpers.js';
 
-const { SX0, PITCH, MY, SY, HY, PILE } = GEOMETRY;
 const WHITE_ALBAZ = 'white-albaz';
 
 // 一张卡在结束帧里的位置落在哪个区（按舞台的几何反推，和生成器的摆位公式无关：只看行、列）
@@ -14,6 +16,7 @@ function zoneAt(f) {
   if (f.x >= PILE.grave[0] && f.x < PILE.grave[0] + 30) return [f.y === PILE.grave[1] ? 'grave' : 'deck'];
   if (f.x < 60) return [f.y === PILE.banished[1] ? 'banished' : 'extra'];
   const slot = (f.x - SX0) / PITCH;
+  if (f.y === EMZ_Y) return ['monsters', 5 + (slot - 1) / 2]; // 额外怪兽区：第 1 / 3 个间距处，sequence 5、6
   return [f.y === MY ? 'monsters' : f.y === SY ? 'spellTraps' : '?', slot];
 }
 
@@ -39,6 +42,23 @@ describe('路线动画生成器：每条路线每一步的动作和引擎一致'
         assert.deepEqual(plan.moves[i + 1].map((m) => [m.code, m.from, m.to]), step.moves.map((m) => [m.code, m.from, m.to]), `${id} 第 ${step.n} 步`);
       });
     }
+  });
+
+  test('每一次移动的落点来自引擎：怪兽区 / 魔陷区的格子和坐标 = 引擎 move.sequence 对应的格子（含这一步里还会再动的中途落点）', () => {
+    let mid = 0;
+    for (const [id, route] of routes) {
+      const plan = plans.get(id);
+      route.steps.forEach((step, i) => {
+        step.moves.forEach((m, j) => {
+          const planned = plan.moves[i + 1][j];
+          if (m.to !== 'monsters' && m.to !== 'spellTraps') return;
+          assert.equal(planned.slot, m.sequence, `${id} 第 ${step.n} 步 ${m.md} 的格子`);
+          assert.deepEqual(planned.pos, slotPos(m.to, m.sequence), `${id} 第 ${step.n} 步 ${m.md} 的坐标`);
+          if (step.moves.slice(j + 1).some((n) => n.code === m.code && n.from === m.to && n.fromSequence === m.sequence)) mid += 1;
+        });
+      });
+    }
+    assert.ok(mid > 0, '数据里要有至少一次中途落点（落胤与圣女发动后又进墓地），否则这条测试什么都没查');
   });
 
   test('每一步的结束帧：看得见的卡恰好是快照里的卡，各在快照说的区和格子，张数标签等于快照', () => {
@@ -76,7 +96,8 @@ describe('路线动画生成器：每条路线每一步的动作和引擎一致'
     const plan = plans.get(WHITE_ALBAZ);
     const f = frameAt(plan, plan.segments[9].mark).find((x) => x.code === 62962630 && x.opacity > 0.99);
     assert.equal(f.rotation, 90);
-    for (const g of frameAt(plan, plan.segments[9].mark).filter((x) => x.code === 45883110 && x.opacity > 0.99)) assert.equal(g.rotation, 0);
+    assert.equal(f.tilt, SIDEWAYS_SCALE);
+    for (const g of frameAt(plan, plan.segments[9].mark).filter((x) => x.code === 45883110 && x.opacity > 0.99)) { assert.equal(g.rotation, 0); assert.equal(g.tilt, 1); }
   });
 
   test('同调光环的星数 = 召唤出来的怪兽的真实等级；融合没有星', () => {
