@@ -28,6 +28,14 @@ describe('最好场面搜索：上限按节点数，结果可复现', () => {
     assert.deepEqual(a, b);
   });
 
+  test('没有已知路线可照的起手（排序全靠默认顺序）：两次搜出一样的结果，节点数和步骤都相同', async () => {
+    const hand = [19096726, 36637374, 55273560, 19304410, 48130397]; // 铁兽鸟、烙印开幕、白之圣女、炎工之姬特、超融合
+    const a = await searchHand(engine, BRANDED, { hand, seed: 3456687457, maxNodes: 500 });
+    const b = await searchHand(engine, BRANDED, { hand, seed: 3456687457, maxNodes: 500 });
+    assert.equal(a.nodes, 500);
+    assert.deepEqual(a, b);
+  });
+
   test('起手含白之落胤时，上限给够就搜到不低于这条路线的场面值，且搜出的步骤能被 playRoute 重放出同一个终场', async () => {
     const route = await playRoute(engine, BRANDED, WHITE_ALBAZ, { seed: 7 });
     const routeValue = boardValue(BRANDED, route.endBoard);
