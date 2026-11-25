@@ -7,16 +7,18 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { BRANDED } from '../src/decks/branded.js';
 import { JSONL_PATH, MD_PATH, buildReport, parseJsonl } from '../src/opening-report.js';
+import { failerFor } from './opening-common.js';
 
 const { values, positionals } = parseArgs({ options: { out: { type: 'string' }, merge: { type: 'string' } }, allowPositionals: true });
 const inputs = positionals.length ? positionals : [JSONL_PATH];
-let rows;
+const fail = failerFor('opening-report');
+let rows; let report;
 try {
   rows = parseJsonl(inputs.map((f) => readFileSync(f, 'utf8')).join('\n'));
+  report = buildReport(rows, BRANDED);
 } catch (e) {
-  console.error(`opening-report: ${e.message}`);
-  process.exit(2);
+  fail(e.message);
 }
 if (values.merge) writeFileSync(values.merge, rows.map((r) => `${JSON.stringify(r)}\n`).join(''));
-writeFileSync(values.out ?? MD_PATH, buildReport(rows, BRANDED));
+writeFileSync(values.out ?? MD_PATH, report);
 console.log(`${rows.length} 手 → ${values.out ?? MD_PATH}${values.merge ? `，合并的 JSONL 写到 ${values.merge}` : ''}`);

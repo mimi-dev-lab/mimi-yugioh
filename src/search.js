@@ -1,5 +1,5 @@
 // 最好场面搜索（离线分析用，#37）：在决斗会话里做有限偏离的深度优先搜索（存档回滚、置换表），按场面值评估我方回合结束时的场面。
-// 从 #28 删掉的版本恢复，改了两处：① 上限按节点数（maxNodes），不按毫秒，所以同一手、同一种子、同一上限的结果完全一样，续跑和一口气跑出的 JSONL 相同；② 不再让出事件循环、不暂停（脚本里没有别的活要让）。
+// 上限按节点数（maxNodes），不按毫秒，所以同一手、同一种子、同一上限的结果完全一样，续跑和一口气跑出的 JSONL 相同；搜索一口气跑完，不让出事件循环、不暂停。
 // 纯逻辑：会话、卡组、上限都由调用方传进来（见 AGENTS.md「边界」）。
 // 搜出的路线用 route.js 的语义回应写（{ idle, code }、{ chain }、{ pick }…），不用选项下标：下标随起手顺序和种子变。格式就是卡组数据里路线的 steps，playRoute 能重放。
 import { openHandSession } from './duel-session.js';
@@ -33,15 +33,15 @@ class Capped extends Error {}
 
 // 路线里出现过的动作和选过的卡：搜索先试它们（只排先后，不限制范围）
 function routeMoves(deck) {
-  const acts = new Set(); const picks = new Set();
+  const moves = new Set(); const picks = new Set();
   for (const route of deck.routes ?? []) {
     for (const r of route.steps.flatMap((s) => s.do)) {
-      if (r.idle) acts.add(`${r.idle}:${r.code}`);
-      if (r.chain) acts.add(`chain:${r.chain}`);
+      if (r.idle) moves.add(`${r.idle}:${r.code}`);
+      if (r.chain) moves.add(`chain:${r.chain}`);
       if (r.pick) r.pick.forEach((c) => picks.add(c));
     }
   }
-  return { moves: acts, picks };
+  return { moves, picks };
 }
 
 // 起手含路线要的卡时，把这条路线展平成回应序列，当「先走哪个」的参考
@@ -115,10 +115,10 @@ function candidates(prompt, preferred, deck) {
 // 在会话当前的局面上搜最好的终场。节点 = 一次 visit（走了一个回应）；用掉 maxNodes 个就停，capped 为真，value / steps / endBoard 是停之前找到的最好的（一条都没找到是 null）。
 // 返回 { value, steps, endBoard, capped, nodes }：steps 是从当前提示起走到我方回合结束的路线（按 startsStep 切，{ text, do }），endBoard 是搜到的那个终场。搜完会话回到调用时的局面，调用方自己关会话。
 // 有限偏离：每个提示上有个排好的先后（照已知路线、动作的价值），一条路线上最多 MAX_DISCREPANCY 处不走排第一的；先搜 0 处、再 1 处、再 2 处，所以不管停在哪，手里都是已搜到的较好结果。同值的取先搜到的，所以结果只由 maxNodes 决定。
-export function searchSession(session, deck, { maxNodes, useRoutes = true }) {
+export function searchSession(session, deck, { maxNodes }) {
   let nodes = 0;
   const preferred = routeMoves(deck);
-  const guides = useRoutes ? guidesFor(deck, session.board().hand.map((c) => c.code)) : [];
+  const guides = guidesFor(deck, session.board().hand.map((c) => c.code));
   let seen = new Map(); // 主阶段提示上的置换表：局面 → 到过它时还剩的偏离次数
   const path = []; // 当前走到这里的 { response, starts, text }
   let best = { value: -1, path: null, endBoard: null };

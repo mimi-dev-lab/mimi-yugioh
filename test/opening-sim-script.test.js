@@ -26,6 +26,7 @@ describe('scripts/opening-sim.js：固定种子、中途停下能续', () => {
     assert.equal(r.status, 0, r.stderr);
     const got = rows(out);
     assert.deepEqual(got.map((x) => x.index), [0, 1, 2]);
+    assert.ok(got.every((x) => x.masterSeed === 99 && Object.keys(x)[0] === 'masterSeed'), '每行最前面是总种子');
     assert.deepEqual(got.map((x) => x.seed), handSeeds(99, 3));
     assert.deepEqual(got.map((x) => x.hand), handSeeds(99, 3).map((s) => deal(BRANDED, s)));
     assert.ok(got.every((x) => x.maxNodes === 40 && typeof x.value === 'number' && Array.isArray(x.steps)));

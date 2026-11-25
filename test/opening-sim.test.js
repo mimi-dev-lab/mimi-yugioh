@@ -47,7 +47,9 @@ describe('一手的模拟：搜索 + 已知路线取更好的', () => {
   const now = () => (ticks += 7);
 
   test('起手是白之落胤线的牌：路线值 24（2 个打断 + 4 张手牌），最好值不低于它，记下关键卡、来源和重放用的步骤', async () => {
-    const row = await simulateHand(engine, BRANDED, { index: 3, seed: 7, hand: WHITE_ALBAZ.hand, maxNodes: 600, now });
+    const row = await simulateHand(engine, BRANDED, { masterSeed: 99, index: 3, seed: 7, hand: WHITE_ALBAZ.hand, maxNodes: 600, now });
+    assert.equal(row.masterSeed, 99);
+    assert.deepEqual(Object.keys(row).slice(0, 3), ['masterSeed', 'index', 'seed'], '总种子在行的最前面');
     assert.equal(row.index, 3);
     assert.equal(row.seed, 7);
     assert.deepEqual(row.hand, WHITE_ALBAZ.hand);

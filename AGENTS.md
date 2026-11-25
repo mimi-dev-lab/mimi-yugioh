@@ -21,7 +21,7 @@
 改代码前对照这一节；标「机械」的由 `./ci`（`checks/list`，规则在 `scripts/check.js`）查，没标的只能靠读。来源：照 `lifaninjp/finance` 的 AGENTS.md「架构约定」，只留适用于本仓的几条，#2 定。
 
 **一个功能放哪**
-- 规则或计算：`src/` 下一个按领域起名的模块（`duel-session.js`、`route.js`…），由 `src/server.js` 调用；测试在 `test/<领域>.test.js`，起服务的在 `test/<领域>-http.test.js`。DESIGN.md「结构」一模块一行，新模块加一行。回头看：`src/server.js` 超过 400 行时按路由拆（另开票）。
+- 规则或计算：`src/` 下一个按领域起名的模块（`duel-session.js`、`route.js`…），由 `src/server.js` 调用（离线分析的模块由 `scripts/` 下的脚本调用，不进服务）；测试在 `test/<领域>.test.js`，起服务的在 `test/<领域>-http.test.js`。DESIGN.md「结构」一模块一行，新模块加一行。回头看：`src/server.js` 超过 400 行时按路由拆（另开票）。
 - 接口：只在 `src/server.js` 加路径。
 - 插件（`plugin/`）只做外壳（机械：plugin、plugin-loads、plugin-smoke）：后端 `plugin/dashboard/plugin_api.py` 只把请求转给 `YUGIOH_URL`（只许本机）的服务，不算数、不读数据、不起子进程；页面 `plugin/webapp/plugin.js` 只 import 网页工作区给的 SDK 和 React，只经 `ctx.rest` 调本插件的后端，不引外部字体图片，不显示百分比、场面估值、「还差」（教程没有评分）。新接口要在后端加一条转发的路径，网关重启后才生效。
 

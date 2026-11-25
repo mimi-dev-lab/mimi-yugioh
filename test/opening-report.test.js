@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { BRANDED } from '../src/decks/branded.js';
-import { analyze, buildReport, parseJsonl } from '../src/opening-report.js';
+import { checkReplay, replayRow } from '../src/opening-sim.js';
+import { analyze, buildReport, candidateDetails, parseJsonl } from '../src/opening-report.js';
+import { MAX_BRANCH, MAX_COMBOS, MAX_DISCREPANCY } from '../src/search.js';
+import { openTestEngine } from './helpers.js';
 
 // 编的小 JSONL：8 手，数字都能手算。A 白之落胤、B 烙印融合、C 阿卢绯尔、E 白之圣女；手坑：灰流丽、增殖的Z、原初之神 法拉、抽牌小丑与封锁鸟
 const A = 73819701; const B = 44362883; const C = 62962630; const E = 55273560;
@@ -88,7 +91,8 @@ describe('报告的统计：全部由 JSONL 的行算出', () => {
   });
 
   test('搜索上限：用的上限、超上限的手数、重放对不上的手数、来源统计', () => {
-    assert.deepEqual(stats.maxNodes, [5000]);
+    assert.equal(stats.maxNodes, 5000);
+    assert.equal(stats.masterSeed, 20261126);
     assert.equal(stats.cappedCount, 1);
     assert.equal(stats.replayBad, 0);
     assert.deepEqual(stats.sources, { search: 7, 'white-albaz': 1 });
@@ -114,6 +118,10 @@ describe('报告文字：同一份 JSONL 同一份报告', () => {
     assert.match(text, /node scripts\/opening-replay\.js --seed 1003/);
   });
 
+  test('搜索范围的说明引用 search.js 导出的上限，不是写死的数字', () => {
+    assert.ok(text.includes(`每条路线最多 ${MAX_DISCREPANCY} 处不走排在第一的回应，选卡时最多试 ${MAX_BRANCH} 个不同的卡、${MAX_COMBOS} 种组合`));
+  });
+
   test('打断数分布和卡手率的数字在文字里', () => {
     assert.match(text, /\| 0 \| 3 \| 37\.5% \|/);
     assert.match(text, /\| 3\+ \| 2 \| 25\.0% \|/);
@@ -135,6 +143,18 @@ describe('报告文字：同一份 JSONL 同一份报告', () => {
   });
 });
 
+describe('行里的总种子或上限不止一个值：报错，不拼出一个不存在的数', () => {
+  test('上限不一样（5000 和 100000）：analyze 和 buildReport 都报错，信息里有字段名和两个值', () => {
+    const mixed = [ROWS[0], { ...ROWS[1], maxNodes: 100000 }];
+    for (const run of [() => analyze(mixed, BRANDED), () => buildReport(mixed, BRANDED)]) assert.throws(run, /maxNodes[\s\S]*5000[\s\S]*100000/);
+  });
+
+  test('总种子不一样：报错', () => {
+    const mixed = [ROWS[0], { ...ROWS[1], masterSeed: 1 }];
+    assert.throws(() => buildReport(mixed, BRANDED), /masterSeed[\s\S]*1[\s\S]*20261126/);
+  });
+});
+
 describe('JSONL 读入', () => {
   test('一行一手，按 index 排序，空行跳过；同一个 index 出现两次报错', () => {
     const text = `${JSON.stringify(ROWS[1])}\n\n${JSON.stringify(ROWS[0])}\n`;
@@ -149,6 +169,16 @@ const JSONL = fileURLToPath(new URL('../docs/opening-analysis.jsonl', import.met
 describe('提交的报告', { skip: !existsSync(MD) || !existsSync(JSONL) }, () => {
   test('docs/opening-analysis.md 等于用 scripts/opening-report.js 从 docs/opening-analysis.jsonl 重新生成的', () => {
     assert.equal(readFileSync(MD, 'utf8'), buildReport(parseJsonl(readFileSync(JSONL, 'utf8')), BRANDED));
+  });
+});
+
+// 报告里附完整步骤的新路线候选（至少 3 个）：用 replayRow 在引擎里重放，和记录对照应当一致
+describe('提交的 JSONL 里的新路线候选能在引擎里重放', { skip: !existsSync(JSONL) }, () => {
+  test('报告附完整步骤的候选：至少 3 个，每个重放的场面值（和来自搜索时的终场）与记录一致', async () => {
+    const details = candidateDetails(analyze(parseJsonl(readFileSync(JSONL, 'utf8')), BRANDED));
+    assert.ok(details.length >= 3, `候选只有 ${details.length} 个`);
+    const engine = await openTestEngine();
+    for (const r of details) assert.deepEqual(checkReplay(r, await replayRow(engine, BRANDED, r)), [], `种子 ${r.seed}（第 ${r.index} 手）`);
   });
 });
 
@@ -175,6 +205,15 @@ describe('scripts/opening-report.js', () => {
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(parseJsonl(readFileSync(merged, 'utf8')), ROWS);
     assert.equal(readFileSync(md, 'utf8'), buildReport(ROWS, BRANDED));
+  });
+
+  test('各行的上限不一样：报错退出，不写报告也不写合并文件', () => {
+    const mixed = write('mixed.jsonl', [ROWS[0], { ...ROWS[1], maxNodes: 100000 }]);
+    const md = join(dir, 'mixed.md'); const merged = join(dir, 'mixed-merged.jsonl');
+    const r = run(mixed, '--out', md, '--merge', merged);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /maxNodes/);
+    assert.ok(!existsSync(md) && !existsSync(merged));
   });
 
   test('找不到输入文件、分片里同一手出现两次：报错退出', () => {

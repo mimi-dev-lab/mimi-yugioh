@@ -2,6 +2,8 @@
 // 纯函数：只看传进来的行和卡组数据，不读时间、不读文件；同样的行得到同样的文字（毫秒只在「总耗时」里出现，它来自行里记的 ms）。
 import { expand } from './deck.js';
 import { keyCardsIn } from './opening-sim.js';
+import { cardOf } from './route-view.js';
+import { MAX_BRANCH, MAX_COMBOS, MAX_DISCREPANCY } from './search.js';
 
 export const MIN_LIFT_HANDS = 10; // 「每张卡在手时」只列至少在这么多手里出现过的卡（手数太少，平均不稳）
 export const CANDIDATE_DETAIL = 5; // 新路线候选里前几个附完整步骤
@@ -20,8 +22,15 @@ export function parseJsonl(text) {
 const mean = (list) => (list.length ? list.reduce((s, x) => s + x, 0) / list.length : 0);
 const countBy = (list, keyOf) => list.reduce((m, x) => { const k = keyOf(x); m[k] = (m[k] ?? 0) + 1; return m; }, {});
 
+// 报告里「总种子」「上限」只写一个值：行里这两个字段不止一个值（几份不同参数的 JSONL 混在了一起）就报错，不拼出一个不存在的数
+function uniqueValue(rows, field) {
+  const values = [...new Set(rows.map((r) => r[field]))];
+  if (values.length > 1) throw new Error(`行里的 ${field} 不止一个值（${values.sort((a, b) => a - b).join('、')}）：不同参数跑出的行不能混进同一份报告`);
+  return values[0];
+}
+
 export function analyze(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) {
-  const md = (code) => deck.cards[code]?.md ?? String(code);
+  const md = (code) => cardOf(deck, code).md;
   const total = rows.length;
   const handTraps = (row) => row.hand.filter((c) => deck.cards[c]?.role === '手坑').length;
   const noStarter = (row) => !row.hand.some((c) => deck.cards[c]?.role === '启动');
@@ -73,7 +82,7 @@ export function analyze(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) {
     groups, candidates: { better, uncovered }, lift,
     bricks: { n: bricks.length, withoutKey: bricks.filter((r) => keyOf(r).length === 0).length, noStarter: bricks.filter(noStarter).length, avgHandTraps: mean(bricks.map(handTraps)), overRepresented },
     avgHandTraps: mean(rows.map(handTraps)), noStarterAll: rows.filter(noStarter).length,
-    maxNodes: [...new Set(rows.map((r) => r.maxNodes))].sort((a, b) => a - b), cappedCount: rows.filter((r) => r.capped).length, replayBad: rows.filter((r) => r.searchReplayOk === false).length,
+    masterSeed: uniqueValue(rows, 'masterSeed'), maxNodes: uniqueValue(rows, 'maxNodes'), cappedCount: rows.filter((r) => r.capped).length, replayBad: rows.filter((r) => r.searchReplayOk === false).length,
     sources: countBy(rows, (r) => r.source), avgNodes: mean(rows.map((r) => r.nodes)), maxNodesUsed: rows.length ? Math.max(...rows.map((r) => r.nodes)) : 0, totalMs: rows.reduce((s, r) => s + r.ms, 0),
   };
 }
@@ -86,11 +95,13 @@ const hours = (ms) => (ms / 3600000).toFixed(2);
 // 报告全文。「重算」一节写的是仓里的固定路径（报告提交在这两个位置）
 export const JSONL_PATH = 'docs/opening-analysis.jsonl';
 export const MD_PATH = 'docs/opening-analysis.md';
+
+// 报告里附完整步骤的新路线候选：搜索比已知路线好的在前，其次是已知路线都走不通的，取前 CANDIDATE_DETAIL 手
+export const candidateDetails = ({ candidates }) => [...candidates.better, ...candidates.uncovered].slice(0, CANDIDATE_DETAIL);
+
 export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) {
   const s = analyze(rows, deck, { minLiftHands });
-  const md = (code) => deck.cards[code]?.md ?? String(code);
-  const seeds = [...new Set(rows.map((r) => r.masterSeed))];
-  const masterSeed = seeds.length === 1 ? seeds[0] : '（不止一个）';
+  const md = (code) => cardOf(deck, code).md;
   const out = [];
   const line = (text = '') => out.push(text);
   const table = (head, body) => { line(`| ${head.join(' | ')} |`); line(`|${head.map(() => '---').join('|')}|`); for (const r of body) line(`| ${r.join(' | ')} |`); line(); };
@@ -101,9 +112,9 @@ export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) 
   line();
   line('## 怎么跑的');
   line();
-  line(`- 手数：${s.total} 手。总种子 ${masterSeed}，每手的发牌种子由它按 mulberry32 派生；每手把 40 张主卡组按这个种子洗牌，取前 5 张当先攻起手，引擎里剩下的牌用同一个种子洗。`);
+  line(`- 手数：${s.total} 手。总种子 ${s.masterSeed}，每手的发牌种子由它按 mulberry32 派生；每手把 40 张主卡组按这个种子洗牌，取前 5 张当先攻起手，引擎里剩下的牌用同一个种子洗。`);
   line('- 评价：场面值 = 10 × 我方回合结束时终场在场各卡的打断数之和 + 1 × 剩余手牌数（打断数照卡组数据里每张卡的 `interrupts`，见 DESIGN「卡组数据」）。下面「打断数」都指终场的打断数之和。');
-  line(`- 每手两路取更好的：一路是规则引擎里的有限偏离深度优先搜索（上限 ${s.maxNodes.join('、')} 个节点，见最后一节），一路是把卡组数据里的 ${Object.keys(rows[0]?.routeValues ?? {}).length} 条已知展开路线用这手的起手和种子各重放一遍（对不上引擎提示的就算走不了）。`);
+  line(`- 每手两路取更好的：一路是规则引擎里的有限偏离深度优先搜索（上限 ${s.maxNodes} 个节点，见最后一节），一路是把卡组数据里的 ${Object.keys(rows[0]?.routeValues ?? {}).length} 条已知展开路线用这手的起手和种子各重放一遍（对不上引擎提示的就算走不了）。`);
   line(`- 最好值来源：${Object.entries(s.sources).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([k, n]) => `${k === 'search' ? '搜索' : `路线 ${k}`} ${n} 手`).join('，')}（搜索和路线同值记搜索）。`);
   line();
 
@@ -132,7 +143,7 @@ export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) 
     line();
     table(['种子', '第几手', '起手', '场面值', '打断数'], uncovered.slice(0, 20).map((r) => [r.seed, r.index, r.hand.map(md).join('、'), r.value, r.interrupts]));
   }
-  const detail = [...better, ...uncovered].slice(0, CANDIDATE_DETAIL);
+  const detail = candidateDetails(s);
   for (const r of detail) {
     line(`### 种子 ${r.seed}（第 ${r.index} 手）`);
     line();
@@ -165,17 +176,17 @@ export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) 
 
   line('## 搜索上限和超上限的手');
   line();
-  line(`- 搜索上限：每手 ${s.maxNodes.join('、')} 个节点（一个节点 = 搜索里走一个回应；不按毫秒，所以同一手、同一种子、同一上限的结果完全一样，续跑和一口气跑相同）。`);
+  line(`- 搜索上限：每手 ${s.maxNodes} 个节点（一个节点 = 搜索里走一个回应；不按毫秒，所以同一手、同一种子、同一上限的结果完全一样，续跑和一口气跑相同）。`);
   line(`- 超上限（capped）的手：${s.cappedCount} 手（${pct(s.cappedCount, s.total)}）：节点用完时搜索还没搜完，记下的是停之前找到的最好的，真正的最好场面可能更高。其余手是在这个搜索范围里搜完的。`);
   line(`- 每手平均 ${Math.round(s.avgNodes)} 个节点，最多 ${s.maxNodesUsed} 个；各手的耗时加起来 ${hours(s.totalMs)} 小时（只记录，不参与任何决定）。`);
   line(`- 搜出的步骤用 \`playRoute\` 重放核对，场面值对不上的手：${s.replayBad} 手（对不上就不采信搜索值）。`);
-  line('- 搜索不保证穷举：每条路线最多 2 处不走排在第一的回应，选卡时最多试 5 个不同的卡、4 种组合，放哪一格和表示形式只试第一个，不进战斗阶段，盖放没有打断数的卡不试。所以「最好」是这个范围里的最好，不是理论最高。');
+  line(`- 搜索不保证穷举：每条路线最多 ${MAX_DISCREPANCY} 处不走排在第一的回应，选卡时最多试 ${MAX_BRANCH} 个不同的卡、${MAX_COMBOS} 种组合，放哪一格和表示形式只试第一个，不进战斗阶段，盖放没有打断数的卡不试。所以「最好」是这个范围里的最好，不是理论最高。`);
   line();
 
   line('## 重算和重放');
   line();
   line('```');
-  line(`node scripts/opening-sim.js --count ${s.total} --seed ${masterSeed} --max-nodes ${s.maxNodes.join('')} --out ${JSONL_PATH}   # 重跑模拟（已有的行会跳过，续跑）`);
+  line(`node scripts/opening-sim.js --count ${s.total} --seed ${s.masterSeed} --max-nodes ${s.maxNodes} --out ${JSONL_PATH}   # 重跑模拟（已有的行会跳过，续跑）`);
   line(`node scripts/opening-report.js ${JSONL_PATH} --out ${MD_PATH}   # 从 JSONL 重新生成本文件`);
   line(`node scripts/opening-replay.js --seed ${(detail[0] ?? rows[0])?.seed ?? 0}   # 重放某一手搜出的路线，打出终场和打断数并和 JSONL 里的记录对照`);
   line('```');

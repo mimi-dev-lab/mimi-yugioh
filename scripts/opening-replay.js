@@ -1,16 +1,16 @@
 // 重放一手搜出的路线（#37）：从 JSONL 里取那一手的步骤，在引擎里用这手的起手和种子重放，打出终场、打断数，并和记录对照；一致退出 0，不一致退出 1，找不到那一手或参数不对退出 2。
 // 用法：node scripts/opening-replay.js --seed 种子 | --index 第几手 [--file docs/opening-analysis.jsonl] [--engine 引擎数据目录]
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { BRANDED } from '../src/decks/branded.js';
 import { openEngine } from '../src/duel-session.js';
 import { openEngineFiles } from '../src/engine-files.js';
 import { checkReplay, replayRow } from '../src/opening-sim.js';
 import { JSONL_PATH, parseJsonl } from '../src/opening-report.js';
+import { cardOf } from '../src/route-view.js';
+import { engineDirFrom, failerFor } from './opening-common.js';
 
-const fail = (message) => { console.error(`opening-replay: ${message}`); process.exit(2); };
+const fail = failerFor('opening-replay');
 const { values } = parseArgs({ options: { seed: { type: 'string' }, index: { type: 'string' }, file: { type: 'string' }, engine: { type: 'string' } } });
 if ((values.seed === undefined) === (values.index === undefined)) fail('要给 --seed 或 --index 其中一个');
 const file = values.file ?? JSONL_PATH;
@@ -19,10 +19,9 @@ try { rows = parseJsonl(readFileSync(file, 'utf8')); } catch (e) { fail(`读不�
 const row = values.seed !== undefined ? rows.find((r) => r.seed === Number(values.seed)) : rows.find((r) => r.index === Number(values.index));
 if (!row) fail(`${file} 里没有${values.seed !== undefined ? `种子 ${values.seed}` : `第 ${values.index} 手`}`);
 
-const engineDir = values.engine ?? process.env.YUGIOH_ENGINE ?? join(homedir(), '.cache/mimi-yugioh/engine');
+const engineDir = engineDirFrom(values.engine);
 const engine = await openEngine(openEngineFiles(engineDir));
-const md = (code) => BRANDED.cards[code]?.md ?? String(code);
-const names = (codes) => (codes.length ? codes.map(md).join('、') : '无');
+const names = (codes) => (codes.length ? codes.map((code) => cardOf(BRANDED, code).md).join('、') : '无');
 const noPath = row.searchValue === null || !row.steps?.length ? checkReplay(row, null) : [];
 if (noPath.length) {
   console.log(`种子 ${row.seed}（第 ${row.index} 手），起手：${names(row.hand)}\n不一致：${noPath.join('；')}`);

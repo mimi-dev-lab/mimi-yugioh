@@ -26,6 +26,7 @@ scripts/sync-card-images.js  把卡组用到的卡图从 NAS 经 ssh（stat + ta
 launchd/             在 mac mini 上常驻用的 launchd 配置 jp.lifan.mimi-yugioh（见「在 mini 上常驻」）
 scripts/opening-sim.js  随机起手模拟（离线，#37）：固定种子发 5 张先攻起手，每手搜最好场面并试已知路线，每手一行追加到 JSONL，可续跑、可 `--shard` 并行；手动跑，不进 ./ci
 scripts/opening-report.js  JSONL → docs/opening-analysis.md（纯计算）；`--merge` 把几个分片合成一份 JSONL
+scripts/opening-common.js  opening-sim.js 和 opening-replay.js 共用：引擎数据目录的默认值、报错退出
 scripts/opening-replay.js  从 JSONL 取一手（`--seed` 或 `--index`）搜出的步骤，在引擎里重放，打出终场和打断数并和记录对照
 scripts/deploy.js    部署到 mini：导出 origin/main、核对、装依赖、换上、只重启自己的任务、冒烟；`--dry-run` 只演练
 scripts/smoke.js     线上冒烟（只读）：部署的版本、/health、/deck、/routes（有路线、每条重放通过）、卡组用到的卡图
@@ -44,7 +45,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 |---|---|---|
 | `PORT` | `4519` | 端口（`0` = 随便挑一个空闲的） |
 | `YUGIOH_DATA` | `~/.mimi-yugioh` | 数据目录（仓外、不进 git） |
-| `YUGIOH_ENGINE` | `$YUGIOH_DATA/engine` | 引擎数据目录（卡库、脚本）：`scripts/prepare-engine.js` 下载到这里，测试和 `./ci` 用 `~/.cache/mimi-yugioh/engine`。服务启动时用它重放展开路线（`/routes`、`/route`）；目录里没有数据时这两个接口回 503，别的接口照常 |
+| `YUGIOH_ENGINE` | `$YUGIOH_DATA/engine` | 引擎数据目录（卡库、脚本）：`scripts/prepare-engine.js` 下载到这里，测试、`./ci` 和离线分析脚本（`scripts/opening-*.js`，见「随机起手模拟」）用 `~/.cache/mimi-yugioh/engine`。服务启动时用它重放展开路线（`/routes`、`/route`）；目录里没有数据时这两个接口回 503，别的接口照常 |
 | `YUGIOH_URL` | `http://127.0.0.1:4519` | 插件后端转发到哪个服务（只许本机）；在 Hermes 网关的环境里设 |
 | `YUGIOH_DEPLOY_DIR`、`YUGIOH_AGENTS_DIR`、`YUGIOH_LAUNCHCTL`、`YUGIOH_NPM`、`YUGIOH_SMOKE_BASE`、`YUGIOH_LOG` | mini 上的真实位置 | 只给部署、冒烟的演练换成临时的（部署目录、LaunchAgents 目录、launchctl 和 npm 命令、冒烟连的地址、日志） |
 | `YUGIOH_NAS`、`YUGIOH_NAS_IMAGES` | `lifan222@192.168.10.124`、`mimi-projects/mimi-yugioh/images/cn` | 只有 `scripts/sync-card-images.js` 读：NAS 的 ssh 地址和卡图目录（相对它的家目录） |
@@ -140,7 +141,8 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 - **已知路线**：每手把 `deck.routes` 每一条用这手实际的起手和种子重放一遍（`playRoute`，起手换成这手的），对不上引擎提示就算走不了（`null`）。最好值取搜索和路线里更高的，同值记搜索；记下 `searchValue`、`routeValue`（走得通的路线里最高的）、`bestRoute`、`routeValues`。`searchValue > routeValue` 的手是新路线候选。
 - **重放核对**：搜出的步骤再用 `playRoute` 重放一次，场面值对不上就不采信搜索值（`searchReplayOk: false`，报告里写手数）。`scripts/opening-replay.js` 是同一件事的命令行：取 JSONL 里那手的步骤重放，和记录对照。
 - **JSONL 一行一手**：字段见 `src/opening-sim.js` 开头。续跑：读已有的 JSONL，跳过已完成的 index，最后一行没写完就丢掉重写；已有的行的总种子或上限和这次对不上就报错退出。`--shard i/K` 只跑 index 对 K 取余等于 i 的手，K 个进程各写自己的文件并行跑，`opening-report.js --merge` 合成一份。
-- **报告**：纯计算，同一份 JSONL 同一份文字；每个数字能由 JSONL 重算，重算命令写在报告最后一节。`test/opening-report.test.js` 里有一条：提交的报告等于从提交的 JSONL 重新生成的。
+- **引擎目录**：`--engine`，其次 `$YUGIOH_ENGINE`，默认 `~/.cache/mimi-yugioh/engine`（`scripts/opening-common.js`）。和服务的默认（`$YUGIOH_DATA/engine`，见「环境变量」）不同，是有意的：离线分析是手动跑的脚本，不碰用户数据目录 `~/.mimi-yugioh`，用测试和 `./ci` 共用的那份缓存。
+- **报告**：纯计算，同一份 JSONL 同一份文字；行里的总种子或搜索上限不止一个值（不同参数的 JSONL 混在一起）就报错，不出报告；每个数字能由 JSONL 重算，重算命令写在报告最后一节。`test/opening-report.test.js` 里有一条：提交的报告等于从提交的 JSONL 重新生成的。
 
 ## 数据目录
 
