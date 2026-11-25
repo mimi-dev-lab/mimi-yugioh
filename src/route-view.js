@@ -1,7 +1,8 @@
 // 路线的展示数据（GET /routes、GET /route）：把 playRoute 重放出来的每一步场面配上卡名、和上一步的差异、终场汇总。
-// 场面全部来自引擎重放，这里只加名字、算差异、数打断；纯函数，引擎由调用方注入。
+// 场面全部来自引擎重放，这里只加名字、算差异；打断数由 interrupts.js 算；纯函数，引擎由调用方注入。
 import { OcgLocation as L, OcgPosition as P } from 'ocgcore-wasm';
 import { cardOf } from './deck.js';
+import { countInterrupts } from './interrupts.js';
 import { diffEnd, playRoute } from './route.js';
 
 // 场面里展示的区域：手牌、怪兽区（含额外怪兽区）、魔陷区（含场地）、墓地、除外、主卡组、额外卡组
@@ -60,16 +61,10 @@ function viewStepBoard(deck, board, diff) {
 
 const END_ZONES = ['hand', 'monsters', 'spellTraps', 'grave', 'banished']; // 终场汇总里列的区：不含主卡组和额外卡组
 
-// 终场汇总：场上每张卡、剩余手牌、打断数 = 终场在场各卡 interrupts 之和，每个打断靠哪张卡、怎么打断（同一张卡有几张就合在一条里）
+// 终场汇总：场上每张卡、剩余手牌、打断数（按卡组数据里的条件算，见 src/interrupts.js），每个打断靠哪张卡、怎么打断（同一张卡算进去几张就合在一条里）
 export function endSummary(deck, endBoard) {
-  const board = viewZones(deck, endBoard, END_ZONES);
-  const copies = new Map();
-  for (const c of [...board.monsters, ...board.spellTraps]) copies.set(c.code, (copies.get(c.code) ?? 0) + 1);
-  const breakers = [...copies].flatMap(([code, n]) => {
-    const { interrupts = 0, interruptHow } = deck.cards[code] ?? {}; // 卡组外的卡（token）不提供打断
-    return interrupts > 0 ? [{ ...cardOf(deck, code), copies: n, interrupts: interrupts * n, interruptHow }] : [];
-  });
-  return { ...board, interrupts: breakers.reduce((n, b) => n + b.interrupts, 0), breakers };
+  const { total, breakers } = countInterrupts(deck, endBoard);
+  return { ...viewZones(deck, endBoard, END_ZONES), interrupts: total, breakers: breakers.map((b) => ({ ...cardOf(deck, b.code), copies: b.copies, interrupts: b.interrupts, interruptHow: deck.cards[b.code].interruptHow })) };
 }
 
 // 重放一条路线，返回页面要的全部数据。重放走不通会抛错（带步号），由调用方决定怎么回

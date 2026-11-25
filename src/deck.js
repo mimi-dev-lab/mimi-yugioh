@@ -1,5 +1,6 @@
 // 卡组：把 { code, count } 的列表展开成密码数组，并检查卡组数据是否完整、张数是否合规。纯函数，不读文件。
 import { maxCopies } from './banlist.js';
+import { checkInterruptFields } from './interrupts.js';
 
 export function expand(list) {
   return list.flatMap(({ code, count }) => Array(count).fill(code));
@@ -27,6 +28,7 @@ export function checkDeck(deck, { limit = maxCopies, mainSize = 40, extraSize = 
     if (!Number.isInteger(card.interrupts) || card.interrupts < 0) problems.push(`${card.jp}（${code}）的打断数不是非负整数`);
     else if (typeof card.interruptHow !== 'string' || (card.interrupts > 0) !== (card.interruptHow.trim() !== '')) problems.push(`${card.jp}（${code}）的打断数 ${card.interrupts} 和「对手回合怎么打断」对不上：有打断就要写怎么打断，没有就留空`);
   }
+  problems.push(...checkInterruptFields(deck));
   for (const code of Object.keys(deck.cards)) if (!counts.has(Number(code))) problems.push(`${deck.cards[code].jp}（${code}）在卡表里但不在卡组里`);
   return problems;
 }
