@@ -66,7 +66,8 @@ function candidates(prompt, preferred, deck) {
   const rank = (response) => {
     if (response === 'end-turn') return 3;
     if ((response.idle && preferred.moves.has(`${response.idle}:${response.code}`)) || (response.chain && preferred.moves.has(`chain:${response.chain}`))) return 0;
-    return 1;
+    if (response === 'pass') return 1; // 路线里没用过的连锁发动（手坑之类）排在放行后面：每次放行都不该白花一次偏离
+    return 2;
   };
   const dedupe = (list) => { const seen = new Set(); return list.filter((r) => { const k = JSON.stringify(r); return seen.has(k) ? false : seen.add(k); }); };
   let list = [];
