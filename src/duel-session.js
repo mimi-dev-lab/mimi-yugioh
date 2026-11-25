@@ -2,7 +2,7 @@
 // 开局（卡组、起手、种子）→ prompt() 当前提示和合法选项 → choose() 提交选择 → board() 查场面 → checkpoint() / rollback() 存档回滚。
 // 只做规则裁判：每个提示只给引擎认的合法选项，选了不在里面的抛错。我方是 0 号玩家、先攻；对手是 1 号，用一套没有效果的通常怪兽凑数，它的提示由会话自动放弃。
 import { expand } from './deck.js';
-import createCore, { OcgDuelMode, OcgLocation as L, OcgMessageType as M, OcgPosition, OcgProcessResult, OcgResponseType as R, SelectIdleCMDAction as A } from 'ocgcore-wasm';
+import createCore, { OcgDuelMode, OcgLocation as L, OcgMessageType as M, OcgPosition, OcgProcessResult, OcgQueryFlags as Q, OcgResponseType as R, SelectIdleCMDAction as A } from 'ocgcore-wasm';
 
 // 通常怪兽（青眼白龙），给对手凑卡组：没有效果，不会打断我方展开
 const VANILLA = 89631139;
@@ -25,6 +25,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   let lastHint = null; // 最近一条给我方的选择提示（HINT_SELECTMSG 的字符串编号）
   let promptHint = null; // 当前提示对应的那一条
   const activated = []; // 我方发动过效果的卡的密码，按发动顺序
+  const events = []; // 引擎发出的卡片移动和召唤消息（MSG_MOVE、MSG_SPSUMMONING…）按发生顺序的记录，路线重放按步切片
+  let endEvents = null; // 我方回合结束那一刻 events 有几条；之后（对手回合）的消息不算
 
   function build() {
     if (handle) core.destroyDuel(handle);
@@ -48,15 +50,44 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     endBoard = null;
     normalSummonUsed = false;
     activated.length = 0;
+    events.length = 0;
+    endEvents = null;
     lastHint = null;
     promptHint = null;
   }
 
-  // 我方的场面：每个区域里的卡（编号、名字、格子）
+  // 我方的场面：每个区域里的卡（编号、名字、格子、表示形式），主卡组和额外卡组也列出每一张
   function snapshot() {
-    const at = (location) => core.duelQueryLocation(handle, { flags: 0x1, controller: 0, location })
-      .map((c, sequence) => (c ? { code: c.code, name: files.name(c.code), sequence } : null)).filter(Boolean);
-    return { hand: at(L.HAND), monsters: at(L.MZONE), spellTraps: at(L.SZONE), grave: at(L.GRAVE), banished: at(L.REMOVED), deck: core.duelQueryCount(handle, 0, L.DECK), extra: at(L.EXTRA) };
+    const at = (location) => core.duelQueryLocation(handle, { flags: Q.CODE | Q.POSITION, controller: 0, location })
+      .map((c, sequence) => (c ? { code: c.code, name: files.name(c.code), sequence, position: c.position } : null)).filter(Boolean);
+    return { hand: at(L.HAND), monsters: at(L.MZONE), spellTraps: at(L.SZONE), grave: at(L.GRAVE), banished: at(L.REMOVED), deck: at(L.DECK), extra: at(L.EXTRA) };
+  }
+
+  // 引擎消息里和卡片去向有关的，按发生顺序记进 events：
+  //   move   { code, from, to, reason, summon?, chain? }：MSG_MOVE，起点终点是 { controller, location, sequence, position }。
+  //          summon 是它之后紧跟的 MSG_SUMMONING / MSG_SPSUMMONING 说的召唤方式：normal，或 special / fusion / synchro / xyz / link / ritual
+  //          （特殊召唤的种类取自这次召唤之前的素材移动的 reason：REASON_MATERIAL 加上 FUSION / SYNCHRO / XYZ / LINK / RITUAL）；
+  //          chain 是它发生时正在连锁的第几环（CHAINING 开始，CHAIN_END 结束；发动效果前的支付、卡片本身从手牌盖上场不在连锁里）
+  //   chaining { code, controller, chain }：MSG_CHAINING，chain 是连锁环号（1 起）
+  const KINDS = [[0x40000, 'fusion'], [0x80000, 'synchro'], [0x200000, 'xyz'], [0x10000000, 'link'], [0x100000, 'ritual']];
+  const MATERIAL = 0x8;
+  let chainNow = null;
+  let materialKind = null;
+  function record(m) {
+    const spot = (p) => ({ controller: p.controller, location: p.location, sequence: p.sequence, position: p.position, ...(p.overlay_sequence === undefined ? {} : { overlay: p.overlay_sequence }) });
+    const annotate = (code, summon) => { const move = events.findLast((e) => e.type === 'move' && e.code === code); if (move) move.summon = summon; };
+    switch (m.type) {
+      case M.CHAINING: chainNow = m.chain_size; events.push({ type: 'chaining', code: m.code, controller: m.triggering_controller, chain: m.chain_size }); break;
+      case M.CHAIN_SOLVING: chainNow = m.chain_size; break;
+      case M.CHAIN_END: chainNow = null; break;
+      case M.MOVE:
+        events.push({ type: 'move', code: m.card, from: spot(m.from), to: spot(m.to), reason: m.reason, ...(chainNow === null ? {} : { chain: chainNow }) });
+        if (m.reason & MATERIAL) materialKind = KINDS.find(([flag]) => m.reason & flag)?.[1] ?? materialKind;
+        break;
+      case M.SUMMONING: annotate(m.code, 'normal'); break;
+      case M.SPSUMMONING: annotate(m.code, materialKind ?? 'special'); materialKind = null; break;
+      default:
+    }
   }
 
   // 推进引擎直到它要我们选，或者决斗结束；对手的提示自动放弃
@@ -65,6 +96,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
       const status = core.duelProcess(handle);
       const messages = core.duelGetMessage(handle);
       for (const m of messages) {
+        if (m.type === M.NEW_TURN && m.player === 1 && endEvents === null) endEvents = events.length;
+        record(m);
         if (m.type === M.SUMMONING && m.controller === 0) normalSummonUsed = true;
         if (m.type === M.SET && m.controller === 0 && m.location === L.MZONE) normalSummonUsed = true;
         if (m.type === M.CHAINING && m.triggering_controller === 0) activated.push(m.code);
@@ -192,6 +225,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
       advance();
     },
     board() { return snapshot(); },
+    // 引擎消息的记录（见 record），到我方回合结束为止；按步切片用：先记下 events.length，走完这一步再取 events.slice(记下的数)
+    get events() { return events.slice(0, endEvents ?? events.length); },
     get normalSummonUsed() { return normalSummonUsed; },
     get activated() { return [...activated]; },
     // 我方回合结束那一刻的场面（对手回合开始时记下），没结束是 null；回合结束后的抽牌不算在里面

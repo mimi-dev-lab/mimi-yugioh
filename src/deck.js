@@ -32,7 +32,7 @@ export function deckOverview(deck) {
   const entries = [...deck.main.map((e) => ({ ...e, zone: 'main' })), ...deck.extra.map((e) => ({ ...e, zone: 'extra' }))];
   const cards = entries.map(({ code, count, zone }) => {
     const { md, jp, role, does, cost, limit, interrupts, interruptHow } = deck.cards[code];
-    return { code, md, jp, role, zone, count, does, cost, limit, interrupts, interruptHow };
+    return { code, md, jp, ...deck.levels?.[code], role, zone, count, does, cost, limit, interrupts, interruptHow };
   });
   const rank = (c) => deck.roles.findIndex((r) => r.name === c.role);
   return { name: deck.name, source: deck.source, roles: deck.roles, cards: cards.sort((a, b) => rank(a) - rank(b)) };
