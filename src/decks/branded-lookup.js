@@ -27,7 +27,7 @@ export const LOOKUP = [
     card: C.aluber,
     routes: [{ route: 'aluber' }],
     fallbacks: [
-      { lack: C.aluber, have: [C.brandedFusion], route: 'branded-fusion', how: '烙印融合线不用阿卢绯尔，第二次融合用白之落胤当素材' },
+      { lack: C.aluber, have: [C.brandedFusion], route: 'branded-fusion', how: '烙印融合线不用阿卢绯尔，第二次融合用墓地的阿尔白斯之落胤当素材' },
     ],
   },
   {

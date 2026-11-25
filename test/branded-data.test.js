@@ -11,10 +11,10 @@ const ALBAZ = 73819701; const FUSION = 44362883; const ASH = 14558127; const MIR
 const clone = () => structuredClone(BRANDED);
 
 describe('烙印卡组数据', () => {
-  test('主卡组 40 张、额外卡组 15 张，数据完整，张数符合 2026-11-05 禁限表', () => {
+  test('主卡组 40 张、额外卡组 15 张，数据完整，张数符合 2026-12-04 禁限表（11-24 公告）', () => {
     assert.equal(expand(BRANDED.main).length, 40);
     assert.equal(expand(BRANDED.extra).length, 15);
-    assert.equal(BANLIST_DATE, '2026-11-05');
+    assert.equal(BANLIST_DATE, '2026-12-04');
     assert.deepEqual(checkDeck(BRANDED), []);
     assert.deepEqual(checkLookup(BRANDED), []);
   });
@@ -42,16 +42,21 @@ describe('烙印卡组数据', () => {
     assert.equal(quem, '引导之圣女 库妸㽗');
   });
 
-  test('禁限表：烙印融合限 1、The Fallen ＆ The Virtuous 准限 2，没写的 3 张', () => {
+  test('禁限表：白之落胤限 1、烙印融合限 1、The Fallen ＆ The Virtuous 准限 2，没写的 3 张', () => {
     assert.equal(maxCopies(FUSION), 1);
     assert.equal(maxCopies(30271097), 2);
-    assert.equal(maxCopies(ALBAZ), 3);
+    assert.equal(maxCopies(ALBAZ), 1); // 白之落胤：12-04 起限 1
+    assert.equal(maxCopies(68468459), 3); // 阿尔白斯之落胤
+    assert.equal(maxCopies(1041278), 0); // 分かつ烙印（Branded Expulsion）禁止
+    assert.equal(maxCopies(6763530), 3); // 烙印追放（Branded Banishment）没被禁
   });
 
   test('检查会抓出问题：烙印融合 2 张、少一张主卡、缺简中名、作用不在表里、打断数不是整数、打断数和怎么打断对不上', () => {
     const over = clone(); over.main.find((e) => e.code === FUSION).count = 2; over.main.find((e) => e.code === ASH).count = 1;
     assert.match(checkDeck(over).join('\n'), /烙印融合.*2 张，禁限表上限 1/);
     assert.match(checkDeck(over).join('\n'), /主卡组 39 张/);
+    const twoAlbaz = clone(); twoAlbaz.main.find((e) => e.code === ALBAZ).count = 2; twoAlbaz.main.find((e) => e.code === 68468459).count = 1;
+    assert.match(checkDeck(twoAlbaz).join('\n'), /白き竜の落胤.*2 张，禁限表上限 1/);
     const noName = clone(); noName.cards[ALBAZ].md = '';
     assert.match(checkDeck(noName).join('\n'), /白き竜の落胤 缺 md/);
     const badRole = clone(); badRole.cards[ALBAZ].role = '乱写';
