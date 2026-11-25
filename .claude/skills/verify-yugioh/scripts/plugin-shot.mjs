@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // plugin-verify 的 shot 用的浏览器脚本：用本机的无头 Chromium（不装依赖）打开临时网页工作区，像用户一样从侧栏点「游戏王」（默认是「卡组一览」页签），
 // 可选地切页签、在卡组一览里点一张卡、在展开路线里点一条路线、或在起手速查里点一条路线（--jump，跳到那条路线的播放页）并翻到某一步（点「下一步」或按右方向键），写 <name>.png / .txt / .json（网络记录）。
-// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, mobile, tab, select, route, jump, step, keys, compare }>'
+// 用法：node plugin-shot.mjs '<json：{ base, cookies:[[name,value]…], evidence, name, design, mobile, tab, select, route, jump, step, keys, compare, compareLabel, compareWith }>'
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -247,6 +247,18 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     await sleep(300);
     pop = await evaluate(() => { const r = document.querySelector('.yg-pop').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, vw: innerWidth, vh: innerHeight, text: document.querySelector('.yg-pop').innerText }; });
   }
+  // 播放页的步号条和按钮有没有被网页工作区的窗口头部（或别的东西）盖住：每个按钮的上沿、下沿各取一点，elementFromPoint 要落在按钮自己身上
+  const bar = await evaluate(() => {
+    const btns = [...document.querySelectorAll('.yg-controls button')];
+    if (!btns.length) return null;
+    const hidden = btns.filter((b) => {
+      const r = b.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      return [r.top + 2, r.bottom - 2].some((y) => !b.contains(document.elementFromPoint(x, y)));
+    }).map((b) => b.innerText.trim());
+    const first = btns[0].getBoundingClientRect();
+    return { clear: hidden.length === 0, hidden, firstTop: first.top, firstBottom: first.bottom };
+  });
   const overflowX = await evaluate(() => { const x = document.querySelector('.yg'); return x.scrollWidth > x.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1; });
   const height = await evaluate(() => document.querySelector('.yg').scrollHeight);
   await sleep(600);
@@ -282,14 +294,25 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
   const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
   const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
   if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
-  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, pop, closed, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs }, null, 1));
-  // 并排对照：设计稿 PNG 在左、这张在右，用 data: 地址在一个页面里拼好再截一张
+  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, pop, closed, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs }, null, 1));
+  // 并排对照：设计稿 PNG 在左（标签 --compare-label，默认「样子稿」），这张和 --compare-with 列的同一证据目录里先截的几张在右，上下排；在一个 data: 页面里拼好再截一张
   if (opts.compare) {
-    const design = (await readFile(opts.compare)).toString('base64');
-    const html = `<meta charset="utf-8"><body style="margin:0;background:#222;display:flex;gap:16px;padding:16px;font:14px sans-serif;color:#ddd"><div><div style="margin-bottom:6px">设计稿 design-r3</div><img style="width:1280px;display:block" src="data:image/png;base64,${design}"></div><div><div style="margin-bottom:6px">真 Hermes 里的页面</div><img style="width:1280px;display:block" src="data:image/png;base64,${shot.data}"></div></body>`;
+    const b64 = async (f) => (await readFile(f)).toString('base64');
+    const right = [[opts.name, shot.data], ...await Promise.all((opts.compareWith ?? []).map(async (n) => [n, await b64(`${opts.evidence}/${n}.png`)]))];
+    const fig = (label, data) => `<div><div style="margin-bottom:6px">${label}</div><img style="width:1280px;display:block" src="data:image/png;base64,${data}"></div>`;
+    const html = `<meta charset="utf-8"><body style="margin:0;background:#222;display:flex;align-items:flex-start;gap:16px;padding:16px;font:14px sans-serif;color:#ddd">`
+      + `<div>${fig(opts.compareLabel || '样子稿', await b64(opts.compare))}</div>`
+      + `<div style="display:flex;flex-direction:column;gap:16px">${right.map(([n, d]) => fig(`真 Hermes 里的页面：${n}`, d)).join('')}</div></body>`;
     await send('Emulation.setDeviceMetricsOverride', { width: 2608, height: 940, deviceScaleFactor: 1, mobile: false });
-    await send('Page.navigate', { url: `data:text/html;base64,${Buffer.from(html).toString('base64')}` });
+    // 三张 PNG 的 data: 地址太长，Chromium 不肯整页导航过去：先到 about:blank，再把页面内容直接塞进去
+    await send('Page.navigate', { url: 'about:blank' });
+    await sleep(500);
+    const { frameTree } = await send('Page.getFrameTree');
+    await send('Page.setDocumentContent', { frameId: frameTree.frame.id, html });
     await sleep(1500);
+    const h = await evaluate(() => document.documentElement.scrollHeight);
+    await send('Emulation.setDeviceMetricsOverride', { width: 2608, height: h, deviceScaleFactor: 1, mobile: false });
+    await sleep(500);
     const both = await send('Page.captureScreenshot', { format: 'png' });
     await writeFile(`${opts.evidence}/${opts.name}-compare.png`, Buffer.from(both.data, 'base64'));
   }
