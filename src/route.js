@@ -31,12 +31,12 @@ export function indicesFor(prompt, response) {
 }
 
 // 一步 = 主阶段的一个命令，或连锁窗口里发动一个效果；它后面的选卡、选格子、放行都算在这一步里。路线的「每一步之后的场面」按这个切
-const startsStep = (prompt, indices) => prompt.kind === 'idle' || (prompt.kind === 'chain' && prompt.options[indices[0]]?.action === 'chain');
+export const startsStep = (prompt, indices) => prompt.kind === 'idle' || (prompt.kind === 'chain' && prompt.options[indices[0]]?.action === 'chain');
 
 const ACTION_NAMES = { summon: '召唤', 'monster-set': '盖放怪兽', 'special-summon': '特殊召唤', 'position-change': '改变表示形式', 'spell-set': '盖放', activate: '发动', 'to-battle': '进入战斗阶段', 'end-turn': '结束回合' };
 
 // 路线每步的文字：这一步里的每个选择怎么写
-function labelFor(deck, prompt, indices) {
+export function labelFor(deck, prompt, indices) {
   const md = (code) => deck.cards[code]?.md ?? String(code);
   const chosen = indices.map((i) => prompt.options[i]);
   const one = chosen[0];

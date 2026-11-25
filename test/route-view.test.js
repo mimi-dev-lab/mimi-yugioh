@@ -30,15 +30,15 @@ describe('路线展示数据：教程和引擎不一致、重放不通', () => {
     await assert.rejects(replayRoute(engine, BRANDED, broken), /第 1 步「故意写错」/);
   });
 
-  test('同一张卡有几张在场：打断数按张数算，合成一条说明', async () => {
-    const board = { hand: [], monsters: [{ code: 44146295, sequence: 0 }, { code: 44146295, sequence: 1 }], spellTraps: [], grave: [], banished: [] };
+  test('同一张卡有几张能发动：打断数按张数算，合成一条说明', async () => {
+    const board = { hand: [{ code: 14558127, sequence: 0 }, { code: 14558127, sequence: 1 }], monsters: [], spellTraps: [{ code: 48130397, sequence: 0 }, { code: 48130397, sequence: 1 }], grave: [], banished: [], extra: [] };
     const end = endSummary(BRANDED, board);
     assert.equal(end.interrupts, 2);
-    assert.deepEqual(end.breakers.map((b) => [b.md, b.copies, b.interrupts]), [['冰剑龙 镜翠幻种', 2, 2]]);
+    assert.deepEqual(end.breakers.map((b) => [b.md, b.copies, b.interrupts]), [['超融合', 2, 2]]);
   });
 
   test('卡组外的卡（token）在场：不抛错，打断当 0，名字退回密码', () => {
-    const board = { hand: [], monsters: [{ code: 44146295, sequence: 0 }, { code: 99999999, sequence: 1 }], spellTraps: [], grave: [], banished: [] };
+    const board = { hand: [], monsters: [{ code: 44146295, sequence: 0 }, { code: 99999999, sequence: 1 }], spellTraps: [], grave: [], banished: [], extra: [{ code: 87746184, sequence: 0 }] };
     const end = endSummary(BRANDED, board);
     assert.equal(end.interrupts, 1);
     assert.deepEqual(end.breakers.map((b) => b.code), [44146295]);

@@ -83,21 +83,21 @@ describe('路线接口：GET /routes、GET /route?id=', () => {
     } finally { server.stop(); }
   });
 
-  test('终场汇总：打断数等于终场在场各卡打断数之和，每个打断说明靠哪张卡、怎么打断', async () => {
+  test('终场汇总：打断数等于 breakers 之和（条件见 test/interrupts.test.js），每个打断说明靠哪张卡、怎么打断，那张卡确实在终场里', async () => {
     const server = await start({ YUGIOH_ENGINE: ENGINE_DIR });
     try {
-      const deck = (await get(server.url, '/deck')).body;
-      const per = new Map(deck.cards.map((c) => [c.code, c.interrupts]));
       const routes = (await get(server.url, '/routes')).body.routes;
       for (const def of BRANDED.routes) {
         const { body } = await get(server.url, `/route?id=${def.id}`);
-        const onField = [...body.end.monsters, ...body.end.spellTraps];
-        const sum = onField.reduce((n, c) => n + per.get(c.code), 0);
+        const sum = body.end.breakers.reduce((n, b) => n + b.interrupts, 0);
         assert.equal(body.end.interrupts, sum, def.id);
         assert.equal(routes.find((r) => r.id === def.id).interrupts, sum, `${def.id} 列表和单条的打断数一致`);
         assert.deepEqual(body.end.hand.length, body.steps.at(-1).board.hand.length);
-        assert.equal(body.end.breakers.reduce((n, b) => n + b.interrupts, 0), sum);
-        for (const b of body.end.breakers) { assert.ok(b.md && b.interruptHow, `${def.id} ${b.code} 的打断说明`); assert.ok(b.interrupts > 0); }
+        const present = [...body.end.monsters, ...body.end.spellTraps, ...body.end.hand].map((c) => c.code);
+        for (const b of body.end.breakers) {
+          assert.ok(b.md && b.interruptHow, `${def.id} ${b.code} 的打断说明`); assert.ok(b.interrupts > 0);
+          assert.ok(present.filter((code) => code === b.code).length >= b.copies, `${def.id} ${b.md} 在终场里`);
+        }
       }
       const fusion = (await get(server.url, '/route?id=branded-fusion')).body;
       assert.ok(fusion.end.spellTraps.some((c) => c.md === '烙印断罪'), '烙印融合线终场盖着烙印断罪');
