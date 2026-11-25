@@ -73,6 +73,14 @@ describe('路线快照：引擎给出的卡片移动和区的变化一一对应'
     assert.deepEqual(step.moves.filter((m) => m.from === 'monsters').map((m) => m.to), ['grave', 'grave']);
   });
 
+  test('素材标记取自引擎：融合 / 同调的素材带 material，召唤出来的怪兽和别的移动没有', () => {
+    const wa = views.get('white-albaz').steps;
+    assert.deepEqual(wa[2].moves.map((m) => !!m.material), [true, true, false]); // 同调：两个素材，再是黑衣龙
+    assert.deepEqual(wa[11].moves.map((m) => !!m.material), [true, true, false, false]); // 融合：两个素材、卢绯里昂、烙印用完进墓地
+    assert.deepEqual(wa[13].moves.map((m) => !!m.material), [true, true, false]); // 冰剑龙：素材回额外卡组 / 卡组
+    assert.ok(wa[4].moves.every((m) => !m.material)); // 第 5 步只是送墓
+  });
+
   test('第 9 步阿卢绯尔从卡组守备表示出场：move 和场上的卡都是 defense', () => {
     const step = views.get('white-albaz').steps[8];
     const move = step.moves.find((m) => m.code === ALUBER && m.to === 'monsters');

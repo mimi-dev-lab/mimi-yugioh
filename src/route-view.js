@@ -19,9 +19,9 @@ export const cardOf = (deck, code) => ({ code, md: deck.cards[code]?.md ?? Strin
 // 怪兽区和魔陷区的卡带 position（attack / defense / facedown）
 const placed = (deck, zone, c) => ({ ...cardOf(deck, c.code), sequence: c.sequence, ...(zone === 'monsters' || zone === 'spellTraps' ? { position: positionName(c.position) } : {}) });
 
-// 一步里引擎发出的卡片移动：{ code, md, jp, level?/rank?/link?, from, to, position?, summon?, chain? }。from / to 是区名（ZONES，Xyz 素材是 overlay）；
+// 一步里引擎发出的卡片移动：{ code, md, jp, level?/rank?/link?, from, to, position?, summon?, material?, chain? }。from / to 是区名（ZONES，Xyz 素材是 overlay）；
 // position 是去处在怪兽区、魔陷区时的表示形式；summon 是这只怪兽被召唤的方式（normal / special / fusion / synchro / xyz / link / ritual，取自引擎消息）；
-// chain 是移动发生时正在连锁的第几环。只列我方的卡；起点终点都是对手那边的不列
+// material 是这张卡作为融合 / 同调等召唤的素材被移走；chain 是移动发生时正在连锁的第几环。只列我方的卡；起点终点都是对手那边的不列
 function movesOf(deck, events) {
   return events.filter((e) => e.type === 'move' && (e.from.controller === 0 || e.to.controller === 0)).map((e) => {
     if (e.from.controller !== e.to.controller) throw new Error(`${e.code} 在两个玩家之间移动，快照还没处理`);
@@ -29,7 +29,7 @@ function movesOf(deck, events) {
     return {
       ...cardOf(deck, e.code), from: zoneOf(e.from.location), to,
       ...(to === 'monsters' || to === 'spellTraps' ? { position: positionName(e.to.position) } : {}),
-      ...(e.summon === undefined ? {} : { summon: e.summon }), ...(e.chain === undefined ? {} : { chain: e.chain }),
+      ...(e.material ? { material: true } : {}), ...(e.summon === undefined ? {} : { summon: e.summon }), ...(e.chain === undefined ? {} : { chain: e.chain }),
     };
   });
 }

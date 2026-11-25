@@ -68,6 +68,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   //          summon 是它之后紧跟的 MSG_SUMMONING / MSG_SPSUMMONING 说的召唤方式：normal，或 special / fusion / synchro / xyz / link / ritual
   //          （特殊召唤的种类取自这次召唤之前的素材移动的 reason：REASON_MATERIAL 加上 FUSION / SYNCHRO / XYZ / LINK / RITUAL）；
   //          chain 是它发生时正在连锁的第几环（CHAINING 开始，CHAIN_END 结束；发动效果前的支付、卡片本身从手牌盖上场不在连锁里）
+  //          material: true 是这张卡作为融合 / 同调 / 超量 / 连接 / 仪式的素材被移走（reason 带 REASON_MATERIAL）
   //   chaining { code, controller, chain }：MSG_CHAINING，chain 是连锁环号（1 起）
   const KINDS = [[0x40000, 'fusion'], [0x80000, 'synchro'], [0x200000, 'xyz'], [0x10000000, 'link'], [0x100000, 'ritual']];
   const MATERIAL = 0x8;
@@ -81,7 +82,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
       case M.CHAIN_SOLVING: chainNow = m.chain_size; break;
       case M.CHAIN_END: chainNow = null; break;
       case M.MOVE:
-        events.push({ type: 'move', code: m.card, from: spot(m.from), to: spot(m.to), reason: m.reason, ...(chainNow === null ? {} : { chain: chainNow }) });
+        events.push({ type: 'move', code: m.card, from: spot(m.from), to: spot(m.to), reason: m.reason, ...(m.reason & MATERIAL ? { material: true } : {}), ...(chainNow === null ? {} : { chain: chainNow }) });
         if (m.reason & MATERIAL) materialKind = KINDS.find(([flag]) => m.reason & flag)?.[1] ?? materialKind;
         break;
       case M.SUMMONING: annotate(m.code, 'normal'); break;

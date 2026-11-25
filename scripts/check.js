@@ -26,7 +26,7 @@ const BOUNDARY = [
   { what: 'Date.now()', re: /\bDate\.now\(/, only: ['src/server.js'], why: '「现在」只在 server.js 取，传给别的模块' },
   { what: 'new Date()', re: /\bnew Date\(\s*\)/, only: ['src/server.js'], why: '「现在」只在 server.js 取，传给别的模块' },
   { what: 'node:http / node:net', re: /['"]node:(http|net)['"]/, only: ['src/server.js'], why: '只有 server.js 开服务' },
-  { what: 'node:fs / node:sqlite', re: /['"]node:(fs|fs\/promises|sqlite)['"]/, only: ['src/engine-files.js', 'src/store.js'], why: '读卡库和脚本只在 engine-files.js，写数据目录只在 store.js' },
+  { what: 'node:fs / node:sqlite', re: /['"]node:(fs|fs\/promises|sqlite)['"]/, only: ['src/engine-files.js', 'src/store.js', 'src/vendor-files.js'], why: '读卡库和脚本只在 engine-files.js，读写数据目录只在 store.js，读 vendor/ 里的第三方文件只在 vendor-files.js' },
   { what: '写文件（writeFile / appendFile / rename / rm / unlink / mkdir）', re: /\b(writeFile|appendFile|rename|rm|unlink|mkdir)(Sync)?\(/, only: ['src/store.js'], why: '数据目录只由 store.js 写' },
   { what: 'node:https / fetch', re: /['"]node:https['"]|\bfetch\(/, only: [], why: '服务不往外发请求：联网只有 scripts/prepare-engine.js 下载公开的引擎数据' },
   { what: 'node:child_process', re: /['"]node:child_process['"]/, only: [], why: '服务不起子进程' },
