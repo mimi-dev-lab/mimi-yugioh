@@ -146,6 +146,9 @@ done
 for name in tap-route anim-mid anim-jump anim-back anim-auto anim-phone-auto hover-route; do
   node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!j.cdp || j.cdp.foreign.length || j.cdp.total < 1) { console.error(JSON.stringify(j.cdp)); process.exit(1); }' "$ev/$name.json" || { echo "$name 的网络记录里有非本地请求，或没记到请求，见 $ev/$name.json"; exit 1; }
 done
+for name in anim-jump anim-auto anim-phone-auto hover-route; do
+  grep -q '"jsErrors": \[\]' "$ev/$name.json" || { echo "$name 里有没接住的 JS 异常，见 $ev/$name.json"; exit 1; }
+done
 for name in deck card phone phone-card routes route-start route-first route-mid route-end route-fusion-end route-phone-start route-phone route-phone-end quick quick-phone quick-jump quick-jump-end quick-jump-phone; do
   grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
 done

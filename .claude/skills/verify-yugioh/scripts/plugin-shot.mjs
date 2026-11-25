@@ -40,12 +40,14 @@ async function main() {
   await new Promise((r) => { ws.onopen = r; });
   let id = 0;
   const pending = new Map();
+  const jsErrors = []; // 页面和动画框里没接住的 JS 异常
   const cdpRequests = []; // 这个标签页和它的子框架（路线动画的框架）发的每一个请求：[网址, 来自哪个会话]
   ws.onmessage = (m) => {
     const d = JSON.parse(m.data);
     if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); return; }
     if (d.method === 'Network.requestWillBeSent') cdpRequests.push([d.params.request.url, d.sessionId ? 'child' : 'page']);
-    if (d.method === 'Target.attachedToTarget') send('Network.enable', {}, d.params.sessionId).catch(() => {});
+    if (d.method === 'Runtime.exceptionThrown') jsErrors.push(String(d.params.exceptionDetails.exception?.description ?? d.params.exceptionDetails.text).slice(0, 300));
+    if (d.method === 'Target.attachedToTarget') { send('Network.enable', {}, d.params.sessionId).catch(() => {}); send('Runtime.enable', {}, d.params.sessionId).catch(() => {}); }
   };
   const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
     const i = ++id;
@@ -75,6 +77,7 @@ async function main() {
 
   await send('Page.enable');
   await send('Network.enable');
+  await send('Runtime.enable');
   await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   // --design：设计稿的 1280×860；--mobile：手机宽（390×844，按手机模拟）；都不给：1600 宽的桌面
@@ -261,7 +264,7 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
   const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
   const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
   if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
-  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, pop, closed, requests: urls.length, foreign, hostLoad, urls, cdp, playedMs }, null, 1));
+  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, pop, closed, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs }, null, 1));
   // 并排对照：设计稿 PNG 在左、这张在右，用 data: 地址在一个页面里拼好再截一张
   if (opts.compare) {
     const design = (await readFile(opts.compare)).toString('base64');
