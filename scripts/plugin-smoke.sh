@@ -2,6 +2,7 @@
 # ./ci 的插件冒烟：游戏王插件在临时的网页工作区（只开 Webapp 的 Hermes 网关，插件用本仓的 plugin/，后端转给编的数据起的游戏王服务）里，
 # 从侧栏点「游戏王」：首页是教程外壳，第一个页签「卡组一览」按作用分组列出每张卡（简中名、日文名）；点一张卡看效果说明和对手回合怎么打断；
 # 桌面宽和手机宽各走一遍；展开路线：列表、点进白之落胤线（停在起手）翻到第 1 步、中间一步、终场（点下一步和按右方向键各一次），看终场汇总的打断数；起手速查：每张关键卡的路线和缺卡改走哪条，点一条路线跳到它的播放页（桌面宽、手机宽）。页面上不能有打牌、评分、记卡、进步曲线的字样，也没有百分比。
+# 卡片弹窗：桌面悬停卡组一览、路线场面、终场汇总、起手速查的卡，手机点一下，弹窗整块在窗口里、关得掉。
 # 每次的网络记录里不能有不同源的请求。照验证技能（.claude/skills/verify-yugioh）的 plugin-verify。
 # 不碰线上：端口、数据目录都是这次临时的，卡图是编的单色小图，不连 NAS；证据放临时目录，过了就删，没过留着并打出路径。
 # YUGIOH_SMOKE_KEEP=<目录>：过了也把截图拷到那个目录。
@@ -101,6 +102,35 @@ shot quick-jump-end --tab 起手速查 --jump white-saint --step last
 has quick-jump-end "基本展开｜白之圣女初动" "终场汇总" "对手回合能打断 0 次"
 shot quick-jump-phone --mobile --tab 起手速查 --jump nadir-servant --step 2
 has quick-jump-phone "基本展开｜天底的使徒初动" "第 2 / 13 步" "花了什么"
+# 卡片弹窗：悬停（桌面）/ 点一下（手机）弹出放大卡图 + 两个名字 + 作用 + 三件事 + 对手回合怎么打断；整块在窗口里；关得掉
+popup() {
+  name=$1
+  node -e '
+    const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const p = j.pop;
+    const bad = [];
+    if (!p) bad.push("没有弹窗");
+    else if (p.left < 0 || p.top < 0 || p.right > p.vw || p.bottom > p.vh) bad.push(`弹窗超出窗口：${JSON.stringify(p)}`);
+    if (process.argv[2] === "close" && !(j.closed && j.closed.esc && (j.closed.button !== false))) bad.push(`没关上：${JSON.stringify(j.closed)}`);
+    if (bad.length) { console.error(bad.join("；")); process.exit(1); }
+  ' "$ev/$name.json" "$2" || { echo "$name 的弹窗不对，见 $ev/$name.json"; exit 1; }
+}
+shot hover-deck --hover "冰剑龙 镜翠幻种" --close
+popup hover-deck close
+grep -q '"text": ".*氷剣竜ミラジェイド.*干什么.*对手回合.*终场时能打断 1 次' "$ev/hover-deck.json" || { echo "hover-deck 的弹窗里缺日文名、干什么或对手回合，见 $ev/hover-deck.json"; exit 1; }
+shot hover-route --route white-albaz --hover 白之落胤 --within .yg-board --close
+popup hover-route close
+shot hover-lookup --tab 起手速查 --hover 白之落胤 --within .yg-lookup --close
+popup hover-lookup close
+shot hover-end --route white-albaz --step last --hover "冰剑龙 镜翠幻种" --within .yg-end --close
+popup hover-end close
+shot tap-route --mobile --route white-albaz --tap 白之落胤 --within .yg-board --close
+popup tap-route close
+has tap-route "× 关上"
+shot tap-deck --mobile --tab 起手速查 --tap 白之落胤 --within .yg-lookup --close
+popup tap-deck close
+for name in hover-deck hover-route hover-lookup hover-end tap-route tap-deck; do
+  grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
+done
 for name in deck card phone phone-card routes route-start route-first route-mid route-end route-fusion-end route-phone-start route-phone route-phone-end quick quick-phone quick-jump quick-jump-end quick-jump-phone; do
   grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
 done

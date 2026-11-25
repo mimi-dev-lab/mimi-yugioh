@@ -76,6 +76,7 @@ async function main() {
   // --design：设计稿的 1280×860；--mobile：手机宽（390×844，按手机模拟）；都不给：1600 宽的桌面
 const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } : opts.design ? { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false } : { width: 1600, height: 900, deviceScaleFactor: 1, mobile: false };
   await send('Emulation.setDeviceMetricsOverride', view);
+  if (opts.mobile) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
   for (const [name, value] of opts.cookies) await send('Network.setCookie', { name, value, url: `${opts.base}/`, httpOnly: true });
   await send('Page.navigate', { url: `${opts.base}/#/` });
 
@@ -152,21 +153,63 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
       await until((n) => Number(document.querySelector('.yg-player').dataset.step) > n, now, 10000, `翻到第 ${now + 1} 步`).catch(fail);
     }
   }
+  // 卡片弹窗：--hover 卡名（桌面：鼠标移到那张卡上）或 --tap 卡名（手机：触摸点一下），范围 --within CSS（默认整页）；等弹窗 .yg-pop 出这张卡
+  const aim = opts.hover ?? opts.tap;
+  let pop = null;
+  if (aim) {
+    const at = await evaluate(({ name, within }) => {
+      const root = document.querySelector(within || '.yg');
+      const el = [...(root?.querySelectorAll('[data-card-code]') ?? [])].find((x) => x.dataset.cardMd === name);
+      if (!el) return null;
+      el.scrollIntoView({ block: 'center' });
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, { name: aim, within: opts.within }).then((v) => v ?? fail(new Error(`页面上没有卡「${aim}」（范围 ${opts.within ?? '.yg'}）`)));
+    await sleep(300);
+    if (opts.tap) {
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y }] });
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } else {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x - 3, y: at.y - 3 });
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+    }
+    await until((n) => document.querySelector('.yg-pop .yg-title')?.innerText === n, aim, 10000, `弹窗显示「${aim}」`).catch(fail);
+    await sleep(300);
+    pop = await evaluate(() => { const r = document.querySelector('.yg-pop').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, vw: innerWidth, vh: innerHeight, text: document.querySelector('.yg-pop').innerText }; });
+  }
   const overflowX = await evaluate(() => { const x = document.querySelector('.yg'); return x.scrollWidth > x.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1; });
   const height = await evaluate(() => document.querySelector('.yg').scrollHeight);
   await sleep(600);
   // --design 保持 1280×860 的视口（和设计稿同样大），--mobile 保持一屏手机；平时把视口拉到内容那么高
-  if (!opts.design && !opts.mobile) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 200, 4000) }); await sleep(500); }
+  if (aim) { /* 弹窗开着：不改视口，不然鼠标和弹窗都变了 */ }
+  else if (!opts.design && !opts.mobile) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 200, 4000) }); await sleep(500); }
   else if (opts.mobile && (opts.route || opts.jump || opts.tab === '起手速查')) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 100, 5000) }); await sleep(500); }
   await until(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity), null, 5000, '动画走完').catch(() => {});
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   await writeFile(`${opts.evidence}/${opts.name}.png`, Buffer.from(shot.data, 'base64'));
   await writeFile(`${opts.evidence}/${opts.name}.txt`, await evaluate(() => document.querySelector('.yg').innerText));
+  // --close：关弹窗（手机点「× 关上」，再点开按 Esc；桌面按 Esc），弹窗要没了
+  let closed = null;
+  if (opts.close) {
+    if (!pop) throw new Error('--close 要和 --hover 或 --tap 一起用');
+    const gone = () => evaluate(() => !document.querySelector('.yg-pop'));
+    const esc = async () => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 }); await sleep(300); };
+    closed = {};
+    if (opts.tap) {
+      closed.button = (await evaluate(() => { const b = document.querySelector('.yg-pop button'); if (!b || b.innerText.trim() !== '× 关上') return false; b.click(); return true; })) && (await sleep(300), await gone());
+      const at = await evaluate((n) => { const el = [...document.querySelectorAll('[data-card-code]')].find((x) => x.dataset.cardMd === n); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, aim);
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y }] });
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await until(() => !!document.querySelector('.yg-pop'), null, 5000, '再点一次弹窗又出来');
+    }
+    await esc();
+    closed.esc = await gone();
+  }
   const all = await evaluate((t) => performance.getEntriesByType('resource').map((e) => [e.name, e.startTime >= t]), t0);
   const urls = all.filter(([, after]) => after).map(([u]) => u);
   const foreign = urls.filter((u) => !u.startsWith(`${opts.base}/`));
   const hostLoad = all.filter(([u, after]) => !after && !u.startsWith(`${opts.base}/`)).map(([u]) => u);
-  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, requests: urls.length, foreign, hostLoad, urls }, null, 1));
+  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, pop, closed, requests: urls.length, foreign, hostLoad, urls }, null, 1));
   // 并排对照：设计稿 PNG 在左、这张在右，用 data: 地址在一个页面里拼好再截一张
   if (opts.compare) {
     const design = (await readFile(opts.compare)).toString('base64');

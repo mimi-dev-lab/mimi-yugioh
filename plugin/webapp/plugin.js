@@ -7,13 +7,16 @@
    GET /card-image?code= (JSON with base64; drawn as a data: address).
    Tabs: 卡组一览 (the deck grouped by role; click a card for its effect), 展开路线 (the route list, then a player: previous / next / jump / arrow keys,
    a step bar starting with 起手 (the opening hand, step 0, no diff), the last step is the end summary), 起手速查 (per key card: the route(s) to take with its end interrupts, and "缺 X → route" lines; a click jumps to that route's player, step 0).
+   Card popup: any card (卡组一览, route boards, 起手速查) pops up its big art, both names, role and the three things when hovered (desktop) or tapped
+   (phone: a bottom sheet with 关上; Esc closes). One entry point: useCardPopup() gives { show(code, rect), hide, bind(code) }; show() takes a card code and a
+   DOMRect (or {left, top, right, bottom}) in the page's viewport coordinates and flips / clamps the popup inside the window, so another source (a frame) can use it too.
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
    The look is its own (design-r3): a true-black ground, #c8ff3d as the accent, grey text no darker than #bdbdbd,
    independent of the workspace's light / dark theme; usable at phone width. */
 import { ROUTES_AREA, SIDEBAR_NAV_AREA } from "@hermes/plugin-sdk";
-import { createElement as h, useState, useEffect } from "react";
+import { createElement as h, createContext, useContext, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 
 const TABS = ["卡组一览", "展开路线", "起手速查"];
 const ZONE_NAME = { main: "主卡组", extra: "额外卡组" };
@@ -41,7 +44,8 @@ function CardArt({ rest, code, md, className = "" }) {
 
 // ---- one card in the deck list: art, ×count, interrupt chip, Master Duel name, Japanese name ----
 function Tile({ rest, card, selected, onClick }) {
-  return h("button", { className: `yg-tile${selected ? " sel" : ""}`, onClick, "aria-label": card.md, "aria-pressed": selected },
+  const { bind } = useCardPopup();
+  return h("button", { ...bind(card.code, card.md, { tap: false }), className: `yg-tile${selected ? " sel" : ""}`, onClick, "aria-label": card.md, "aria-pressed": selected },
     h("span", { className: "yg-tile-art" },
       h(CardArt, { rest, code: card.code, md: card.md }),
       card.count > 1 ? h("span", { className: "yg-count" }, `×${card.count}`) : null,
@@ -52,11 +56,11 @@ function Tile({ rest, card, selected, onClick }) {
 }
 
 // ---- the card clicked: big art, both names, role, count, the three things, the opponent's turn ----
-function Detail({ rest, card, onClose }) {
-  if (!card) return h("aside", { className: "yg-detail empty", "aria-label": "卡的说明" }, h("p", { className: "yg-lab" }, "点一张卡看效果说明"));
+// the click panel and the popup share this body; onClose null = no 关上 button (the hover popup)
+function DetailBody({ rest, card, onClose }) {
   const fact = (label, text) => h("div", { className: "yg-fact" }, h("span", { className: "yg-lab" }, label), h("span", null, text));
-  return h("aside", { className: "yg-detail", "aria-label": "卡的说明" },
-    h("div", { className: "yg-detail-head" },
+  return [
+    h("div", { key: "head", className: "yg-detail-head" },
       h(CardArt, { rest, code: card.code, md: card.md, className: "yg-big" }),
       h("div", { className: "yg-col" },
         h("div", { className: "yg-title" }, card.md),
@@ -64,14 +68,68 @@ function Detail({ rest, card, onClose }) {
         h("div", { className: "yg-row wrap" },
           h("span", { className: "yg-chip on" }, card.role),
           h("span", { className: "yg-chip" }, `${ZONE_NAME[card.zone]} ×${card.count}`)),
-        h("button", { className: "yg-btn small yg-close", onClick: onClose, "aria-label": "关上" }, "× 关上"))),
-    h("div", { className: "yg-facts" },
+        onClose ? h("button", { className: "yg-btn small yg-close", onClick: onClose, "aria-label": "关上" }, "× 关上") : null)),
+    h("div", { key: "facts", className: "yg-facts" },
       fact("干什么", card.does),
       fact("条件代价", card.cost),
       fact("限制", card.limit),
       fact("对手回合", card.interrupts > 0 ? `终场时能打断 ${card.interrupts} 次：${card.interruptHow}`
-        : card.role === "手坑" ? "从手牌发动，不算终场的打断" : "终场时不提供打断")));
+        : card.role === "手坑" ? "从手牌发动，不算终场的打断" : "终场时不提供打断"))];
 }
+function Detail({ rest, card, onClose }) {
+  if (!card) return h("aside", { className: "yg-detail empty", "aria-label": "卡的说明" }, h("p", { className: "yg-lab" }, "点一张卡看效果说明"));
+  return h("aside", { className: "yg-detail", "aria-label": "卡的说明" }, h(DetailBody, { rest, card, onClose }));
+}
+
+// ---- card popup: hover (desktop) / tap (phone) on any card; one state in the app, one entry point show(code, rect) ----
+const CardPopupContext = createContext(null);
+const PHONE = "(max-width: 760px), (hover: none)";
+const isPhone = () => window.matchMedia(PHONE).matches;
+const EDGE = 8, GAP = 12;
+// where a w×h popup goes for a card at rect: right of it, else left, clamped inside the window; a window too narrow for either side clamps in place
+function placePopup(rect, w, hgt, vw, vh) {
+  let left = rect.right + GAP;
+  if (left + w > vw - EDGE) left = rect.left - GAP - w;
+  left = Math.max(EDGE, Math.min(left, vw - EDGE - w));
+  const top = Math.max(EDGE, Math.min(rect.top, vh - EDGE - hgt));
+  return { left, top };
+}
+function CardPopup({ rest, card, rect, onClose }) {
+  const ref = useRef(null);
+  const phone = isPhone();
+  const [pos, setPos] = useState(null);
+  useLayoutEffect(() => {
+    if (phone || !ref.current) return;
+    const box = ref.current.getBoundingClientRect();
+    setPos(placePopup(rect, box.width, box.height, window.innerWidth, window.innerHeight));
+  }, [phone, rect, card]);
+  const style = phone ? undefined : pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" };
+  return h("aside", { ref, className: `yg-pop${phone ? " phone" : ""}`, style, "aria-label": "卡的详情", "data-code": String(card.code) },
+    h(DetailBody, { rest, card, onClose: phone ? onClose : null }));
+}
+function CardPopupProvider({ rest, cards, children }) {
+  const [pop, setPop] = useState(null); // { code, rect } or null
+  const hide = useCallback(() => setPop(null), []);
+  const show = useCallback((code, rect) => setPop({ code, rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } }), []);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") hide(); };
+    const onScroll = () => { if (!isPhone()) hide(); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); };
+  }, [hide]);
+  // props for a card's element: hover on desktop, tap on a phone (tap: false = the element has its own click, as the deck tile does)
+  const bind = useCallback((code, md, { tap = true } = {}) => ({
+    "data-card-code": String(code), "data-card-md": md,
+    onMouseEnter: (e) => { if (!isPhone()) show(code, e.currentTarget.getBoundingClientRect()); },
+    onMouseLeave: () => { if (!isPhone()) hide(); },
+    ...(tap ? { onClick: (e) => { if (isPhone()) show(code, e.currentTarget.getBoundingClientRect()); } } : {}),
+  }), [show, hide]);
+  const api = useMemo(() => ({ show, hide, bind }), [show, hide, bind]);
+  const card = pop ? cards.find((c) => c.code === pop.code) : null;
+  return h(CardPopupContext.Provider, { value: api }, children, card ? h(CardPopup, { rest, card, rect: pop.rect, onClose: hide }) : null);
+}
+const useCardPopup = () => useContext(CardPopupContext);
 
 // ---- 卡组一览: the deck grouped by role, the clicked card's effect beside (below on a phone) ----
 function DeckView({ rest, deck }) {
@@ -101,7 +159,8 @@ const ZONE_LABEL = { hand: "手牌", monsters: "怪兽区", spellTraps: "魔陷�
 const BOARD_ZONES = ["monsters", "spellTraps", "hand", "grave", "banished"];
 
 function MiniCard({ rest, card, fresh, zone }) {
-  return h("div", { className: `yg-mini${fresh ? " fresh" : ""}`, title: card.jp, "data-fresh": fresh ? "true" : "false" },
+  const { bind } = useCardPopup();
+  return h("div", { ...bind(card.code, card.md), className: `yg-mini${fresh ? " fresh" : ""}`, "data-fresh": fresh ? "true" : "false" },
     h("span", { className: "yg-mini-art" },
       h(CardArt, { rest, code: card.code, md: card.md }),
       fresh ? h("span", { className: "yg-new" }, "新") : null,
@@ -224,13 +283,14 @@ function JumpButton({ route, onOpen, extra }) {
 
 function LookupView({ rest, loaded, onOpen }) {
   if (loaded.error) return h("div", { className: "yg-error", role: "alert" }, loaded.error);
+  const { bind } = useCardPopup();
   const lookup = loaded.data?.lookup;
   if (!lookup) return h("p", { className: "yg-lab" }, "读取速查…");
   return h("div", { className: "yg-lookup" },
     h("p", { className: "yg-lab yg-sum" }, "手里有哪张关键卡，就走哪条路线；缺某张卡时看「缺」那几行。点路线名，打开那条路线的逐步播放。每条路线都在规则引擎里重放过。"),
     lookup.map((e) => h("section", { key: e.card.code, className: "yg-key", "aria-label": e.card.md, "data-card-code": String(e.card.code) },
       h("div", { className: "yg-key-head" },
-        h("span", { className: "yg-route-art" }, h(CardArt, { rest, code: e.card.code, md: e.card.md })),
+        h("span", { className: "yg-route-art", ...bind(e.card.code, e.card.md) }, h(CardArt, { rest, code: e.card.code, md: e.card.md })),
         h("span", { className: "yg-col" },
           h("span", { className: "yg-title" }, e.card.md),
           h("span", { className: "yg-lab" }, e.card.jp),
@@ -244,7 +304,7 @@ function LookupView({ rest, loaded, onOpen }) {
           h("p", { className: "yg-lab" }, f.how)))) : null)));
 }
 
-function YugiohApp({ rest }) {
+function YugiohApp({ rest, setDeckCards }) {
   const [tab, setTab] = useState(TABS[0]);
   const [deck, setDeck] = useState(null);
   const [error, setError] = useState("");
@@ -256,7 +316,7 @@ function YugiohApp({ rest }) {
   }, [rest]);
   useEffect(() => {
     (async () => {
-      try { setDeck(await rest("/deck")); } catch (e) { setError(message(e)); }
+      try { const d = await rest("/deck"); setDeck(d); setDeckCards(d.cards); } catch (e) { setError(message(e)); }
       setReady(true);
     })();
   }, [rest]);
@@ -270,6 +330,10 @@ function YugiohApp({ rest }) {
       h("nav", { className: "yg-tabs" }, TABS.map((t) => h("button", { key: t, className: `yg-tab${tab === t ? " on" : ""}`, onClick: () => setTab(t) }, t)))),
     error ? h("div", { className: "yg-error", role: "alert" }, error) : null,
     main);
+}
+function YugiohRoot({ rest }) {
+  const [deckCards, setDeckCards] = useState([]);
+  return h(CardPopupProvider, { rest, cards: deckCards }, h(YugiohApp, { rest, setDeckCards }));
 }
 
 const CSS = `
@@ -317,6 +381,15 @@ const CSS = `
 .yg-title { font-size: 16px; font-weight: 600; line-height: 1.4; }
 .yg-facts { display: flex; flex-direction: column; font-size: 12px; line-height: 1.6; }
 .yg-fact { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid #1c1c1c; }
+.yg-pop { position: fixed; z-index: 50; width: 380px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; pointer-events: none;
+  border: 1px solid #c8ff3d; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: #000; box-shadow: 0 8px 28px rgba(0, 0, 0, .7);
+  font-family: "PingFang SC", "Noto Sans SC", system-ui, sans-serif; font-size: 13px; color: #ececec; }
+.yg-pop *, .yg-pop *::before { box-sizing: border-box; }
+.yg-pop button { font: inherit; color: inherit; cursor: pointer; }
+.yg-pop p { margin: 0; }
+.yg-pop .yg-big { width: 150px; height: 218px; }
+.yg-pop.phone { pointer-events: auto; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-width: none; max-height: 70vh; border-radius: 12px 12px 0 0; border-color: #3a3a3a; }
+.yg-pop.phone .yg-big { width: 96px; height: 140px; }
 .yg-routes { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
 .yg-route { display: flex; gap: 14px; align-items: flex-start; text-align: left; padding: 12px; border: 1px solid #2a2a2a; border-radius: 8px; background: #000; }
 .yg-route:hover { border-color: #c8ff3d; }
@@ -389,7 +462,7 @@ export default {
     ctx.onDispose(() => style.remove());
     const rest = (path, opts) => ctx.rest(path, opts);
     ctx.registerMany([
-      { id: "page", area: ROUTES_AREA, data: { path: "/yugioh" }, render: () => h(YugiohApp, { rest }) },
+      { id: "page", area: ROUTES_AREA, data: { path: "/yugioh" }, render: () => h(YugiohRoot, { rest }) },
       { id: "nav", area: SIDEBAR_NAV_AREA, data: { path: "/yugioh", label: "游戏王", codicon: "game" } },
     ]);
   },
