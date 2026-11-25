@@ -55,7 +55,7 @@ shot card --select "冰剑龙 镜翠幻种"
 has card "冰剑龙 镜翠幻种" "氷剣竜ミラジェイド" "终场" "额外卡组 ×1" "干什么" "条件代价" "限制" "对手回合" "终场时能打断 1 次：" "关上"
 lacks card "点一张卡看效果说明"
 shot card-none --select 白之落胤
-has card-none "白之落胤" "启动" "主卡组 ×2" "终场时不提供打断"
+has card-none "白之落胤" "启动" "主卡组 ×1" "终场时不提供打断"
 shot phone --mobile
 has phone "卡组一览" "启动" "白之落胤" "白き竜の落胤"
 # shellcheck disable=SC2086
