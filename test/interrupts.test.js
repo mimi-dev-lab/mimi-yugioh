@@ -64,7 +64,7 @@ describe('终场打断数按卡片条件算', () => {
     assert.equal(total(board({ spellTraps: [ID.fallen, ID.fallen], extra: [ID.ecclesiaDark, ID.albion] })), 1);
   });
 
-  test('冰剑龙和落胤与圣女抢额外卡组的卡：符合的少的先付，各挑标签最少的', () => {
+  test('冰剑龙和落胤与圣女抢额外卡组的卡：怪兽区的冰剑龙先付', () => {
     // 额外卡组只剩一只阿尔比昂：只够付一个
     assert.equal(total(board({ monsters: [ID.mirrorjade], spellTraps: [ID.fallen], extra: [ID.albion] })), 1);
     // 阿尔比昂给冰剑龙，黑衣龙之艾克利西亚给落胤与圣女

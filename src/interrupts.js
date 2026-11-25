@@ -13,7 +13,8 @@
 // 条件对象的键（同时写几个 = 都要满足）：field（自己怪兽区）、hand、handOrField、grave、extra，值是规格；anyOf: [条件对象…] 满足其一即可。
 // 数手牌和怪兽区时不算发动的这张卡自己。
 //
-// 资源分配：手牌发动的卡用掉它自己那张手牌；弃牌代价从剩下的手牌里出；送额外卡组的代价按「符合的卡少的先付」，挑标签最少的卡送。
+// 资源分配：手牌发动的卡用掉它自己那张手牌；弃牌代价从剩下的手牌里出；送额外卡组的代价按场上的先后付（怪兽区在魔陷区前）。
+// 烙印里会抢额外卡组的只有冰剑龙（怪兽区，要 albazFusion）和落胤与圣女（魔陷区，要 mentionsAlbaz，范围更大），这个先后已经是最优的；加了别的卡组再看要不要换成更聪明的分配。
 // 不模拟发动之后场面怎么变（例如烙印断罪让融合怪兽回额外卡组之后，别的卡的前提还在不在）：每张卡都对着终场判断。
 // 融合召唤用到的素材（赫之圣女 卡尔塔西亚）只查有没有，不从手牌里扣掉。
 
@@ -57,22 +58,19 @@ export function countInterrupts(deck, board) {
     used.set(c.code, n + 1);
     return true;
   });
-  // 3. 代价：手牌发动的卡占掉自己那张，其余手牌给弃牌代价；额外卡组的代价按符合的卡少的先付
+  // 3. 代价：手牌发动的卡占掉自己那张，其余手牌给弃牌代价；额外卡组的代价按场上的先后付
   const hand = zones.hand.filter((h) => !capped.some((s) => s.c === h));
   const extra = [...zones.extra];
-  const pool = (pay) => (pay.extra !== undefined ? extra.filter((e) => fits(deck, e.code, pay.extra)).length : hand.length);
-  const order = capped.filter((s) => s.card.pay).sort((a, b) => pool(a.card.pay) - pool(b.card.pay));
-  const paid = new Set(capped.filter((s) => !s.card.pay));
-  for (const s of order) {
-    const { discard, extra: spec } = s.card.pay;
+  const paid = new Set();
+  for (const s of capped) {
+    const { discard, extra: spec } = s.card.pay ?? {};
     if (discard !== undefined) {
       if (hand.length < discard) continue;
       hand.splice(0, discard);
-    } else {
-      const candidates = extra.filter((e) => fits(deck, e.code, spec));
-      if (!candidates.length) continue;
-      const pick = candidates.reduce((a, b) => ((deck.cards[b.code]?.tags ?? []).length < (deck.cards[a.code]?.tags ?? []).length ? b : a));
-      extra.splice(extra.indexOf(pick), 1);
+    } else if (spec !== undefined) {
+      const pick = extra.findIndex((e) => fits(deck, e.code, spec));
+      if (pick < 0) continue;
+      extra.splice(pick, 1);
     }
     paid.add(s);
   }
