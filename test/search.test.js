@@ -11,8 +11,9 @@ describe('最好场面搜索：上限按节点数，结果可复现', () => {
   let engine;
   before(async () => { engine = await openTestEngine(); });
 
-  test('场面值 = 10 × 终场在场各卡的打断数之和 + 剩余手牌数', () => {
-    const board = { hand: [{ code: 1 }, { code: 2 }], monsters: [{ code: 44146295 }, { code: 95515789 }], spellTraps: [{ code: 17751597 }], grave: [], banished: [] };
+  test('场面值 = 10 × 终场的打断数（按条件算）+ 剩余手牌数', () => {
+    // 冰剑龙（额外卡组有阿尔比昂可送）、卡尔塔西亚（额外卡组有赫焉龙，场上有光暗的冰剑龙）、烙印断罪（场上有冰剑龙）各 1
+    const board = { hand: [{ code: 1 }, { code: 2 }], monsters: [{ code: 44146295 }, { code: 95515789 }], spellTraps: [{ code: 17751597 }], grave: [], banished: [], extra: [{ code: 87746184 }, { code: 24915933 }] };
     assert.equal(boardValue(BRANDED, board), 10 * 3 + 2);
   });
 

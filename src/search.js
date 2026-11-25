@@ -3,6 +3,7 @@
 // 纯逻辑：会话、卡组、上限都由调用方传进来（见 AGENTS.md「边界」）。
 // 搜出的路线用 route.js 的语义回应写（{ idle, code }、{ chain }、{ pick }…），不用选项下标：下标随起手顺序和种子变。格式就是卡组数据里路线的 steps，playRoute 能重放。
 import { openHandSession } from './duel-session.js';
+import { countInterrupts } from './interrupts.js';
 import { indicesFor, labelFor, startsStep } from './route.js';
 
 export const INTERRUPT_VALUE = 10; // 终场每个打断的场面值
@@ -13,8 +14,8 @@ export const MAX_COMBOS = 4; // 一次选多张时最多试几种组合
 export const GUIDE_WINDOW = 6; // 照已知路线排先后时，往后看几个回应找能对上的
 export const MAX_RESPONSES = 250; // 一条路线最多这么多个回应
 
-// 场面值 = 10 × 终场在场各卡的打断数之和 + 1 × 剩余手牌数（DESIGN「卡组数据」：打断数不手写，由卡表算）
-export const interruptsOf = (deck, board) => [...board.monsters, ...board.spellTraps].reduce((sum, c) => sum + (deck.cards[c.code]?.interrupts ?? 0), 0);
+// 场面值 = 10 × 终场的打断数 + 1 × 剩余手牌数（打断数按卡组数据里的条件算，见 src/interrupts.js）
+export const interruptsOf = (deck, board) => countInterrupts(deck, board).total;
 export const boardValue = (deck, board) => INTERRUPT_VALUE * interruptsOf(deck, board) + HAND_VALUE * board.hand.length;
 
 // 场面的指纹：各区域的卡（不看顺序），置换表用它判断两个局面是不是同一个
