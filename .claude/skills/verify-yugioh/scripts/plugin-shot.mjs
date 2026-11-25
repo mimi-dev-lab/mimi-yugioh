@@ -40,14 +40,17 @@ async function main() {
   await new Promise((r) => { ws.onopen = r; });
   let id = 0;
   const pending = new Map();
+  const cdpRequests = []; // 这个标签页和它的子框架（路线动画的框架）发的每一个请求：[网址, 来自哪个会话]
   ws.onmessage = (m) => {
     const d = JSON.parse(m.data);
-    if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); }
+    if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); return; }
+    if (d.method === 'Network.requestWillBeSent') cdpRequests.push([d.params.request.url, d.sessionId ? 'child' : 'page']);
+    if (d.method === 'Target.attachedToTarget') send('Network.enable', {}, d.params.sessionId).catch(() => {});
   };
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
+  const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
     const i = ++id;
     pending.set(i, (d) => (d.error ? reject(new Error(`${method}: ${d.error.message}`)) : resolve(d.result)));
-    ws.send(JSON.stringify({ id: i, method, params }));
+    ws.send(JSON.stringify({ id: i, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
   const evaluate = async (fn, arg) => {
     const r = await send('Runtime.evaluate', { expression: `(${fn})(${JSON.stringify(arg ?? null)})`, awaitPromise: true, returnByValue: true });
@@ -72,6 +75,7 @@ async function main() {
 
   await send('Page.enable');
   await send('Network.enable');
+  await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   // --design：设计稿的 1280×860；--mobile：手机宽（390×844，按手机模拟）；都不给：1600 宽的桌面
 const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } : opts.design ? { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false } : { width: 1600, height: 900, deviceScaleFactor: 1, mobile: false };
@@ -97,6 +101,7 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     return true;
   }, null, 120000, '侧栏出现「游戏王」（网页工作区连上了后端）');
 
+  cdpRequests.length = 0; // 从这里起的请求才算插件和它的动画框架发的
   // 页面的根是 .yg；画完 = data-ready 为真（卡组一览问过了）
   const drawn = () => until(() => { const x = document.querySelector('.yg'); return !!x && x.dataset.ready === 'true'; }, null, 60000, '游戏王页面画出来');
   await drawn();
@@ -139,6 +144,9 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     if (!opened) await fail(new Error(`路线列表里没有「${opts.route}」`));
     await until(() => !!document.querySelector('.yg-player'), null, 60000, '播放页出来').catch(fail);
   }
+  // 播放页的动画框架就绪（路线动画页装好、播放器 ready）才算打开
+  if (opts.route || opts.jump) await until(() => document.querySelector('.yg-player')?.dataset.ready === 'true', null, 120000, '路线动画就绪').catch(fail);
+  const idle = (ms = 60000) => until(() => document.querySelector('.yg-player').dataset.mode === 'idle', null, ms, '动画播完停住');
   if (opts.step) {
     if (!opts.route && !opts.jump) throw new Error('--step 要和 --route 或 --jump 一起用');
     const total = await evaluate(() => Number(document.querySelector('.yg-player').dataset.total));
@@ -151,22 +159,63 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
         for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39 });
       } else if (!(await clickButton('下一步'))) await fail(new Error(`第 ${now} 步上点不了「下一步」`));
       await until((n) => Number(document.querySelector('.yg-player').dataset.step) > n, now, 10000, `翻到第 ${now + 1} 步`).catch(fail);
+      await idle().catch(fail); // 下一步：播这一步的动画，播完停住
     }
   }
+  // --click-step N：点步号条上的第 N 步（跳到那一步的结束帧，不播）；--play-all：点「连播」，等它播到终场停住，记下用了多久
+  if (opts.clickStep !== undefined && opts.clickStep !== null) {
+    const label = opts.clickStep === '起手' ? '起手' : `第 ${opts.clickStep} 步`;
+    if (!(await clickButton(label))) await fail(new Error(`步号条上没有「${label}」`));
+    await until((n) => Number(document.querySelector('.yg-player').dataset.step) === n, opts.clickStep === '起手' ? 0 : Number(opts.clickStep), 10000, `跳到${label}`).catch(fail);
+    await idle(10000).catch(fail);
+  }
+  let playedMs = null;
+  if (opts.playAll) {
+    const t = Date.now();
+    if (!(await clickButton('连播'))) await fail(new Error('点不了「连播」'));
+    await until(() => document.querySelector('.yg-player').dataset.mode === 'auto', null, 10000, '开始连播').catch(fail);
+    await until(() => { const p = document.querySelector('.yg-player'); return p.dataset.mode === 'idle' && p.dataset.step === p.dataset.total; }, null, 240000, '连播到终场').catch(fail);
+    playedMs = Date.now() - t;
+  }
+  // --stage-at K:比例：把动画跳到第 K 步（0 = 起手）动画的这个比例处停住（取中间帧用）
+  if (opts.stageAt) {
+    const [k, frac] = opts.stageAt.split(':').map(Number);
+    await evaluate(() => document.querySelector('.yg-stage').scrollIntoView({ block: 'start' }));
+    await evaluate(({ k, frac }) => {
+      const st = document.querySelector('.yg-stage'); const a = st.dataset.starts.split(',').map(Number); const e = st.dataset.ends.split(',').map(Number);
+      st.querySelector('iframe').contentWindow.postMessage({ src: 'yg-host', cmd: 'seek', t: a[k] + (e[k] - a[k]) * frac }, '*');
+    }, { k, frac });
+    await sleep(1800);
+  }
   // 卡片弹窗：--hover 卡名（桌面：鼠标移到那张卡上）或 --tap 卡名（手机：触摸点一下），范围 --within CSS（默认整页）；等弹窗 .yg-pop 出这张卡
-  const aim = opts.hover ?? opts.tap;
+  const aim = opts.hover ?? opts.tap ?? opts.hoverAnim ?? opts.tapAnim;
+  const tapping = opts.tap ?? opts.tapAnim;
   let pop = null;
   if (aim) {
-    const at = await evaluate(({ name, within }) => {
+    // --hover-anim / --tap-anim 卡名：向动画框架要「现在看得见的每张卡在哪」（yg-rects），再用真鼠标 / 真触摸点过去，走完整条悬停链路
+    const animAt = async (name) => {
+      await evaluate(() => document.querySelector('.yg-stage').scrollIntoView({ block: 'start' }));
+      await sleep(400);
+      const cards = await evaluate(() => new Promise((resolve) => {
+        const on = (e) => { if (e.data && e.data.type === 'yg-rects') { removeEventListener('message', on); resolve(e.data.cards); } };
+        addEventListener('message', on);
+        document.querySelector('.yg-stage iframe').contentWindow.postMessage({ src: 'yg-host', cmd: 'rects' }, '*');
+        setTimeout(() => resolve(null), 8000);
+      }));
+      const c = cards?.find((x) => x.md === name);
+      const f = await evaluate(() => { const r = document.querySelector('.yg-stage iframe').getBoundingClientRect(); return { x: r.left, y: r.top }; }); // 框架在页面里的位置
+      return c ? { x: f.x + c.rect.x + c.rect.w / 2, y: f.y + c.rect.y + c.rect.h / 2 } : null;
+    };
+    const at = await (opts.hoverAnim || opts.tapAnim ? animAt(aim) : evaluate(({ name, within }) => {
       const root = document.querySelector(within || '.yg');
       const el = [...(root?.querySelectorAll('[data-card-code]') ?? [])].find((x) => x.dataset.cardMd === name);
       if (!el) return null;
       el.scrollIntoView({ block: 'center' });
       const r = el.getBoundingClientRect();
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-    }, { name: aim, within: opts.within }).then((v) => v ?? fail(new Error(`页面上没有卡「${aim}」（范围 ${opts.within ?? '.yg'}）`)));
+    }, { name: aim, within: opts.within })).then((v) => v ?? fail(new Error(`页面上没有卡「${aim}」（范围 ${opts.within ?? '.yg'}）`)));
     await sleep(300);
-    if (opts.tap) {
+    if (tapping) {
       await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y }] });
       await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     } else {
@@ -209,7 +258,10 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
   const urls = all.filter(([, after]) => after).map(([u]) => u);
   const foreign = urls.filter((u) => !u.startsWith(`${opts.base}/`));
   const hostLoad = all.filter(([u, after]) => !after && !u.startsWith(`${opts.base}/`)).map(([u]) => u);
-  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, pop, closed, requests: urls.length, foreign, hostLoad, urls }, null, 1));
+  const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
+  const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
+  if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
+  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, pop, closed, requests: urls.length, foreign, hostLoad, urls, cdp, playedMs }, null, 1));
   // 并排对照：设计稿 PNG 在左、这张在右，用 data: 地址在一个页面里拼好再截一张
   if (opts.compare) {
     const design = (await readFile(opts.compare)).toString('base64');

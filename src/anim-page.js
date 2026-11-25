@@ -22,7 +22,7 @@ export function buildGuestHtml({ player, composition, stage }) {
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="${CSP}">
 <style>*{margin:0}html,body{width:100%;height:100%;background:#000;overflow:hidden}hyperframes-player{display:block;width:100%;height:100%}</style></head>
-<body><hyperframes-player id="pl" interactive disable-click-to-play muted></hyperframes-player>
+<body><hyperframes-player id="pl" interactive disable-click-to-play muted assets-loading-ui="none"></hyperframes-player>
 <script>${inlineJs(player)}</script>
 <script>(function () {
   var W = ${stage.w}, pl = document.getElementById('pl'), raf = 0;

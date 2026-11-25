@@ -67,10 +67,10 @@ shot routes --tab 展开路线
 has routes "基本展开｜白之落胤初动" "基本展开｜烙印融合初动" "需要的起手卡" "终场打断 2" "终场打断 1" "来源 Game8（2026-11-20 版）" "引擎验证于 2026-11-24"
 lacks routes "还没做"
 shot route-start --route white-albaz
-has route-start "起手" "起手 · 共 17 步" "手牌" "怪兽区" "来源 Game8"
+has route-start "起手" "起手 · 共 17 步" "上一步" "下一步" "连播" "墓地 0 张" "来源 Game8"
 lacks route-start "花了什么" "发动了" "终场汇总"
 shot route-first --route white-albaz --step 1
-has route-first "第 1 / 17 步" "上一步" "下一步" "发动了 白之落胤" "花了什么" "换来什么" "怪兽区" "魔陷区" "手牌" "墓地" "除外" "来源 Game8" "页面版本 2026-11-20" "引擎验证于 2026-11-24"
+has route-first "第 1 / 17 步" "上一步" "下一步" "连播" "发动了 白之落胤" "花了什么" "换来什么" "怪兽区" "手牌" "墓地 1 张" "除外 0 张" "来源 Game8" "页面版本 2026-11-20" "引擎验证于 2026-11-24"
 lacks route-first "终场汇总"
 shot route-mid --route white-albaz --step 9
 has route-mid "第 9 / 17 步"
@@ -117,22 +117,37 @@ popup() {
 shot hover-deck --hover "冰剑龙 镜翠幻种" --close
 popup hover-deck close
 grep -q '"text": ".*氷剣竜ミラジェイド.*干什么.*对手回合.*终场时能打断 1 次' "$ev/hover-deck.json" || { echo "hover-deck 的弹窗里缺日文名、干什么或对手回合，见 $ev/hover-deck.json"; exit 1; }
-shot hover-route --route white-albaz --hover 白之落胤 --within .yg-board --close
+shot hover-route --route white-albaz --step 1 --hover-anim 白之落胤 --close
 popup hover-route close
 shot hover-lookup --tab 起手速查 --hover 白之落胤 --within .yg-lookup --close
 popup hover-lookup close
 shot hover-end --route white-albaz --step last --hover "冰剑龙 镜翠幻种" --within .yg-end --close
 popup hover-end close
-shot tap-route --mobile --route white-albaz --tap 白之落胤 --within .yg-board --close
-popup tap-route close
+shot tap-route --mobile --route white-albaz --step 1 --tap-anim 白之落胤
+popup tap-route
 grep -qF "× 关上" "$ev/tap-route.json" || { echo "tap-route 的弹窗里没有「× 关上」，见 $ev/tap-route.json"; exit 1; }
 shot tap-deck --mobile --tab 起手速查 --tap 白之落胤 --within .yg-lookup --close
 popup tap-deck close
-for name in hover-deck hover-route hover-lookup hover-end tap-route tap-deck; do
+# 路线动画：下一步播完停住；点步号跳到那一步的结束帧；连播到终场；动画中间帧；只有本地请求（动画框架里也不联网）
+shot anim-mid --route white-albaz --stage-at 3:0.4
+has anim-mid "起手 · 共 17 步"
+shot anim-jump --route white-albaz --step 3 --click-step 9
+has anim-jump "第 9 / 17 步" "发动了 烙印开幕"
+lacks anim-jump "终场汇总"
+shot anim-back --route white-albaz --step 3 --click-step 起手
+has anim-back "起手 · 共 17 步"
+shot anim-auto --route branded-fusion --play-all
+has anim-auto "第 10 / 10 步 · 终场" "终场汇总" "对手回合能打断 1 次"
+shot anim-phone-auto --mobile --route branded-fusion --step 2 --click-step 10
+has anim-phone-auto "终场汇总"
+for name in hover-deck hover-route anim-mid anim-jump anim-back anim-auto anim-phone-auto hover-lookup hover-end tap-route tap-deck; do
   grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
+done
+for name in tap-route anim-mid anim-jump anim-back anim-auto anim-phone-auto hover-route; do
+  node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!j.cdp || j.cdp.foreign.length || j.cdp.total < 1) { console.error(JSON.stringify(j.cdp)); process.exit(1); }' "$ev/$name.json" || { echo "$name 的网络记录里有非本地请求，或没记到请求，见 $ev/$name.json"; exit 1; }
 done
 for name in deck card phone phone-card routes route-start route-first route-mid route-end route-fusion-end route-phone-start route-phone route-phone-end quick quick-phone quick-jump quick-jump-end quick-jump-phone; do
   grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
 done
 status=0
-echo "游戏王插件在网页工作区里画出来了：卡组一览按作用分组（简中名、日文名、张数、打断数），点卡出效果说明和对手回合怎么打断，桌面宽和手机宽都能用；展开路线列表和逐步播放（起手、第 1 步、中间一步、终场汇总，桌面宽和手机宽）；起手速查按关键卡列出路线和缺卡改走哪条，点一条跳到它的播放页；没有旧功能的字样"
+echo "游戏王插件在网页工作区里画出来了：卡组一览按作用分组（简中名、日文名、张数、打断数），点卡出效果说明和对手回合怎么打断，桌面宽和手机宽都能用；展开路线列表和逐步播放（起手、第 1 步、中间一步、终场汇总，桌面宽和手机宽），路线动画（下一步播完停住、点步号跳、连播到终场、中间帧、动画里悬停和点卡、动画框里没有非本地请求）；起手速查按关键卡列出路线和缺卡改走哪条，点一条跳到它的播放页；没有旧功能的字样"

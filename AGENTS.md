@@ -26,7 +26,7 @@
 - 插件（`plugin/`）只做外壳（机械：plugin、plugin-loads、plugin-smoke）：后端 `plugin/dashboard/plugin_api.py` 只把请求转给 `YUGIOH_URL`（只许本机）的服务，不算数、不读数据、不起子进程；页面 `plugin/webapp/plugin.js` 只 import 网页工作区给的 SDK 和 React，只经 `ctx.rest` 调本插件的后端，不引外部字体图片，不显示百分比、场面估值、「还差」（教程没有评分）。新接口要在后端加一条转发的路径，网关重启后才生效。
 
 **边界只在少数文件**（机械：boundary）
-- 环境变量、「现在」（`Date.now()`、`new Date()`）、开服务只在 `src/server.js`；读卡库和脚本（`node:fs`、`node:sqlite`）只在 `src/engine-files.js`；读写数据目录（含卡图 `images/`）只在 `src/store.js`；服务里哪个文件都不起子进程、不往外发请求。别的 `src/` 模块是纯函数或只接收注入的读取函数，「现在」、路径、卡库都作为参数传进去，测试因此能用临时目录和固定种子。回头看：要加新的外部来源时，在这张表里加一个文件，不是放宽规则。
+- 环境变量、「现在」（`Date.now()`、`new Date()`）、开服务只在 `src/server.js`；读卡库和脚本（`node:fs`、`node:sqlite`）只在 `src/engine-files.js`；读写数据目录（含卡图 `images/`）只在 `src/store.js`；读 `vendor/`（第三方的 HyperFrames 播放器和运行时，原样放着）只在 `src/vendor-files.js`；服务里哪个文件都不起子进程、不往外发请求。别的 `src/` 模块是纯函数或只接收注入的读取函数，「现在」、路径、卡库都作为参数传进去，测试因此能用临时目录和固定种子。回头看：要加新的外部来源时，在这张表里加一个文件，不是放宽规则。
 
 **禁用的写法**
 - 依赖（机械：deps-whitelist）：`package.json` 的 dependencies 只有 `ocgcore-wasm`（规则引擎；记卡的 `ts-fsrs` 随记卡在 #28 删掉）；没有 devDependencies、不加构建；旧应用（Next.js / Supabase / Cloudflare）的包和文件不许回来。

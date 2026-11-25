@@ -15,7 +15,7 @@
    fonts, images or requests.
    The look is its own (design-r3): a true-black ground, #c8ff3d as the accent, grey text no darker than #bdbdbd,
    independent of the workspace's light / dark theme; usable at phone width. */
-import { ROUTES_AREA, SIDEBAR_NAV_AREA } from "@hermes/plugin-sdk";
+import { ROUTES_AREA, SIDEBAR_NAV_AREA, SandboxedFrame } from "@hermes/plugin-sdk";
 import { createElement as h, createContext, useContext, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 
 const TABS = ["卡组一览", "展开路线", "起手速查"];
@@ -195,35 +195,116 @@ function EndSummary({ rest, end }) {
     h(ZoneRow, { rest, label: "剩余手牌", cards: end.hand, zone: "hand" }));
 }
 
-// position 0 is 起手 (the opening hand, nothing spent yet); positions 1..total are the route's steps
+// position 0 is 起手 (the opening hand, nothing spent yet); positions 1..total are the route's steps.
+// The board is the route animation: a HyperFrames page inside the SDK's SandboxedFrame (src/anim-page.js builds it; the message protocol is listed there).
+// 下一步 plays the next step and stops; 上一步 and a step number jump to that step's end frame (no reverse play); 连播 plays on to the end; ← / → keys do the
+// same as the buttons (the frame forwards the keys when it has focus). Hovering a card in the frame opens the card popup (a tap on a phone).
+function Stage({ anim, frameRef, error }) {
+  const marks = anim ? { "data-starts": anim.starts.join(","), "data-ends": anim.ends.join(",") } : {};
+  return h("div", { className: "yg-stage", "aria-label": "路线动画", ...marks },
+    error ? h("div", { className: "yg-error", role: "alert" }, error)
+      : anim ? h(SandboxedFrame, { ref: frameRef, src: anim.src, title: "路线动画", className: "yg-frame" })
+        : h("p", { className: "yg-lab yg-stage-wait" }, "读取动画…"));
+}
+
 function Player({ rest, id, onBack }) {
+  const popup = useCardPopup();
   const [route, setRoute] = useState(null);
+  const [anim, setAnim] = useState(null);
   const [error, setError] = useState("");
-  const [index, setIndex] = useState(0);
+  const [animError, setAnimError] = useState("");
+  const [view, setView] = useState({ index: 0, mode: "idle", ready: false }); // mode: idle | step (one step playing) | auto (连播)
+  const S = useRef({ index: 0, mode: "idle", ready: false, t: 0, mid: false }); // the same state for the message handlers (mid: paused part-way through a step)
+  const frameRef = useRef(null);
+  const ctl = useRef(null);
+  const commit = (patch) => { Object.assign(S.current, patch); setView({ index: S.current.index, mode: S.current.mode, ready: S.current.ready }); };
   useEffect(() => {
     let live = true;
-    setRoute(null); setIndex(0); setError("");
+    setRoute(null); setAnim(null); setError(""); setAnimError(""); S.current = { index: 0, mode: "idle", ready: false, t: 0, mid: false }; setView({ index: 0, mode: "idle", ready: false });
     rest(`/route?id=${id}`).then((r) => { if (live) setRoute(r); }).catch((e) => { if (live) setError(message(e)); });
+    rest(`/route-anim?id=${id}`).then((a) => { if (live) setAnim(a); }).catch((e) => { if (live) setAnimError(message(e)); });
     return () => { live = false; };
   }, [rest, id]);
   const total = route?.steps.length ?? 0;
+
+  const post = (m) => frameRef.current?.contentWindow?.postMessage({ src: "yg-host", ...m }, "*");
+  const segAt = (t) => { let k = 0; anim.starts.forEach((s, i) => { if (s <= t + 0.001) k = i; }); return k; };
+  const jump = (k) => {
+    if (!S.current.ready) return;
+    k = Math.max(0, Math.min(total, k));
+    popup.hide();
+    post({ cmd: "seek", t: anim.ends[k] });
+    commit({ index: k, mode: "idle", mid: false });
+  };
+  const playStep = () => {
+    const from = S.current.index;
+    popup.hide();
+    post({ cmd: "playRange", from: anim.ends[from], to: anim.ends[from + 1] });
+    commit({ index: from + 1, mode: "step", mid: false });
+  };
+  const next = () => {
+    if (!S.current.ready) return;
+    if (S.current.mode !== "idle") jump(segAt(S.current.t));
+    else if (S.current.index < total) playStep();
+  };
+  const prev = () => {
+    if (!S.current.ready) return;
+    if (S.current.mode !== "idle") jump(segAt(S.current.t) - 1);
+    else jump(S.current.index - 1);
+  };
+  const auto = () => {
+    if (!S.current.ready) return;
+    popup.hide();
+    if (S.current.mode === "auto") { post({ cmd: "pause" }); commit({ mode: "idle", index: segAt(S.current.t), mid: true }); return; }
+    if (S.current.mode === "step") post({ cmd: "pause" });
+    let from = S.current.index >= total ? 0 : S.current.index === 0 ? 0 : anim.ends[S.current.index];
+    if (S.current.mid && S.current.t > anim.starts[S.current.index] && S.current.t < anim.ends[S.current.index]) from = S.current.t;
+    post({ cmd: "playRange", from, to: anim.ends[total] });
+    commit({ mode: "auto", mid: false, ...(S.current.index >= total ? { index: 0 } : {}) });
+  };
+  ctl.current = { next, prev, jump, auto, segAt, anim, total };
+
   useEffect(() => {
     const onKey = (e) => {
-      if (total === 0 || e.target?.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? "")) return;
-      if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
-      if (e.key === "ArrowRight") setIndex((i) => Math.min(total, i + 1));
+      if (!ctl.current.anim || e.target?.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? "")) return;
+      if (e.key === "ArrowLeft") ctl.current.prev();
+      if (e.key === "ArrowRight") ctl.current.next();
+    };
+    const onMessage = (e) => {
+      const frame = frameRef.current;
+      const d = e.data;
+      if (!frame || e.source !== frame.contentWindow || !d || typeof d.type !== "string") return;
+      const c = ctl.current;
+      if (d.type === "yg-ready") { commit({ ready: true }); post({ cmd: "seek", t: c.anim.ends[S.current.index] }); }
+      else if (d.type === "yg-time") {
+        S.current.t = d.t;
+        if (S.current.mode !== "idle") { const k = c.segAt(d.t); if (k !== S.current.index) commit({ index: k }); }
+      } else if (d.type === "yg-ended") commit({ mode: "idle", index: c.segAt(d.t), mid: false });
+      else if (d.type === "yg-error") setAnimError(`动画出错：${d.detail}`);
+      else if (d.type === "yg-key") { if (d.key === "ArrowLeft") c.prev(); if (d.key === "ArrowRight") c.next(); }
+      else if (d.type === "yg-card-hover" || d.type === "yg-card-tap" || d.type === "yg-card-leave") {
+        if (d.type === "yg-card-leave") { if (!isPhone()) popup.hide(); return; }
+        if (d.type === "yg-card-hover" === isPhone()) return; // hover on a desktop, a tap on a phone
+        const f = frame.getBoundingClientRect();
+        popup.show(d.code, { left: f.left + d.rect.x, top: f.top + d.rect.y, right: f.left + d.rect.x + d.rect.w, bottom: f.top + d.rect.y + d.rect.h });
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [total]);
+    window.addEventListener("message", onMessage);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("message", onMessage); };
+  }, [popup]);
+
   if (error) return h("div", { className: "yg-error", role: "alert" }, error);
   if (!route) return h("p", { className: "yg-lab" }, "读取路线…");
+  const { index, mode } = view;
   const opening = index === 0;
   const step = opening ? null : route.steps[index - 1];
   const board = opening ? route.start : step.board;
   const last = index === total;
+  const playing = mode !== "idle";
   const mismatch = [route.mismatch, ...route.engineDiff.map((d) => `引擎重放和教程写的终场不一致：${d}`)].filter(Boolean);
-  return h("div", { className: "yg-player", "data-step": String(index), "data-total": String(total) },
+  const pile = (label, cards) => h("p", { className: "yg-pile" }, h("span", { className: "yg-lab" }, `${label} ${cards.length} 张：`), cards.length ? cards.map((c) => c.md).join("、") : "没有");
+  return h("div", { className: "yg-player", "data-step": String(index), "data-total": String(total), "data-mode": mode, "data-ready": String(view.ready) },
     h("div", { className: "yg-row wrap" },
       h("button", { className: "yg-btn small", onClick: onBack }, "← 路线列表"),
       h("h2", { className: "yg-route-title" }, route.name)),
@@ -232,23 +313,26 @@ function Player({ rest, id, onBack }) {
       ` · 页面版本 ${route.source.date} · 引擎验证于 ${route.verified}`),
     mismatch.length ? h("div", { className: "yg-mismatch", role: "alert" }, h("strong", null, "教程和引擎不一致"), mismatch.map((m, i) => h("p", { key: i }, m))) : null,
     h("div", { className: "yg-stepbar", role: "group", "aria-label": "跳到某一步" },
-      h("button", { className: `yg-stepno${opening ? " on" : ""}`, onClick: () => setIndex(0), "aria-label": "起手", "aria-current": opening ? "step" : undefined }, "起手"),
-      route.steps.map((s, i) => h("button", { key: s.n, className: `yg-stepno${i + 1 === index ? " on" : ""}`, onClick: () => setIndex(i + 1), "aria-label": `第 ${s.n} 步`, "aria-current": i + 1 === index ? "step" : undefined }, String(s.n)))),
+      h("button", { className: `yg-stepno${opening ? " on" : ""}`, onClick: () => jump(0), "aria-label": "起手", "aria-current": opening ? "step" : undefined }, "起手"),
+      route.steps.map((s, i) => h("button", { key: s.n, className: `yg-stepno${i + 1 === index ? " on" : ""}`, onClick: () => jump(i + 1), "aria-label": `第 ${s.n} 步`, "aria-current": i + 1 === index ? "step" : undefined }, String(s.n)))),
     h("div", { className: "yg-nav" },
-      h("button", { className: "yg-btn", disabled: opening, onClick: () => setIndex(index - 1) }, "上一步"),
-      h("span", { className: "yg-lab yg-pos" }, opening ? `起手 · 共 ${total} 步` : `第 ${index} / ${total} 步${last ? " · 终场" : ""}`),
-      h("button", { className: "yg-btn", disabled: last, onClick: () => setIndex(index + 1) }, "下一步")),
-    h("section", { className: "yg-step", "aria-label": opening ? "起手" : "这一步" },
-      opening ? h("p", { className: "yg-step-text" }, "起手：先看这副手牌，往后每一步都和上一步比")
-        : [
-          h("p", { key: "text", className: "yg-step-text" }, step.text),
-          step.activated.length ? h("p", { key: "act" }, h("span", { className: "yg-lab" }, "发动了 "), step.activated.map((c) => c.md).join("、")) : null,
-          step.actions.length ? h("p", { key: "acts", className: "yg-lab" }, `引擎里的操作：${step.actions.join(" · ")}`) : null,
-          h(Trade, { key: "trade", diff: step.diff }),
-        ]),
-    h("div", { className: "yg-board", "aria-label": "完整场面" },
-      BOARD_ZONES.map((zone) => h(ZoneRow, { key: zone, rest, label: ZONE_LABEL[zone], cards: board[zone], zone }))),
-    last ? h(EndSummary, { rest, end: route.end }) : null);
+      h("button", { className: "yg-btn", disabled: !view.ready || (opening && !playing), onClick: prev }, "上一步"),
+      h("button", { className: "yg-btn", disabled: !view.ready || (last && !playing), onClick: next }, "下一步"),
+      h("button", { className: `yg-btn${mode === "auto" ? " on" : ""}`, disabled: !view.ready, onClick: auto }, mode === "auto" ? "暂停" : "连播"),
+      h("span", { className: "yg-lab yg-pos" }, opening ? `起手 · 共 ${total} 步` : `第 ${index} / ${total} 步${last ? " · 终场" : ""}`)),
+    h("div", { className: "yg-play" },
+      h(Stage, { anim, frameRef, error: animError }),
+      h("div", { className: "yg-play-side" },
+        h("section", { className: "yg-step", "aria-label": opening ? "起手" : "这一步" },
+          opening ? h("p", { className: "yg-step-text" }, "起手：先看这副手牌，往后每一步都和上一步比")
+            : [
+              h("p", { key: "text", className: "yg-step-text" }, step.text),
+              step.activated.length ? h("p", { key: "act" }, h("span", { className: "yg-lab" }, "发动了 "), step.activated.map((c) => c.md).join("、")) : null,
+              step.actions.length ? h("p", { key: "acts", className: "yg-lab" }, `引擎里的操作：${step.actions.join(" · ")}`) : null,
+              h(Trade, { key: "trade", diff: step.diff }),
+            ]),
+        h("div", { className: "yg-piles", "aria-label": "墓地和除外" }, pile("墓地", board.grave), pile("除外", board.banished)))),
+    last && !playing ? h(EndSummary, { rest, end: route.end }) : null);
 }
 
 // `loaded` is the shared GET /routes result: { data, error } (data null until it arrives)
@@ -418,7 +502,17 @@ const CSS = `
 .yg-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .yg-trade-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .yg-arrow { color: #c8ff3d; font-size: 20px; padding-top: 18px; }
-.yg-board, .yg-end { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.yg-player { container-type: inline-size; }
+.yg-play { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+@container (min-width: 1040px) { .yg-play { grid-template-columns: minmax(0, 700px) minmax(0, 1fr); align-items: start; } }
+.yg-stage { position: relative; width: 100%; max-width: 800px; aspect-ratio: 800 / 700; background: #000; border: 1px solid #1f1f1f; border-radius: 8px; overflow: hidden; }
+.yg-stage .yg-frame { width: 100%; height: 100%; border: 0; display: block; }
+.yg-stage-wait { padding: 16px; }
+.yg-play-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.yg-piles { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.6; }
+.yg-piles p { margin: 0; }
+.yg-btn.on { background: #c8ff3d; color: #000; border-color: #c8ff3d; }
+.yg-end { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .yg-zone { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid #1c1c1c; min-width: 0; }
 .yg-zone-lab { display: flex; gap: 10px; align-items: baseline; }
 .yg-minis { display: flex; flex-wrap: wrap; gap: 10px; }

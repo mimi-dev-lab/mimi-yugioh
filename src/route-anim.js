@@ -295,7 +295,7 @@ export function planRoute(route) {
   function addSegment(label, build) {
     const start = clock;
     const { end, moves } = build(start);
-    const dur = Math.max(end - start + 0.55, 1.6);
+    const dur = Math.max(end - start + 0.85, 1.6);
     clock = q(start + dur);
     segments.push({ label, start: q(start), dur: q(dur), mark: q(start + dur - 0.05), end: q(start + dur) });
     planned.push(moves);

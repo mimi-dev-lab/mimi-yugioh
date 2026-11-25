@@ -105,10 +105,10 @@ describe('路线动画生成器：每条路线每一步的动作和引擎一致'
     }
   });
 
-  test('每步的动作都落在这一步里：这一步的轨道不早于它的开始，结束帧时都已停稳', () => {
+  test('每步的动作都落在这一步里：所有卡和特效的轨道都在这一步的结束帧之前停稳（特效没有拖到下一帧）', () => {
     const plan = plans.get(WHITE_ALBAZ);
     for (const [id, props] of Object.entries(plan.tracks)) {
-      if (!/^c\d+$/.test(id)) continue;
+      
       for (const segs of Object.values(props)) for (const [t0, t1] of segs) {
         const seg = plan.segments.find((s) => t0 >= s.start && t0 < s.end);
         assert.ok(seg && t1 <= seg.mark, `${id} 的一段 ${t0}–${t1} 跨过了结束帧`);

@@ -55,7 +55,8 @@ describe('路线动画页：本地、不联网', () => {
   test('外壳页处理插件页的命令（seek、playRange、pause、rects），把合成页的悬停、点击、左右键转给插件页', () => {
     const html = buildGuestHtml({ player: '', composition: '', stage: { w: 800, h: 700 } });
     for (const needle of ["'seek'", "'playRange'", "'pause'", "'rects'", 'card-hover|card-leave|card-tap|key|rects', 'yg-ended', 'yg-ready']) assert.ok(html.includes(needle), needle);
-    assert.ok(html.includes('interactive')); // 没有 interactive，播放器会把鼠标事件吃掉，悬停就没了
+    assert.ok(html.includes('interactive'));
+    assert.ok(html.includes('assets-loading-ui="none"')); // 不然卡图还在解码时播放器盖一层模糊的加载牌 // 没有 interactive，播放器会把鼠标事件吃掉，悬停就没了
   });
 });
 
