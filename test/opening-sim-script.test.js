@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, truncateSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
@@ -87,5 +87,50 @@ describe('scripts/opening-sim.js：固定种子、中途停下能续', () => {
   test('坏的参数：--count 不是正整数、--shard 写错，报错退出', () => {
     assert.notEqual(sim(newOut(), '--count', '0').status, 0);
     assert.notEqual(sim(newOut(), '--count', '2', '--shard', '2/2').status, 0);
+  });
+});
+
+describe('scripts/opening-replay.js：把记录里的步骤在引擎里重放，和记录对照', () => {
+  const REPLAY = fileURLToPath(new URL('../scripts/opening-replay.js', import.meta.url));
+  const replay = (file, ...args) => spawnSync(process.execPath, [REPLAY, '--engine', ENGINE_DIR, '--file', file, ...args], { encoding: 'utf8' });
+
+  test('按 --index 或 --seed 找到那一手，重放出和记录一致的场面值，退出码 0', () => {
+    const out = newOut();
+    assert.equal(sim(out, '--count', '2', '--max-nodes', '800').status, 0);
+    const [first, second] = rows(out);
+    assert.ok(first.steps.length && second.steps.length, '这两手在上限内都搜到了终场');
+    const byIndex = replay(out, '--index', '1');
+    assert.equal(byIndex.status, 0, byIndex.stderr);
+    assert.match(byIndex.stdout, /一致/);
+    assert.match(byIndex.stdout, new RegExp(`打断数 ${second.interrupts}`));
+    assert.match(byIndex.stdout, new RegExp(`种子 ${second.seed}`));
+    const bySeed = replay(out, '--seed', String(first.seed));
+    assert.equal(bySeed.status, 0, bySeed.stderr);
+    assert.match(bySeed.stdout, new RegExp(`种子 ${first.seed}`));
+  });
+
+  test('记录被改过（搜索值对不上重放）：退出码 1，说出差在哪', () => {
+    const out = newOut();
+    assert.equal(sim(out, '--count', '1', '--max-nodes', '800').status, 0);
+    const [row] = rows(out);
+    writeFileSync(out, `${JSON.stringify({ ...row, searchValue: row.searchValue + 10 })}\n`);
+    const r = replay(out, '--index', '0');
+    assert.equal(r.status, 1);
+    assert.match(r.stdout + r.stderr, /不一致.*场面值/s);
+  });
+
+  test('这手在上限内没搜到终场（steps 是空的）：说明没有可重放的路线，退出码 1，不崩', () => {
+    const out = newOut();
+    assert.equal(sim(out, '--count', '1', '--max-nodes', '1').status, 0);
+    const r = replay(out, '--index', '0');
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /没有搜出/);
+  });
+
+  test('没有这个种子、没给 --seed 也没给 --index：退出码 2', () => {
+    const out = newOut();
+    assert.equal(sim(out, '--count', '1').status, 0);
+    assert.equal(replay(out, '--seed', '1').status, 2);
+    assert.equal(replay(out).status, 2);
   });
 });

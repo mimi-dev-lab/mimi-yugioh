@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { before, describe, test } from 'node:test';
 import { expand } from '../src/deck.js';
 import { BRANDED } from '../src/decks/branded.js';
-import { deal, handSeeds, keyCardsIn, replayRow, simulateHand } from '../src/opening-sim.js';
+import { checkReplay, deal, handSeeds, keyCardsIn, replayRow, simulateHand } from '../src/opening-sim.js';
 import { openTestEngine } from './helpers.js';
 
 const WHITE_ALBAZ = BRANDED.routes.find((r) => r.id === 'white-albaz');
@@ -88,5 +88,17 @@ describe('一手的模拟：搜索 + 已知路线取更好的', () => {
   test('同一手、同一种子、同一上限，结果一样（毫秒除外）', async () => {
     const run = () => simulateHand(engine, BRANDED, { index: 3, seed: 7, hand: WHITE_ALBAZ.hand, maxNodes: 200, now: () => 0 });
     assert.deepEqual(await run(), await run());
+  });
+
+  test('checkReplay：重放和记录一致返回空；场面值、终场、打断数对不上的列出来', async () => {
+    const row = await simulateHand(engine, BRANDED, { index: 3, seed: 7, hand: WHITE_ALBAZ.hand, maxNodes: 300, now });
+    const replay = await replayRow(engine, BRANDED, row);
+    assert.deepEqual(checkReplay(row, replay), []);
+    assert.match(checkReplay({ ...row, searchValue: row.searchValue + 10 }, replay).join(), /场面值/);
+    if (row.source === 'search') {
+      assert.match(checkReplay({ ...row, interrupts: row.interrupts + 1 }, replay).join(), /打断数/);
+      assert.match(checkReplay({ ...row, end: { ...row.end, monsters: [] } }, replay).join(), /终场/);
+    }
+    assert.match(checkReplay({ ...row, steps: [], searchValue: null }, replay).join(), /没有搜出/);
   });
 });

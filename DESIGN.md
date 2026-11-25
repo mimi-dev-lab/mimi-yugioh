@@ -15,12 +15,18 @@ src/lookup.js        起手速查：检查卡组数据里的 lookup（目标路�
 src/decks/branded.js         烙印卡组数据：卡表、卡名、作用、三件事、打断数和怎么打断
 src/decks/branded-routes.js  烙印的展开路线（引擎可重放的步骤序列）：Game8 两条，另有从 B站专栏路线图、T³ 文库 Mas 的展开一览补的几条，每条带出处
 src/decks/branded-lookup.js  烙印的起手速查数据：关键卡 → 路线，缺卡改走哪条（只指向 branded-routes.js 里的路线 id）
+src/search.js        最好场面搜索（离线分析用，#37）：在决斗会话里做有限偏离的深度优先搜索（存档回滚、置换表），按场面值评估终场；上限按节点数；纯逻辑，见「随机起手模拟」
+src/opening-sim.js   随机起手模拟：发牌（mulberry32）、总种子派生每手种子、一手的模拟（搜索 + 已知路线取更好的）、记录重放和对照；纯逻辑，引擎、「现在」由调用方注入
+src/opening-report.js  随机起手模拟的报告：JSONL 的行 → 统计 → docs/opening-analysis.md 的文字；纯函数
 src/engine-files.js  读引擎数据：cards.cdb（node:sqlite）和卡牌脚本，给会话提供 cardReader、scriptReader、卡名；只读
 src/store.js         数据目录的读取（卡图）；唯一碰数据目录的地方
 scripts/prepare-engine.js  把固定版本的 Project Ignis CardScripts 和 BabelCDB 的 cards.cdb 下载到引擎数据目录（唯一联网的地方）
 scripts/fetch-card-names.js  按日文卡名向 ygocdb 查密码和简中名（md_name），整理卡组数据时手动跑；服务不联网
 scripts/sync-card-images.js  把卡组用到的卡图从 NAS 经 ssh（stat + tar）复制到数据目录 images/；手动跑，`--dry-run` 只打出要复制的文件数
 launchd/             在 mac mini 上常驻用的 launchd 配置 jp.lifan.mimi-yugioh（见「在 mini 上常驻」）
+scripts/opening-sim.js  随机起手模拟（离线，#37）：固定种子发 5 张先攻起手，每手搜最好场面并试已知路线，每手一行追加到 JSONL，可续跑、可 `--shard` 并行；手动跑，不进 ./ci
+scripts/opening-report.js  JSONL → docs/opening-analysis.md（纯计算）；`--merge` 把几个分片合成一份 JSONL
+scripts/opening-replay.js  从 JSONL 取一手（`--seed` 或 `--index`）搜出的步骤，在引擎里重放，打出终场和打断数并和记录对照
 scripts/deploy.js    部署到 mini：导出 origin/main、核对、装依赖、换上、只重启自己的任务、冒烟；`--dry-run` 只演练
 scripts/smoke.js     线上冒烟（只读）：部署的版本、/health、/deck、/routes（有路线、每条重放通过）、卡组用到的卡图
 scripts/plugin-setup  把插件链进 Hermes 的插件目录（`--home <目录>` 沙盒用；`--live` 是上线那一步，单独一张票，要用户点头）
@@ -122,6 +128,19 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 - `source`、`verified`、`needs`（起手卡 `{ code, md, jp }`）、`start`（起手场面）。
 
 服务启动时对 `BRANDED.routes` 逐条重放并缓存（启动后台跑，请求等它跑完；耗时随路线数和步数增长，要量就在服务刚启动时给第一次 `/routes` 请求计时）。引擎数据缺失或哪条重放不通（脚本报错、步骤对不上提示），`/routes` 和 `/route` 都回 503 和原因，不让页面显示没验证过的路线。
+
+## 随机起手模拟（离线分析，#37）
+
+不进服务、不进页面。`scripts/opening-sim.js` 对随机起手搜最大化的展开，结果存成 `docs/opening-analysis.jsonl`，`scripts/opening-report.js` 由它生成 `docs/opening-analysis.md`。
+
+- **发牌**：总种子（默认 `DEFAULT_SEED`）按 mulberry32 派生每手的种子，所以 `--count` 少的是多的前缀。每手：主卡组 40 张按这手的种子洗牌取前 5 张当先攻起手；引擎里剩下的牌由 `openHandSession` 用同一个种子洗（和路线重放同一个入口）。
+- **场面值** = 10 × 终场在场（怪兽区 + 魔陷区）各卡的打断数之和 + 1 × 剩余手牌数（`src/search.js` 的 `boardValue`；打断数取自卡表，不手写）。
+- **搜索**（`searchSession`）：有限偏离深度优先，每个提示上先排好试的先后（起手含某条已知路线的初动卡时，路线展平成回应序列当参考；其次路线里出现过的动作和选过的卡、卡表里打断数和作用高的卡；结束回合排最后；连锁窗口里路线没用过的发动排在放行后面），一条路线上最多 `MAX_DISCREPANCY`(2) 处不走排第一的，先搜 0 处、再 1 处、再 2 处。主阶段提示上有置换表。选卡同一密码只算一种，选一张最多试 `MAX_BRANCH`(5) 个、选多张最多 `MAX_COMBOS`(4) 种组合；放哪一格和表示形式只试第一个；不进战斗阶段、不改变表示形式、不盖放没有打断数的卡；一条路线最多 `MAX_RESPONSES`(250) 个回应。这些是近似：搜出的是「这个范围里最好的」，场面值保证可达（见下面的重放核对），不保证是理论最高。
+- **上限按节点数，不按毫秒**：`--max-nodes`（默认 `DEFAULT_MAX_NODES`）是一手最多走多少个回应（节点）。用完时搜索停在原地，记下停之前找到的最好的，这手标 `capped: true`。毫秒只记录（`ms`），不参与任何决定，所以同一手、同一种子、同一上限的结果完全一样：续跑和一口气跑出的 JSONL 相同（毫秒除外）。
+- **已知路线**：每手把 `deck.routes` 每一条用这手实际的起手和种子重放一遍（`playRoute`，起手换成这手的），对不上引擎提示就算走不了（`null`）。最好值取搜索和路线里更高的，同值记搜索；记下 `searchValue`、`routeValue`（走得通的路线里最高的）、`bestRoute`、`routeValues`。`searchValue > routeValue` 的手是新路线候选。
+- **重放核对**：搜出的步骤再用 `playRoute` 重放一次，场面值对不上就不采信搜索值（`searchReplayOk: false`，报告里写手数）。`scripts/opening-replay.js` 是同一件事的命令行：取 JSONL 里那手的步骤重放，和记录对照。
+- **JSONL 一行一手**：字段见 `src/opening-sim.js` 开头。续跑：读已有的 JSONL，跳过已完成的 index，最后一行没写完就丢掉重写；已有的行的总种子或上限和这次对不上就报错退出。`--shard i/K` 只跑 index 对 K 取余等于 i 的手，K 个进程各写自己的文件并行跑，`opening-report.js --merge` 合成一份。
+- **报告**：纯计算，同一份 JSONL 同一份文字；每个数字能由 JSONL 重算，重算命令写在报告最后一节。`test/opening-report.test.js` 里有一条：提交的报告等于从提交的 JSONL 重新生成的。
 
 ## 数据目录
 

@@ -1,6 +1,6 @@
 // 随机起手模拟（离线分析，#37）：按固定种子发 5 张先攻起手、对一手起手搜最好场面并把已知路线都试一遍、把记录的一行重放。纯逻辑：引擎、卡组、「现在」由调用方传进来；读写文件、命令行在 scripts/opening-*.js。
 // 一手的记录（JSONL 的一行）：
-//   index、seed（这手的发牌种子，也是引擎洗牌的种子）、hand（起手 5 张的密码，发牌顺序）、keys（手里有的关键卡，起手速查里那几张，去重）
+//   masterSeed（总种子，由 scripts/opening-sim.js 加上）、index、seed（这手的发牌种子，也是引擎洗牌的种子）、hand（起手 5 张的密码，发牌顺序）、keys（手里有的关键卡，起手速查里那几张，去重）
 //   value（最好场面值）、interrupts（打断数）、handLeft（剩余手牌）、end（最好终场：monsters、spellTraps、hand 的密码，升序）
 //   source（最好值的来源：'search' 或路线 id；搜索和路线同值时记 'search'）、searchValue、routeValue（走得通的路线里最高的，没有是 null）、bestRoute（它的路线 id）、routeValues（每条路线的值，走不通是 null）
 //   capped（搜索节点数用完了没搜完）、nodes、maxNodes、ms（只记录，不参与任何决定）
@@ -78,4 +78,17 @@ export async function simulateHand(engine, deck, { index, seed, hand, maxNodes, 
 export async function replayRow(engine, deck, row) {
   const { endBoard, scriptErrors } = await playRoute(engine, deck, { hand: row.hand, steps: row.steps }, { seed: row.seed });
   return { endBoard, end: endOf(endBoard), value: boardValue(deck, endBoard), interrupts: interruptsOf(deck, endBoard), handLeft: endBoard.hand.length, scriptErrors };
+}
+
+// 重放结果和记录对照，返回差异列表（空 = 一致）。重放的是搜索的步骤，所以对着 searchValue；最好值来自搜索（source 是 'search'）时，终场、打断数、剩余手牌也要一致
+export function checkReplay(row, replay) {
+  if (row.searchValue === null || !row.steps?.length) return ['这手没有搜出可重放的路线（searchValue 为 null）'];
+  const problems = [];
+  if (replay.value !== row.searchValue) problems.push(`场面值 ${replay.value} ≠ 记录的搜索值 ${row.searchValue}`);
+  if (row.source === 'search') {
+    if (replay.interrupts !== row.interrupts) problems.push(`打断数 ${replay.interrupts} ≠ 记录的 ${row.interrupts}`);
+    if (replay.handLeft !== row.handLeft) problems.push(`剩余手牌 ${replay.handLeft} ≠ 记录的 ${row.handLeft}`);
+    if (JSON.stringify(replay.end) !== JSON.stringify(row.end)) problems.push(`终场 ${JSON.stringify(replay.end)} ≠ 记录的 ${JSON.stringify(row.end)}`);
+  }
+  return problems;
 }

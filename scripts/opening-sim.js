@@ -17,7 +17,7 @@ import { deal, handSeeds, simulateHand } from '../src/opening-sim.js';
 
 export const DEFAULT_COUNT = 500;
 export const DEFAULT_SEED = 20261126;
-export const DEFAULT_MAX_NODES = 5000;
+export const DEFAULT_MAX_NODES = 100000; // 实测：前 60 手没有一手用满，每手平均约 9 秒，最慢约 45 秒
 
 const fail = (message) => { console.error(`opening-sim: ${message}`); process.exit(2); };
 const { values } = parseArgs({ options: { count: { type: 'string' }, seed: { type: 'string' }, 'max-nodes': { type: 'string' }, out: { type: 'string' }, engine: { type: 'string' }, shard: { type: 'string' } } });
@@ -49,7 +49,7 @@ function loadDone() {
   }
   for (const row of good) {
     if (row.maxNodes !== maxNodes) fail(`${out} 里的手是 --max-nodes ${row.maxNodes} 跑的，这次是 ${maxNodes}：换个 --out，或用同样的上限`);
-    if (seeds[row.index] !== undefined && row.seed !== seeds[row.index]) fail(`${out} 里第 ${row.index} 手的种子 ${row.seed} 和 --seed ${masterSeed} 派生的 ${seeds[row.index]} 对不上：换个 --out，或用同样的种子`);
+    if (row.masterSeed !== masterSeed) fail(`${out} 里的手是 --seed ${row.masterSeed} 跑的，这次是 ${masterSeed}：换个 --out，或用同样的种子`);
   }
   if (good.length !== text.split('\n').length - 1 || !text.endsWith('\n')) writeFileSync(out, good.map((r) => `${JSON.stringify(r)}\n`).join(''));
   return new Set(good.map((r) => r.index));
@@ -61,7 +61,7 @@ let ran = 0;
 for (let index = 0; index < count; index++) {
   if (index % shardCount !== shardIndex || done.has(index)) continue;
   const seed = seeds[index];
-  const row = await simulateHand(engine, BRANDED, { index, seed, hand: deal(BRANDED, seed), maxNodes, now: Date.now });
+  const row = { masterSeed, ...await simulateHand(engine, BRANDED, { index, seed, hand: deal(BRANDED, seed), maxNodes, now: Date.now }) };
   appendFileSync(out, `${JSON.stringify(row)}\n`);
   ran++;
   console.log(`手 ${index + 1}/${count}  种子 ${seed}  最好值 ${row.value}（打断 ${row.interrupts}、手牌 ${row.handLeft}）  来源 ${row.source}  节点 ${row.nodes}${row.capped ? ' 超上限' : ''}  ${row.ms} ms`);
