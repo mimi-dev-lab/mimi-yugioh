@@ -87,6 +87,8 @@ describe('路线快照：引擎给出的卡片移动和区的变化一一对应'
   test('连锁号：发动效果带来的移动带 chain', () => {
     const step = views.get('white-albaz').steps[0];
     assert.ok(step.moves.every((m) => m.chain === 1));
+    const kaimaku = views.get('white-albaz').steps[8].moves; // 烙印开幕：先从手牌发动上场（还没连锁），再支付弃牌、叫出阿卢绯尔、用完进墓地（都在连锁 1 里）
+    assert.deepEqual(kaimaku.map((m) => [m.from, m.to, m.chain]), [['hand', 'spellTraps', undefined], ['hand', 'grave', 1], ['deck', 'monsters', 1], ['spellTraps', 'grave', 1]]);
   });
 });
 
