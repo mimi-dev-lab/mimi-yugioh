@@ -126,7 +126,7 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
   if (opts.select) {
     const clicked = await evaluate((n) => { const b = [...document.querySelectorAll('.yg-deck button.yg-tile')].find((x) => x.getAttribute('aria-label') === n); if (!b) return false; b.click(); return true; }, opts.select);
     if (!clicked) await fail(new Error(`卡组一览里没有卡「${opts.select}」`));
-    await until((n) => document.querySelector('.yg-detail .yg-title')?.innerText === n, opts.select, 10000, `说明区显示「${opts.select}」`).catch(fail);
+    await until((n) => document.querySelector(matchMedia('(max-width: 760px), (hover: none)').matches ? '.yg-pop .yg-title' : '.yg-detail .yg-title')?.innerText === n, opts.select, 10000, `说明区（手机宽是弹窗）显示「${opts.select}」`).catch(fail);
   }
   // 展开路线：按 id 或名字点列表里的一条，播放页默认停在起手（第 0 步），再一步步点「下一步」（--keys：按右方向键）走到第 N 步（0 或「起手」就是不动）或最后一步
   // 起手速查：点速查里指向这条路线的第一个按钮（data-route-id），应当跳到「展开路线」页签里这条路线的播放页（起手，第 0 步）
@@ -179,6 +179,14 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     await until(() => document.querySelector('.yg-player').dataset.mode === 'auto', null, 10000, '开始连播').catch(fail);
     await until(() => { const p = document.querySelector('.yg-player'); return p.dataset.mode === 'idle' && p.dataset.step === p.dataset.total; }, null, 240000, '连播到终场').catch(fail);
     playedMs = Date.now() - t;
+  }
+  // --next-mid MS：（和 --step K 一起）到了第 K 步后点「下一步」，等 MS 毫秒（动画还在播）就往下走去截图：页面上的步号条和动画框都是真的中间状态
+  if (opts.nextMid) {
+    const now = await evaluate(() => Number(document.querySelector('.yg-player').dataset.step));
+    if (!(await clickButton('下一步'))) await fail(new Error(`第 ${now} 步上点不了「下一步」`));
+    await until((n) => Number(document.querySelector('.yg-player').dataset.step) > n, now, 10000, `翻到第 ${now + 1} 步`).catch(fail);
+    await evaluate(() => document.querySelector('.yg-stage').scrollIntoView({ block: 'start' }));
+    await sleep(opts.nextMid);
   }
   // --stage-at K:比例：把动画跳到第 K 步（0 = 起手）动画的这个比例处停住（取中间帧用）
   if (opts.stageAt) {

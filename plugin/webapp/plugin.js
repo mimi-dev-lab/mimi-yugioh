@@ -45,7 +45,10 @@ function CardArt({ rest, code, md, className = "" }) {
 // ---- one card in the deck list: art, ×count, interrupt chip, Master Duel name, Japanese name ----
 function Tile({ rest, card, selected, onClick }) {
   const { bind } = useCardPopup();
-  return h("button", { ...bind(card.code, card.md, { tap: false }), className: `yg-tile${selected ? " sel" : ""}`, onClick, "aria-label": card.md, "aria-pressed": selected },
+  const popup = bind(card.code, card.md);
+  // desktop: hover pops the card up, a click toggles the panel beside the list; phone: a tap pops the card up (with 关上), the panel stays closed (one detail UI, not two)
+  const click = (e) => { popup.onClick(e); if (!isPhone()) onClick(); };
+  return h("button", { ...popup, className: `yg-tile${selected ? " sel" : ""}`, onClick: click, "aria-label": card.md, "aria-pressed": selected },
     h("span", { className: "yg-tile-art" },
       h(CardArt, { rest, code: card.code, md: card.md }),
       card.count > 1 ? h("span", { className: "yg-count" }, `×${card.count}`) : null,
@@ -118,12 +121,12 @@ function CardPopupProvider({ rest, cards, children }) {
     window.addEventListener("scroll", onScroll, true);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); };
   }, [hide]);
-  // props for a card's element: hover on desktop, tap on a phone (tap: false = the element has its own click, as the deck tile does)
-  const bind = useCallback((code, md, { tap = true } = {}) => ({
+  // props for a card's element: hover on desktop, tap on a phone
+  const bind = useCallback((code, md) => ({
     "data-card-code": String(code), "data-card-md": md,
     onMouseEnter: (e) => { if (!isPhone()) show(code, e.currentTarget.getBoundingClientRect()); },
     onMouseLeave: () => { if (!isPhone()) hide(); },
-    ...(tap ? { onClick: (e) => { if (isPhone()) show(code, e.currentTarget.getBoundingClientRect()); } } : {}),
+    onClick: (e) => { if (isPhone()) show(code, e.currentTarget.getBoundingClientRect()); },
   }), [show, hide]);
   const api = useMemo(() => ({ show, hide, bind }), [show, hide, bind]);
   const card = pop ? cards.find((c) => c.code === pop.code) : null;
@@ -201,7 +204,8 @@ function EndSummary({ rest, end }) {
 // same as the buttons (the frame forwards the keys when it has focus). Hovering a card in the frame opens the card popup (a tap on a phone).
 function Stage({ anim, frameRef, error }) {
   const marks = anim ? { "data-starts": anim.starts.join(","), "data-ends": anim.ends.join(",") } : {};
-  return h("div", { className: "yg-stage", "aria-label": "路线动画", ...marks },
+  const ratio = anim ? { style: { aspectRatio: `${anim.stage.w} / ${anim.stage.h}` } } : {};
+  return h("div", { className: "yg-stage", "aria-label": "路线动画", ...marks, ...ratio },
     error ? h("div", { className: "yg-error", role: "alert" }, error)
       : anim ? h(SandboxedFrame, { ref: frameRef, src: anim.src, title: "路线动画", className: "yg-frame" })
         : h("p", { className: "yg-lab yg-stage-wait" }, "读取动画…"));
@@ -505,7 +509,7 @@ const CSS = `
 .yg-player { container-type: inline-size; }
 .yg-play { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 @container (min-width: 1040px) { .yg-play { grid-template-columns: minmax(0, 700px) minmax(0, 1fr); align-items: start; } }
-.yg-stage { position: relative; width: 100%; max-width: 800px; aspect-ratio: 800 / 700; background: #000; border: 1px solid #1f1f1f; border-radius: 8px; overflow: hidden; }
+.yg-stage { position: relative; width: 100%; max-width: 800px; aspect-ratio: 800 / 859; background: #000; border: 1px solid #1f1f1f; border-radius: 8px; overflow: hidden; }
 .yg-stage .yg-frame { width: 100%; height: 100%; border: 0; display: block; }
 .yg-stage-wait { padding: 16px; }
 .yg-play-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }

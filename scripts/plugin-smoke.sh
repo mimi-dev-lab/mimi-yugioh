@@ -62,7 +62,8 @@ has phone "卡组一览" "启动" "白之落胤" "白き竜の落胤"
 # shellcheck disable=SC2086
 lacks phone $OLD
 shot phone-card --mobile --select 灰流丽
-has phone-card "灰流丽" "灰流うらら" "手坑" "干什么" "从手牌发动，不算终场的打断" "关上"
+has phone-card "灰流丽" "灰流うらら" "手坑" "干什么" "从手牌发动，不算终场的打断" "× 关上"
+lacks phone-card "点一张卡看效果说明"
 shot routes --tab 展开路线
 has routes "基本展开｜白之落胤初动" "基本展开｜烙印融合初动" "需要的起手卡" "终场打断 2" "终场打断 1" "来源 Game8（2026-11-20 版）" "引擎验证于 2026-11-24"
 lacks routes "还没做"

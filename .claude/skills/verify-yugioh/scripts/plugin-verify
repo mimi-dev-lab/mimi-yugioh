@@ -309,7 +309,7 @@ def cmd_shot(a) -> int:
     evidence = run["evidence"]
     if not evidence:
         sys.exit("no evidence folder in run.json")
-    opts = {"name": a.name, "design": a.design, "mobile": a.mobile, "tab": a.tab, "select": a.select, "route": a.route, "jump": a.jump, "step": a.step, "keys": a.keys, "hover": a.hover, "tap": a.tap, "within": a.within, "close": a.close, "compare": a.compare, "hoverAnim": a.hover_anim, "tapAnim": a.tap_anim, "clickStep": a.click_step, "playAll": a.play_all, "stageAt": a.stage_at, "netFile": a.net_file}
+    opts = {"name": a.name, "design": a.design, "mobile": a.mobile, "tab": a.tab, "select": a.select, "route": a.route, "jump": a.jump, "step": a.step, "keys": a.keys, "hover": a.hover, "tap": a.tap, "within": a.within, "close": a.close, "compare": a.compare, "hoverAnim": a.hover_anim, "tapAnim": a.tap_anim, "clickStep": a.click_step, "playAll": a.play_all, "stageAt": a.stage_at, "nextMid": a.next_mid, "netFile": a.net_file}
     pub = {"id": run["id"], "base": run["base"], "evidence": evidence, "cookies": [kv.split("=", 1) for kv in cookie(run).split("; ")]}
     r = subprocess.run([node(), str(YV.parent / "plugin-shot.mjs"), json.dumps({**pub, **opts}, ensure_ascii=False)],
                        capture_output=True, text=True, timeout=300)
@@ -361,6 +361,7 @@ def main() -> int:
     s.add_argument("--click-step", metavar="N|起手", help="with --route/--jump: click that number on the step bar (jumps to its end frame)")
     s.add_argument("--play-all", action="store_true", help="with --route/--jump: click 连播 and wait until it stops at the end (the time is in <name>.json as playedMs)")
     s.add_argument("--stage-at", metavar="K:FRAC", help="with --route/--jump: seek the animation to this fraction of step K (0 = 起手) and hold there (mid-frames)")
+    s.add_argument("--next-mid", metavar="MS", type=int, help="with --route/--jump and --step K: after reaching step K, click 下一步 and screenshot MS milliseconds into the real animation of step K+1 (page controls and stage both mid-play)")
     s.add_argument("--net-file", metavar="FILE", help="write every request the tab and its frames made (CDP) to FILE; non-local hosts are flagged")
     s.add_argument("--close", action="store_true", help="with --hover/--tap: close the popup (phone: the 关上 button, then tap again and Esc; desktop: Esc) and record it")
     s.add_argument("--compare", metavar="PNG", help="also write NAME-compare.png: the design PNG on the left, this screenshot on the right")
