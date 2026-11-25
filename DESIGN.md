@@ -11,6 +11,7 @@ src/banlist.js       Master Duel 禁限表（自己维护，现行 11-24 公告�
 src/duel-session.js  决斗会话：包住规则引擎 ocgcore-wasm，一手牌一个会话；开局（卡组、起手、种子）、当前提示和合法选项、提交选择、查场面、存档回滚；纯逻辑，卡库和脚本由调用方注入
 src/route.js         展开路线重放：把一条路线的步骤喂给决斗会话，走到我方回合结束，返回终场和每一步之后的场面，并和路线上写的终场对照
 src/route-view.js    路线的展示数据：把 playRoute 重放出的每一步场面配上卡名、算和上一步的差异、标刚进来的卡、汇总终场和打断数；纯函数，引擎由调用方注入
+src/interrupts.js    终场打断数：按卡组数据里每张卡的打断条件（from / perTurn / needs / pay / tags）算一个终场能打断几次、靠哪几张卡；路线终场汇总、起手速查、搜索、随机起手模拟都只调它；纯函数
 src/lookup.js        起手速查：检查卡组数据里的 lookup（目标路线存在、起手里的卡对得上路线数据）、把它展开成 GET /routes 的 lookup（卡名、目标路线的名字和打断数）；纯函数
 src/decks/branded.js         烙印卡组数据：卡表、卡名、作用、三件事、打断数和怎么打断
 src/decks/branded-routes.js  烙印的展开路线（引擎可重放的步骤序列）：Game8 两条，另有从 B站专栏路线图、T³ 文库 Mas 的展开一览补的几条，每条带出处
@@ -98,7 +99,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 - `source`：卡表的出处 `{ name, url, date }`（页面版本日期），卡组一览上显示并链过去。
 - `roles`：作用的先后和含义，`[{ name, note }]`（`name` 是 `启动 / 检索 / 融合素材 / 终场 / 手坑`，`note` 是页面上组名下的一句含义，词义见 GLOSSARY.md「作用」；含义的原文只写在这里）；卡组一览按它分组。
-- `cards`：密码 → `{ jp, md, role, interrupts, interruptHow, does, cost, limit }`。`md` 是 Master Duel 简体中文客户端的译名（ygocdb 的 `md_name`，用 `scripts/fetch-card-names.js` 查，写死在数据里；字符照抄，不手敲：库妸㽗 是 U+5E93 U+59B8 U+3F57），`jp` 是日文名。`role` 是 `roles` 里某个 `name`；`does / cost / limit` 是「三件事」，我们自己的概括；`interrupts` 是这张卡在终场时对手回合里能打断几次（手牌里的卡不算），`interruptHow` 写怎么打断，`interrupts` 是 0 就是空字符串。一条路线终场的打断数 = 终场在场各卡的 `interrupts` 之和，不在路线里手写。
+- `cards`：密码 → `{ jp, md, role, interrupts, interruptHow, does, cost, limit }`，有打断的卡另有 `from / perTurn / needs / pay / tags`（见下），别的卡可能有 `tags`。`md` 是 Master Duel 简体中文客户端的译名（ygocdb 的 `md_name`，用 `scripts/fetch-card-names.js` 查，写死在数据里；字符照抄，不手敲：库妸㽗 是 U+5E93 U+59B8 U+3F57），`jp` 是日文名。`role` 是 `roles` 里某个 `name`；`does / cost / limit` 是「三件事」，我们自己的概括；`interrupts` 是这张卡每张在对手回合里能打断几次，`interruptHow` 写怎么打断，`interrupts` 是 0 就是空字符串。有打断的卡另写发动条件（照 ygocdb 的卡片原文，结构化，不写在算法里）：`from`（从哪发动，默认 `['field']`，铁兽鸟 墨丘利耶是 `['hand', 'field']`）、`perTurn`（同名卡每回合最多用几张）、`needs`（前提，只看有没有：`field / hand / handOrField / grave / extra` 各要几张符合规格的卡，`anyOf` 满足其一）、`pay`（会用掉终场资源的代价：`{ discard: n }` 弃手牌，`{ extra: 规格 }` 从额外卡组送一只）；规格是标签、密码或它们的数组，标签写在卡的 `tags` 里（`albazFusion` 以阿尔白斯之落胤为融合素材的融合怪兽、`mentionsAlbaz`、`albazName`、`albazNameOnField`、`lightDark`，含义见 `src/decks/branded.js` 文件头）。`cost` 是「三件事」里给人看的代价文字，不是 `pay`。一个终场的打断数由 `src/interrupts.js` 的 `countInterrupts` 按这些字段算（写法和资源怎么分配见那个文件开头），不在路线里手写；`checkDeck` 也查这些字段的写法。
 - `main` / `extra`：`{ code, count }` 列表。`checkDeck` 查张数（主 40、额外 15、不超禁限表上限）和每张卡的字段是否齐，`interrupts` 和 `interruptHow` 是否对得上（有打断就要写怎么打断，没有就留空）。
 - `routes`：展开路线，`{ id, name, source, verified, mismatch?, needs, hand, steps, end }`。`source` 是这条路线的出处 `{ name, url, date }`（页面版本日期），`verified` 是引擎重放验证的日期（写在数据里，改了路线或引擎要重新验证再改它），`mismatch` 是教程和引擎结果不一致处的说明（一致就不写）。`hand` 是起手 5 张（必要卡 + 填充牌），`steps` 每步 `{ text, do }`，`do` 是给引擎的回应（写法见 `src/route.js` 开头），`end` 是出处页面写的我方回合结束时的终场 `{ monsters, spellTraps, hand }`（`hand` 是剩几张手牌；出处没写时，按起手张数减去这条路线用掉的算，写法同 `src/decks/branded-routes.js` 文件头）。`playRoute` 重放（返回终场、路线数据里每一步走完后的场面 `stepBoards`、每步的引擎动作文字和发动了效果的卡，另有按引擎的提示切的 `boards`），`diffEnd` 和 `end` 对照。
 - `lookup`：起手速查，`[{ card, routes, fallbacks }]`，一项一张关键卡（`card` 是密码），三个字段都必填（没有缺卡改走的写 `[]`）。`routes` 是手里有它走哪条：`[{ route, with? }]`，`route` 是路线 id，`with` 是这条路线起手里还要搭的那张卡（两卡展开才有，如烙印之气炎搭软绵雀精或黑衣龙 阿尔比昂）。`fallbacks` 是缺卡改走哪条：`[{ lack, have, route, how }]`，缺 `lack`、手里有 `have`（一张或几张）时改走 `route`，`how` 是为什么走得通，只写那条路线的步骤里真有的事。`checkLookup`（`src/lookup.js`）查：每个 `route` 都是 `routes` 里的 id，关键卡、`with`、`have` 都在那条路线的起手（`hand`）里，`lack` 不在，每张卡都在卡表里，`how` 非空，关键卡不重复；只在测试里查（`test/branded-data.test.js`，同 `checkDeck`），服务启动不查；运行时 `lookupView` 遇到指向的路线不在重放结果里就抛错，`/routes` 回 503。速查不手写打断数和步数：展示时取重放出来的路线（`lookupView`）。
@@ -124,7 +125,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 `replayRoute(engine, deck, route)` 重放一条路线，返回 `GET /route` 的内容。场面**不手写**，全部来自引擎重放：
 
 - `steps`：路线数据里每一项 `steps` 一条（条数 = `route.steps.length`），`{ n, text, actions, activated, board, diff }`。`board` 是这一步走完后我方的完整场面：`hand`、`monsters`（含额外怪兽区，`sequence` 5、6）、`spellTraps`（含场地）、`grave`、`banished`，每张卡 `{ code, md, jp, sequence }`（`sequence` 是区内位置），刚进来的卡多一个 `fresh: true`。`diff` 是和上一步（第 1 步对比起手 `start`）相比每个区的 `{ in, out }`：进来了哪些、离开了哪些，即「花了什么 → 换来什么」（按密码数张数，区内换位置不算）。`activated` 是这一步里引擎记到的我方发动效果的卡，`actions` 是这一步引擎动作的文字（去掉「发动」「选完」「放在第几格」这类机械确认）。最后一步的 `board` 是终场。
-- `end`（终场汇总）：`monsters`、`spellTraps`、`hand`、`grave`、`banished`，`interrupts` = 终场在场（怪兽区 + 魔陷区）各卡 `interrupts` 之和，`breakers` 列出每个打断靠哪张卡、几张、怎么打断（`interruptHow`）。不在路线里手写。
+- `end`（终场汇总）：`monsters`、`spellTraps`、`hand`、`grave`、`banished`，`interrupts` = 终场的打断数（`countInterrupts`：发动条件满足的各卡 `interrupts` 之和，墨丘利耶在手牌也算），`breakers` 列出每个打断靠哪张卡、算进去几张、怎么打断（`interruptHow`）；条件不满足的卡不列。不在路线里手写。
 - `engineDiff`：引擎重放的终场和路线上写的 `end` 的差异（`diffEnd`，空 = 一致）；`mismatch`：路线数据里写的说明。教程和引擎不一致时两者都在，页面醒目显示；路线测试要求 `engineDiff` 非空时 `mismatch` 必须有（`test/route-view-http.test.js`）。
 - `source`、`verified`、`needs`（起手卡 `{ code, md, jp }`）、`start`（起手场面）。
 
@@ -135,7 +136,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 不进服务、不进页面。`scripts/opening-sim.js` 对随机起手搜最大化的展开，结果存成 `docs/opening-analysis.jsonl`，`scripts/opening-report.js` 由它生成 `docs/opening-analysis.md`。
 
 - **发牌**：总种子（默认 `DEFAULT_SEED`）按 mulberry32 派生每手的种子，所以 `--count` 少的是多的前缀。每手：主卡组 40 张按这手的种子洗牌取前 5 张当先攻起手；引擎里剩下的牌由 `openHandSession` 用同一个种子洗（和路线重放同一个入口）。
-- **场面值** = 10 × 终场在场（怪兽区 + 魔陷区）各卡的打断数之和 + 1 × 剩余手牌数（`src/search.js` 的 `boardValue`；打断数取自卡表，不手写）。
+- **场面值** = 10 × 终场的打断数 + 1 × 剩余手牌数（`src/search.js` 的 `boardValue`；打断数由 `src/interrupts.js` 按卡组数据里的条件算，和路线终场汇总同一个函数）。
 - **搜索**（`searchSession`）：有限偏离深度优先，每个提示上先排好试的先后（起手含某条已知路线的初动卡时，路线展平成回应序列当参考；其次路线里出现过的动作和选过的卡、卡表里打断数和作用高的卡；结束回合排最后；连锁窗口里路线没用过的发动排在放行后面），一条路线上最多 `MAX_DISCREPANCY`(2) 处不走排第一的，先搜 0 处、再 1 处、再 2 处。主阶段提示上有置换表。选卡同一密码只算一种，选一张最多试 `MAX_BRANCH`(5) 个、选多张最多 `MAX_COMBOS`(4) 种组合；放哪一格和表示形式只试第一个；不进战斗阶段、不改变表示形式、不盖放没有打断数的卡；一条路线最多 `MAX_RESPONSES`(250) 个回应。这些是近似：搜出的是「这个范围里最好的」，场面值保证可达（见下面的重放核对），不保证是理论最高。
 - **上限按节点数，不按毫秒**：`--max-nodes`（默认 `DEFAULT_MAX_NODES`）是一手最多走多少个回应（节点）。用完时搜索停在原地，记下停之前找到的最好的，这手标 `capped: true`。毫秒只记录（`ms`），不参与任何决定，所以同一手、同一种子、同一上限的结果完全一样：续跑和一口气跑出的 JSONL 相同（毫秒除外）。
 - **已知路线**：每手把 `deck.routes` 每一条用这手实际的起手和种子重放一遍（`playRoute`，起手换成这手的），对不上引擎提示就算走不了（`null`）。最好值取搜索和路线里更高的，同值记搜索；记下 `searchValue`、`routeValue`（走得通的路线里最高的）、`bestRoute`、`routeValues`。`searchValue > routeValue` 的手是新路线候选。
