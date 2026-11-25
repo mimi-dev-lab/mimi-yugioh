@@ -92,6 +92,23 @@ describe('路线快照：引擎给出的卡片移动和区的变化一一对应'
     assert.equal(first.position, 'attack');
   });
 
+  test('每个去处在怪兽区 / 魔陷区的移动带引擎的格子（sequence）；这一步进场的卡在场上的格子就是它', () => {
+    for (const view of views.values()) {
+      for (const step of view.steps) {
+        for (const m of step.moves) assert.ok(Number.isInteger(m.sequence) && m.sequence >= 0, `${view.id} 第 ${step.n} 步 ${m.md} 缺 sequence`);
+        for (const zone of ['monsters', 'spellTraps']) {
+          for (const c of step.board[zone].filter((x) => x.fresh)) {
+            const slots = step.moves.filter((m) => m.code === c.code && m.to === zone).map((m) => m.sequence);
+            assert.ok(slots.includes(c.sequence), `${view.id} 第 ${step.n} 步 ${c.md}：场上第 ${c.sequence} 格，引擎的移动说 ${slots}`);
+          }
+        }
+      }
+    }
+    // 第 9 步阿卢绯尔：引擎说它去怪兽区的某一格，和场上一致（不靠猜）
+    const step = views.get('white-albaz').steps[8];
+    assert.equal(step.moves.find((m) => m.code === ALUBER && m.to === 'monsters').sequence, step.board.monsters.find((c) => c.code === ALUBER).sequence);
+  });
+
   test('连锁号：发动效果带来的移动带 chain', () => {
     const step = views.get('white-albaz').steps[0];
     assert.ok(step.moves.every((m) => m.chain === 1));

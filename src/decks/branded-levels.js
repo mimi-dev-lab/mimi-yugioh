@@ -1,5 +1,5 @@
 // 烙印卡组里每只怪兽的等级 / 阶级 / 连接数：同调光环的星数、动画里的星标用它，不估。
-// 单独放一处，不混进 branded.js 的卡表行；src 里不读卡库，所以写死在这里，test/branded-data.test.js 对照引擎的 cards.cdb 查（卡库变了测试会红）。
+// 卡组数据的一部分（票要求卡组数据带等级 / 阶级），单独放一处，不混进 branded.js 的卡表行；运行时不查卡库，数据写死在这里，test/route-moves.test.js 对照引擎的 cards.cdb 查（写错或卡库变了测试会红）。
 // level 是等级（融合、同调怪兽也写 level），rank 是 Xyz 的阶级，link 是连接怪兽的连接数；魔法、陷阱没有。卡组里新加了怪兽就要补一行（测试会提醒）。
 export const LEVELS = {
   11765832: { level: 6 }, // 共命の翼ガルーラ

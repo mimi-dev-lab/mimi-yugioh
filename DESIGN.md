@@ -6,7 +6,7 @@
 
 ```
 src/server.js        本地服务（Node 22 内置 http，只监听 127.0.0.1:4519）：/health、卡组一览、展开路线、卡图；环境变量只在这里取；启动时用引擎重放每条路线并缓存
-src/deck.js          卡组：展开张数、检查卡组数据（40/15 张、禁限、每张卡的名字、作用、三件事、打断数和怎么打断）、卡组一览（按作用分组）；纯函数
+src/deck.js          卡组：展开张数、`cardOf`（一张卡的展示数据，等级 / 阶级 / 连接数在这里并进去）、检查卡组数据（40/15 张、禁限、每张卡的名字、作用、三件事、打断数和怎么打断）、卡组一览（按作用分组）；纯函数
 src/banlist.js       Master Duel 禁限表（自己维护，现行 11-24 公告的表（12-04 适用），只收和卡组有关的条目）
 src/duel-session.js  决斗会话：包住规则引擎 ocgcore-wasm，一手牌一个会话；开局（卡组、起手、种子）、当前提示和合法选项、提交选择、查场面、存档回滚；纯逻辑，卡库和脚本由调用方注入
 src/route.js         展开路线重放：把一条路线的步骤喂给决斗会话，走到我方回合结束，返回终场和每一步之后的场面，并和路线上写的终场对照
@@ -94,7 +94,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 ## 卡组数据
 
-`src/decks/<卡组>.js` 导出一个卡组对象 `{ name, source, roles, cards, main, extra, routes, lookup }`：
+`src/decks/<卡组>.js` 导出一个卡组对象 `{ name, source, roles, cards, main, extra, levels?, routes, lookup }`：
 
 - `source`：卡表的出处 `{ name, url, date }`（页面版本日期），卡组一览上显示并链过去。
 - `roles`：作用的先后和含义，`[{ name, note }]`（`name` 是 `启动 / 检索 / 融合素材 / 终场 / 手坑`，`note` 是页面上组名下的一句含义，词义见 GLOSSARY.md「作用」；含义的原文只写在这里）；卡组一览按它分组。
@@ -126,7 +126,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 `replayRoute(engine, deck, route)` 重放一条路线，返回 `GET /route` 的内容。场面**不手写**，全部来自引擎重放：
 
 - `steps`：路线数据里每一项 `steps` 一条（条数 = `route.steps.length`），`{ n, text, actions, activated, board, diff, moves }`。`board` 是这一步走完后我方的完整场面：`hand`、`monsters`（含额外怪兽区，`sequence` 5、6）、`spellTraps`（含场地）、`grave`、`banished`、`deck`（主卡组每一张，顺序是引擎洗牌后的）、`extra`（额外卡组每一张），每张卡 `{ code, md, jp, level?/rank?/link?, sequence }`（`sequence` 是区内位置；怪兽才有等级 / 阶级 / 连接数），怪兽区和魔陷区的卡多一个 `position`：`attack`（表侧攻击）、`defense`（表侧守备，页面横放）、`facedown`（里侧），刚进来的卡多一个 `fresh: true`。`diff` 是和上一步（第 1 步对比起手 `start`）相比 7 个区各自的 `{ in, out }`：进来了哪些、离开了哪些，即「花了什么 → 换来什么」（按密码数张数，区内换位置不算）。`activated` 是这一步里引擎记到的我方发动效果的卡，`actions` 是这一步引擎动作的文字（去掉「发动」「选完」「放在第几格」这类机械确认）。最后一步的 `board` 是终场。
-- `moves`：这一步里引擎自己发出的卡片移动（会话的 MSG_MOVE，按发生顺序，只列我方的卡；**不是从 diff 推断的**）：`{ code, md, jp, level?/rank?/link?, from, to, position?, summon?, chain? }`。`from` / `to` 是区名 `hand / monsters / spellTraps / grave / banished / deck / extra`（Xyz 素材是 `overlay`，快照里没有这个区，现有卡组没有 Xyz）；`position` 是去处在怪兽区 / 魔陷区时的表示形式；`summon` 是这只怪兽被召唤的方式（`normal`、`special`、`fusion`、`synchro`、`xyz`、`link`、`ritual`，取自引擎消息）；`chain` 是移动发生时正在连锁的第几环（发动魔法上场、支付之前不在连锁里）。每个区、每个密码的净进出等于 `diff` 的 `in` / `out`（`test/route-moves.test.js` 对每条路线每一步查）。注意引擎的移动语义：融合 / 同调的素材移动的 `reason` 带 MATERIAL，去处由效果决定（同调素材进墓地；白之落胤线第 14 步冰剑龙的融合素材，卢绯里昂回额外卡组、除外的白之落胤回主卡组）；除外的怪兽回场是一条 `banished → monsters` 的移动。
+- `moves`：这一步里引擎自己发出的卡片移动（会话的 MSG_MOVE，按发生顺序，只列我方的卡；**不是从 diff 推断的**）：`{ code, md, jp, level?/rank?/link?, from, to, sequence, position?, summon?, chain? }`。`sequence` 是引擎说的去处的区内位置（MSG_MOVE 的 `to.sequence`：怪兽区 0–4 主怪兽区、5–6 额外怪兽区，魔陷区同理，手牌、墓地等是进去之后的第几张），动画里所有落点的格子都取自它，不自己挑；`from` / `to` 是区名 `hand / monsters / spellTraps / grave / banished / deck / extra`（Xyz 素材是 `overlay`，快照里没有这个区，现有卡组没有 Xyz）；`position` 是去处在怪兽区 / 魔陷区时的表示形式；`summon` 是这只怪兽被召唤的方式（`normal`、`special`、`fusion`、`synchro`、`xyz`、`link`、`ritual`，取自引擎消息）；`chain` 是移动发生时正在连锁的第几环（发动魔法上场、支付之前不在连锁里）。每个区、每个密码的净进出等于 `diff` 的 `in` / `out`（`test/route-moves.test.js` 对每条路线每一步查）。注意引擎的移动语义：融合 / 同调的素材移动的 `reason` 带 MATERIAL，去处由效果决定（同调素材进墓地；白之落胤线第 14 步冰剑龙的融合素材，卢绯里昂回额外卡组、除外的白之落胤回主卡组）；除外的怪兽回场是一条 `banished → monsters` 的移动。
 - `end`（终场汇总）：`monsters`、`spellTraps`、`hand`、`grave`、`banished`，`interrupts` = 终场在场（怪兽区 + 魔陷区）各卡 `interrupts` 之和，`breakers` 列出每个打断靠哪张卡、几张、怎么打断（`interruptHow`）。不在路线里手写。
 - `engineDiff`：引擎重放的终场和路线上写的 `end` 的差异（`diffEnd`，空 = 一致）；`mismatch`：路线数据里写的说明。教程和引擎不一致时两者都在，页面醒目显示；路线测试要求 `engineDiff` 非空时 `mismatch` 必须有（`test/route-view-http.test.js`）。
 - `source`、`verified`、`needs`（起手卡 `{ code, md, jp }`）、`start`（起手场面）。

@@ -1,7 +1,8 @@
 // 起手速查：卡组数据里的 lookup（关键卡 → 路线；缺卡改走哪条）的检查和展示。纯函数，不读文件、不碰引擎。
 // 速查只能指向卡组数据里已有的路线：数据是否站得住由测试查（checkLookup，同 checkDeck），展示在路线重放完之后跑（拿路线的名字、打断数）；
 // 运行时指向的路线不在重放结果里就抛错，/routes 回 503，页面不显示没核对过的速查。
-import { cardOf, routeListItem } from './route-view.js';
+import { cardOf } from './deck.js';
+import { routeListItem } from './route-view.js';
 
 // 返回问题列表（空 = 没问题）。deck = { cards, routes, lookup }
 export function checkLookup(deck) {

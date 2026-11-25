@@ -5,7 +5,11 @@ export function expand(list) {
   return list.flatMap(({ code, count }) => Array(count).fill(code));
 }
 
-// 返回问题列表（空 = 没问题）。deck = { cards, main, extra, roles }，limit 默认用现行禁限表
+// 一张卡的展示数据：密码、简中名、日文名，怪兽再带 level（等级）/ rank（Xyz 阶级）/ link（连接数）之一，取自卡组数据的 levels；
+// 卡表里没有的卡（token）名字退回密码。快照、起手速查、卡组一览的卡都从这里来，levels 只在这里并进去
+export const cardOf = (deck, code) => ({ code, md: deck.cards[code]?.md ?? String(code), jp: deck.cards[code]?.jp ?? String(code), ...deck.levels?.[code] });
+
+// 返回问题列表（空 = 没问题）。deck = { cards, main, extra, roles, levels? }，limit 默认用现行禁限表
 export function checkDeck(deck, { limit = maxCopies, mainSize = 40, extraSize = 15 } = {}) {
   const problems = [];
   const main = expand(deck.main);
@@ -31,8 +35,8 @@ export function checkDeck(deck, { limit = maxCopies, mainSize = 40, extraSize = 
 export function deckOverview(deck) {
   const entries = [...deck.main.map((e) => ({ ...e, zone: 'main' })), ...deck.extra.map((e) => ({ ...e, zone: 'extra' }))];
   const cards = entries.map(({ code, count, zone }) => {
-    const { md, jp, role, does, cost, limit, interrupts, interruptHow } = deck.cards[code];
-    return { code, md, jp, ...deck.levels?.[code], role, zone, count, does, cost, limit, interrupts, interruptHow };
+    const { role, does, cost, limit, interrupts, interruptHow } = deck.cards[code];
+    return { ...cardOf(deck, code), role, zone, count, does, cost, limit, interrupts, interruptHow };
   });
   const rank = (c) => deck.roles.findIndex((r) => r.name === c.role);
   return { name: deck.name, source: deck.source, roles: deck.roles, cards: cards.sort((a, b) => rank(a) - rank(b)) };
