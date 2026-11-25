@@ -61,9 +61,6 @@ shot phone --mobile
 has phone "卡组一览" "启动" "白之落胤" "白き竜の落胤"
 # shellcheck disable=SC2086
 lacks phone $OLD
-shot phone-card --mobile --select 灰流丽
-has phone-card "灰流丽" "灰流うらら" "手坑" "干什么" "从手牌发动，不算终场的打断" "× 关上"
-lacks phone-card "点一张卡看效果说明"
 shot routes --tab 展开路线
 has routes "基本展开｜白之落胤初动" "基本展开｜烙印融合初动" "需要的起手卡" "终场打断 2" "终场打断 1" "来源 Game8（2026-11-20 版）" "引擎验证于 2026-11-24"
 lacks routes "还没做"
@@ -127,6 +124,11 @@ popup hover-end close
 shot tap-route --mobile --route white-albaz --step 1 --tap-anim 白之落胤
 popup tap-route
 grep -qF "× 关上" "$ev/tap-route.json" || { echo "tap-route 的弹窗里没有「× 关上」，见 $ev/tap-route.json"; exit 1; }
+# 卡组一览在手机上点卡：弹窗（带「× 关上」），不开页面里的说明区
+shot phone-card --mobile --tap 灰流丽 --within .yg-deck --close
+popup phone-card close
+grep -q '"text": ".*灰流うらら.*手坑.*× 关上.*干什么.*从手牌发动，不算终场的打断' "$ev/phone-card.json" || { echo "phone-card 的弹窗里缺日文名、作用、干什么、对手回合或「× 关上」，见 $ev/phone-card.json"; exit 1; }
+lacks phone-card "点一张卡看效果说明"
 shot tap-deck --mobile --tab 起手速查 --tap 白之落胤 --within .yg-lookup --close
 popup tap-deck close
 # 路线动画：下一步播完停住；点步号跳到那一步的结束帧；连播到终场；动画中间帧；只有本地请求（动画框架里也不联网）
