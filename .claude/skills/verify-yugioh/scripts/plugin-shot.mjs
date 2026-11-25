@@ -225,7 +225,17 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
       await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x - 3, y: at.y - 3 });
       await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
     }
-    await until((n) => document.querySelector('.yg-pop .yg-title')?.innerText === n, aim, 10000, `弹窗显示「${aim}」`).catch(fail);
+    const popped = () => until((n) => document.querySelector('.yg-pop .yg-title')?.innerText === n, aim, 4000, `弹窗显示「${aim}」`);
+    // 鼠标事件偶尔在页面刚滚完时被吞：没出来就把鼠标移开再移回来，重试两次
+    for (let attempt = 0; ; attempt++) {
+      try { await popped(); break; } catch (e) {
+        if (attempt >= 2 || tapping) await fail(e);
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
+        await sleep(300);
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x - 4, y: at.y - 2 });
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+      }
+    }
     await sleep(300);
     pop = await evaluate(() => { const r = document.querySelector('.yg-pop').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, vw: innerWidth, vh: innerHeight, text: document.querySelector('.yg-pop').innerText }; });
   }
