@@ -539,15 +539,22 @@ const CSS = `
 .yg-title { font-size: 16px; font-weight: 600; line-height: 1.4; }
 .yg-facts { display: flex; flex-direction: column; font-size: 12px; line-height: 1.6; }
 .yg-fact { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-top: 1px solid #1c1c1c; }
-.yg-pop { position: fixed; z-index: 50; width: 380px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; pointer-events: none;
+.yg-pop { position: fixed; z-index: 50; width: 680px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; pointer-events: none;
   border: 1px solid #c8ff3d; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: #000; box-shadow: 0 8px 28px rgba(0, 0, 0, .7);
   font-family: "PingFang SC", "Noto Sans SC", system-ui, sans-serif; font-size: 13px; color: #ececec; }
 .yg-pop *, .yg-pop *::before { box-sizing: border-box; }
 .yg-pop button { font: inherit; color: inherit; cursor: pointer; }
 .yg-pop p { margin: 0; }
-.yg-pop .yg-big { width: 150px; height: 218px; }
-.yg-pop.phone { pointer-events: auto; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-width: none; max-height: 70vh; border-radius: 12px 12px 0 0; border-color: #3a3a3a; }
-.yg-pop.phone .yg-big { width: 96px; height: 140px; }
+/* popup = big art on the left (the image is 680×986), names + facts on the right; the head's two parts become grid cells */
+.yg-pop { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr; column-gap: 18px; row-gap: 10px; align-items: start; }
+.yg-pop .yg-detail-head { display: contents; }
+.yg-pop .yg-big { grid-row: 1 / span 2; width: auto; height: min(420px, calc(100vh - 48px)); aspect-ratio: 680 / 986; object-fit: contain; }
+.yg-pop .yg-col { grid-column: 2; }
+.yg-pop .yg-facts { grid-column: 2; }
+.yg-pop.phone { pointer-events: auto; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-width: none; max-height: 86vh; border-radius: 12px 12px 0 0; border-color: #3a3a3a;
+  grid-template-columns: 1fr; grid-template-rows: none; }
+.yg-pop.phone .yg-big { grid-row: auto; justify-self: center; height: auto; width: min(64vw, 300px); }
+.yg-pop.phone .yg-col, .yg-pop.phone .yg-facts { grid-column: 1; }
 .yg-routes { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
 .yg-route { display: flex; gap: 14px; align-items: flex-start; text-align: left; padding: 12px; border: 1px solid #2a2a2a; border-radius: 8px; background: #000; }
 .yg-route:hover { border-color: #c8ff3d; }
