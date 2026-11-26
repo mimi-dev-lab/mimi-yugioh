@@ -1,7 +1,7 @@
 // 路线动画的计划（纯函数）：读一条重放过的路线（GET /route 的内容），给每一步配动作和时间，产出轨道表、每个位置的时间段和合成页的标记（HTML 片段）。
 // 每张卡的动作来自每步的 `moves`（引擎的 MSG_MOVE：从哪个区到哪个区、去哪一格，按发生的顺序），不从 diff 推断，落点的格子取自 move.sequence，不自己挑；
 // 融合 / 同调等召唤的特效取自 move.summon，素材取自 move.material，同调光环的星数是怪兽的真实等级（move.level），发动的光和连锁号取自 `activated`，
-// 守备表示的怪兽横放（position）。每一步走完后所有卡的位置和快照一致（planRoute 里对不上就抛错；test/anim-plan.test.js 还把每一步的结束帧和快照逐张对照）。
+// 守备表示的怪兽横放（position），每张卡此刻的作用标签取自每步的 `roles`（中场）和 `handRoles`（手牌）。每一步走完后所有卡的位置和快照一致（planRoute 里对不上就抛错；test/anim-plan.test.js 还把每一步的结束帧和快照逐张对照）。
 // 动画本身是一张轨道表（见 anim-engine.js），不依赖 gsap；舞台的几何在 anim-stage.js，合成页的 HTML 在 anim-render.js。
 import {
   CH, COLOR, CW, HY, MERGE, NOTICE, NOTICE_BANNER_H, PILE, PILES, SIDEWAYS_SCALE, SUMMON_TAG, SX0, MY, SY, COL_L, PITCH, STAGE, VISIBLE, ZONE_COLOR, ZONE_NAME, center, handPos, pilePos, slotPos, zOf,
@@ -35,7 +35,8 @@ function newTracks() {
 }
 
 
-export function planRoute(route) {
+// roleTerms：作用标签的术语表（[{ name, color }]），作用标签照它着色
+export function planRoute(route, { roleTerms = [] } = {}) {
   const tr = newTracks();
   const html = { cards: [], fx: [], labels: [] };
   const counters = {};
@@ -49,16 +50,47 @@ export function planRoute(route) {
   const instances = [];
   function mkCard(card) {
     const id = `c${instances.length}`;
-    const inst = { id, code: card.code, md: card.md, slot: null, alive: true, x: 0, y: 0, rot: 0, sc: 1, free: 0 };
+    const inst = { id, code: card.code, md: card.md, slot: null, alive: true, x: 0, y: 0, rot: 0, sc: 1, free: 0, chips: [], chip: null };
     instances.push(inst);
-    html.cards.push(`<div id="${id}" class="card" data-code="${card.code}"><div id="${id}a" class="a i${card.code}" data-code="${card.code}" data-md="${esc(card.md)}">`
-      + `<span class="pt">${esc(card.md)}</span><div id="${id}t" class="tint"></div><div id="${id}k" class="tb"></div><div id="${id}b" class="bk"></div><div id="${id}h" class="hl"></div></div>`
-      + `<div id="${id}n" class="nm">${esc(card.md)}</div></div>`);
     tr.reg(id, { x: 0, y: 0, opacity: 0, z: 10 });
     tr.reg(`${id}a`, { rotation: 0, scale: 1 });
     for (const part of ['t', 'k', 'b', 'h', 'n']) tr.reg(`${id}${part}`, { opacity: 0 });
     state.set(inst, { tint: 0, tb: 0, back: 0, name: 0 });
     return inst;
+  }
+
+  // 一张卡的 HTML：卡面（卡图、暗化、紫罩、卡背、发动的光）、卡名，和它在各步用到的作用标签（每种「作用 + 原因」一块，到点显示 / 隐藏）。
+  // 作用标签是卡的子元素，卡飞到哪它跟到哪；放在卡面的下沿，不压卡名，也不跟着守备横放转
+  const cardHtml = (inst) => `<div id="${inst.id}" class="card" data-code="${inst.code}"><div id="${inst.id}a" class="a i${inst.code}" data-code="${inst.code}" data-md="${esc(inst.md)}">`
+    + `<span class="pt">${esc(inst.md)}</span><div id="${inst.id}t" class="tint"></div><div id="${inst.id}k" class="tb"></div><div id="${inst.id}b" class="bk"></div><div id="${inst.id}h" class="hl"></div></div>`
+    + `<div id="${inst.id}n" class="nm">${esc(inst.md)}</div>`
+    + inst.chips.map((c) => `<div id="${c.id}" class="rl" data-code="${inst.code}" data-tags="${esc(c.tags.join('、'))}" data-why="${esc(c.why)}">${c.tags.map((tag) => `<i style="background:${colorOf(tag)}">${esc(tag)}</i>`).join('')}</div>`).join('')
+    + '</div>';
+
+  // ---- 作用标签：每个位置结束时，中场的卡标 roles 里它的作用，手牌标 handRoles 里的；作用变了或换了区，旧的在这一步开始时收起，新的在这一步的动作都完了时出现 ----
+  const termColor = new Map(roleTerms.map((t) => [t.name, t.color]));
+  const colorOf = (tag) => termColor.get(tag) ?? COLOR.mute;
+  function syncRoles(fin, roles, hand, T, end) {
+    const field = new Map((roles ?? []).map((r) => [r.code, r]));
+    const inHand = new Map((hand ?? []).map((r) => [r.code, r]));
+    for (const inst of instances) {
+      const f = fin.get(inst);
+      const zone = f?.zone;
+      const r = zone === 'monsters' || zone === 'spellTraps' ? field.get(inst.code) : zone === 'hand' ? inHand.get(inst.code) : null;
+      const key = r ? `${zone === 'hand' ? 'hand' : 'field'}\u0000${r.tags.join('、')}\u0000${r.why}` : null;
+      if (key === inst.chip?.key) continue;
+      if (inst.chip) tween(inst.chip.id, 'opacity', T, 0.2, 0, 'l');
+      inst.chip = null;
+      if (!r) continue;
+      let chip = inst.chips.find((c) => c.key === key);
+      if (!chip) {
+        chip = { id: `${inst.id}r${inst.chips.length + 1}`, key, tags: r.tags, why: r.why };
+        inst.chips.push(chip);
+        tr.reg(chip.id, { opacity: 0 });
+      }
+      tween(chip.id, 'opacity', end, 0.25, 1, 'l');
+      inst.chip = chip;
+    }
   }
 
   // ---- 特效（都在卡和名字、区域标签的下面，不盖住它们；只有横幅和发动牌在空带里）----
@@ -391,6 +423,7 @@ export function planRoute(route) {
       ring(center(dest.pos), COLOR.green, t + 0.65, { dur: 0.45, s0: 0.9, s1: 1.35 });
       note(item.move, t, t + 0.65);
     });
+    syncRoles(fin, [], route.startHandRoles, T, end);
     return { end, moves: record(items, items.map((it) => fin.get(it.inst))) };
   });
 
@@ -455,17 +488,15 @@ export function planRoute(route) {
         banner(step.text.length > 22 ? `${step.text.slice(0, 21)}…` : step.text, COLOR.mute, T + 0.2, 1.4);
         end = Math.max(end, T + 1.7);
       }
-      // 终场：最后一步走完，打断的卡标「打断」
+      syncRoles(fin, step.roles, step.handRoles, T, end);
+      // 终场：最后一步走完，打断的卡亮一圈（「打断」两个字在它的作用标签里，见 syncRoles，不另画一块）
       if (step.n === route.steps.length) {
         let tb = end + 0.1;
         for (const b of route.end.breakers ?? []) {
-          const entry = [...fin.entries()].find(([i, f]) => i.code === b.code && (f.zone === 'monsters' || f.zone === 'spellTraps'));
+          const entry = [...fin.entries()].find(([i, f]) => i.code === b.code && (f.zone === 'monsters' || f.zone === 'spellTraps' || f.zone === 'hand'));
           if (!entry) continue;
           const [i, f] = entry;
           set(`${i.id}h`, 'opacity', tb, 1);
-          const tag = fx(`<div id="${nid('bk')}" class="bkt" style="left:${f.pos[0]}px;top:${f.pos[1] + 6}px">打断</div>`, { opacity: 0, y: 8 });
-          set(tag, 'opacity', tb, 1);
-          tween(tag, 'y', tb, 0.3, 0, 'o3');
           ring(center(f.pos), COLOR.amber, tb, { dur: 0.6, s0: 0.9, s1: 1.8 });
           tb += 0.5;
         }
@@ -476,8 +507,8 @@ export function planRoute(route) {
   }
 
   return {
-    stage: STAGE, duration: q(clock), segments, moves: planned, tracks: tr.segs, init: tr.init, html, frames,
-    instances: instances.map((i) => ({ id: i.id, code: i.code, md: i.md })),
+    stage: STAGE, duration: q(clock), segments, moves: planned, tracks: tr.segs, init: tr.init, html: { ...html, cards: instances.map(cardHtml) }, frames,
+    instances: instances.map((i) => ({ id: i.id, code: i.code, md: i.md, chips: i.chips.map((c) => ({ id: c.id, tags: c.tags, why: c.why })) })),
     codes: [...new Set([...instances.map((i) => i.code), ...route.steps.flatMap((s) => s.activated.map((c) => c.code))])],
   };
 }

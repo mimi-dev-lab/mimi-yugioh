@@ -11,6 +11,8 @@ export function frameAt(plan, t) {
     id: inst.id, code: inst.code, md: inst.md,
     x: read(inst.id, 'x', 0), y: read(inst.id, 'y', 0), opacity: read(inst.id, 'opacity', 1), z: read(inst.id, 'z', 10),
     rotation: read(`${inst.id}a`, 'rotation', 0), tilt: read(`${inst.id}a`, 'scale', 1), tint: read(`${inst.id}t`, 'opacity', 0), tb: read(`${inst.id}k`, 'opacity', 0), back: read(`${inst.id}b`, 'opacity', 0), name: read(`${inst.id}n`, 'opacity', 1),
+    // 这一刻看得见的作用标签（每块 { tags, why, opacity }，opacity > 0 才算）
+    roles: (inst.chips ?? []).map((c) => ({ tags: c.tags, why: c.why, opacity: read(c.id, 'opacity', 0) })).filter((c) => c.opacity > 0),
   }));
 }
 export const textAt = (plan, id, t) => {

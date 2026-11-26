@@ -25,7 +25,7 @@ describe('卡组一览和卡图：HTTP 接口', () => {
       assert.equal(count('extra'), 15);
       for (const c of body.cards) {
         const levelKey = Object.keys(BRANDED.levels[c.code] ?? {}); // 怪兽多一个 level / rank / link，魔法陷阱没有
-        assert.deepEqual(Object.keys(c).sort(), ['code', 'cost', 'count', 'does', 'interruptHow', 'interrupts', 'jp', 'limit', 'md', 'role', 'zone', ...levelKey].sort(), `${c.code} 的字段`);
+        assert.deepEqual(Object.keys(c).sort(), ['code', 'cost', 'count', 'does', 'interruptHow', 'interrupts', 'jp', 'limit', 'md', 'role', 'roleTags', 'roleWhy', 'zone', ...levelKey].sort(), `${c.code} 的字段`);
         assert.deepEqual(levelKey.map((k) => c[k]), Object.values(BRANDED.levels[c.code] ?? {}), `${c.code} 的等级`);
         assert.ok(body.roles.some((r) => r.name === c.role), `${c.md} 的作用 ${c.role}`);
         // 打断能力：有打断次数就写了怎么打断，没有就是空的
@@ -38,9 +38,8 @@ describe('卡组一览和卡图：HTTP 接口', () => {
       assert.match(mirrorjade.interruptHow, /除外/);
       assert.equal(body.cards.find((c) => c.code === 14558127).role, '手坑'); // 灰流丽
       assert.equal(body.cards.find((c) => c.code === 45883110).md, '引导之圣女 库妸㽗'); // 生僻字照 md_name 的码位
-      // 按作用分组排好：同一作用的卡挨在一起，组的先后照 roles
-      const order = body.cards.map((c) => body.roles.findIndex((r) => r.name === c.role));
-      assert.deepEqual(order, [...order].sort((a, b) => a - b));
+      // 主卡组在前、额外卡组在后，各自照卡组数据的顺序（页面按默认作用标签分组，不靠接口排序）
+      assert.deepEqual(body.cards.map((c) => c.code), [...BRANDED.main, ...BRANDED.extra].map((e) => e.code));
     } finally { server.stop(); }
   });
 

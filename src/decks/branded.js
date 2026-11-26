@@ -8,6 +8,7 @@
 // 和 Game8 页面不一致的一处：路线 A 要用阿卢绯尔检索「赫之烙印」，但页面的卡表里没有它，只有烙印之气炎 ×3；这里按路线走得通改成 烙印之气炎 ×2 + 赫之烙印 ×1，其余照页面。
 import { LEVELS } from './branded-levels.js';
 import { LOOKUP } from './branded-lookup.js';
+import { DEFAULTS as ROLE_DEFAULTS, ROUTES as ROLE_ROUTES, TERMS as ROLE_TERMS } from './branded-roles.js';
 import { ROUTES } from './branded-routes.js';
 
 export const SOURCE = { name: 'Game8', url: 'https://game8.jp/yugioh-masterduel/534262', date: '2026-11-20' };
@@ -108,4 +109,4 @@ export const EXTRA = [
   { code: 54757758, count: 1 }, // 沼地のドロゴン
 ];
 
-export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, levels: LEVELS, routes: ROUTES, lookup: LOOKUP };
+export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, levels: LEVELS, routes: ROUTES, lookup: LOOKUP, roleTags: { terms: ROLE_TERMS, defaults: ROLE_DEFAULTS, routes: ROLE_ROUTES } };

@@ -247,6 +247,55 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     await sleep(300);
     pop = await evaluate(() => { const r = document.querySelector('.yg-pop').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, vw: innerWidth, vh: innerHeight, text: document.querySelector('.yg-pop').innerText }; });
   }
+  // 路线动画里的作用标签：向动画框架要看得见的卡和作用标签的位置（yg-rects），每块标签要贴在自己那张卡上（水平在卡的范围里，竖直在卡的上沿和下沿 +30 px 之间：守备横放的卡标签在横着的卡下面一点），记进 .json 的 stage
+  const stageRects = () => evaluate(() => new Promise((resolve) => {
+    const fr = document.querySelector('.yg-stage iframe');
+    if (!fr) return resolve(null);
+    const on = (e) => { if (e.data && e.data.type === 'yg-rects') { removeEventListener('message', on); resolve({ cards: e.data.cards, roles: e.data.roles ?? [] }); } };
+    addEventListener('message', on);
+    fr.contentWindow.postMessage({ src: 'yg-host', cmd: 'rects' }, '*');
+    setTimeout(() => resolve(null), 8000);
+  }));
+  let stage = null;
+  if (opts.route || opts.jump) {
+    const r = await stageRects();
+    if (r) {
+      const scale = r.cards[0] ? r.cards[0].rect.w / 80 : 1; // 动画缩放：卡宽 80 px 在页面里有多宽
+      const detached = r.roles.filter((t) => {
+        const c = r.cards.find((x) => x.card === t.card);
+        if (!c) return true;
+        const cx = t.rect.x + t.rect.w / 2;
+        return !(cx >= c.rect.x && cx <= c.rect.x + c.rect.w && t.rect.y >= c.rect.y - 1 && t.rect.y + t.rect.h <= c.rect.y + c.rect.h + 30 * scale);
+      });
+      stage = { roles: r.roles.map((t) => ({ ...t, md: r.cards.find((x) => x.card === t.card)?.md })), cards: r.cards, detached };
+      if (opts.requireRoles && !r.roles.length) await fail(new Error('动画里没有看得见的作用标签'));
+      if (detached.length) await fail(new Error(`作用标签没贴在卡上：${detached.map((t) => `${t.code} ${t.tags}`).join('、')}`));
+    }
+  }
+  // --hover-role / --tap-role 卡名：把真鼠标移到（手机：点）动画里这张卡的作用标签上，等页面上出原因的小框 .yg-roletip
+  let roleTip = null;
+  const roleAim = opts.hoverRole ?? opts.tapRole;
+  if (roleAim) {
+    await evaluate(() => document.querySelector('.yg-stage').scrollIntoView({ block: 'start' }));
+    await sleep(400);
+    const r = await stageRects();
+    const card = r?.cards.find((c) => c.md === roleAim);
+    const tag = card && r.roles.find((t) => t.card === card.card);
+    if (!tag) await fail(new Error(`动画里「${roleAim}」没有看得见的作用标签`));
+    const f = await evaluate(() => { const b = document.querySelector('.yg-stage iframe').getBoundingClientRect(); return { x: b.left, y: b.top }; });
+    const at = { x: f.x + tag.rect.x + tag.rect.w / 2, y: f.y + tag.rect.y + tag.rect.h / 2 };
+    if (opts.tapRole) {
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] });
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } else {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x - 3, y: at.y - 3 });
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+    }
+    await until(() => !!document.querySelector('.yg-roletip'), null, 5000, `「${roleAim}」的作用标签出原因`).catch(fail);
+    await sleep(300);
+    roleTip = await evaluate(() => { const el = document.querySelector('.yg-roletip'); const b = el.getBoundingClientRect(); return { text: el.innerText, left: b.left, top: b.top, right: b.right, bottom: b.bottom, vw: innerWidth, vh: innerHeight }; });
+    roleTip.chip = { tags: tag.tags, x: at.x, y: at.y };
+  }
   // 播放页的步号条和按钮有没有被网页工作区的窗口头部（或别的东西）盖住：每个按钮的上沿、下沿各取一点，elementFromPoint 要落在按钮自己身上
   const bar = await evaluate(() => {
     const btns = [...document.querySelectorAll('.yg-controls button')];
@@ -263,11 +312,14 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
   const height = await evaluate(() => document.querySelector('.yg').scrollHeight);
   await sleep(600);
   // --design 保持 1280×860 的视口（和设计稿同样大），--mobile 保持一屏手机；平时把视口拉到内容那么高
-  if (aim) { /* 弹窗开着：不改视口，不然鼠标和弹窗都变了 */ }
+  if (aim || roleAim) { /* 弹窗开着：不改视口，不然鼠标和弹窗都变了 */ }
   else if (!opts.design && !opts.mobile) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 200, 4000) }); await sleep(500); }
-  else if (opts.mobile && (opts.route || opts.jump || opts.tab === '起手速查')) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 100, 5000) }); await sleep(500); }
+  else if (opts.mobile && (opts.route || opts.jump || (opts.tab === '起手速查' || opts.tab === '术语表'))) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 100, 5000) }); await sleep(500); }
   await until(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity), null, 5000, '动画走完').catch(() => {});
-  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  // --clip-stage：只截动画框（场面特写），按 2 倍像素
+  const clip = opts.clipStage ? await evaluate(() => { const st = document.querySelector('.yg-stage'); st.scrollIntoView({ block: 'start' }); const b = st.querySelector('iframe').getBoundingClientRect(); return { x: b.left + scrollX, y: b.top + scrollY, width: b.width, height: b.height, scale: 2 }; }) : null;
+  if (clip) await sleep(400);
+  const shot = await send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip, captureBeyondViewport: true } : {}) });
   await writeFile(`${opts.evidence}/${opts.name}.png`, Buffer.from(shot.data, 'base64'));
   await writeFile(`${opts.evidence}/${opts.name}.txt`, await evaluate(() => document.querySelector('.yg').innerText));
   // --close：关弹窗（手机点「× 关上」，再点开按 Esc；桌面按 Esc），弹窗要没了
@@ -294,7 +346,7 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
   const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
   const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
   if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
-  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, pop, closed, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs }, null, 1));
+  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs }, null, 1));
   // 并排对照：设计稿 PNG 在左（标签 --compare-label，默认「样子稿」），这张和 --compare-with 列的同一证据目录里先截的几张在右，上下排；在一个 data: 页面里拼好再截一张
   if (opts.compare) {
     const b64 = async (f) => (await readFile(f)).toString('base64');

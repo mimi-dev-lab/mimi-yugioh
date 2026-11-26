@@ -3,6 +3,7 @@
 import { OcgLocation as L, OcgPosition as P } from 'ocgcore-wasm';
 import { cardOf } from './deck.js';
 import { countInterrupts } from './interrupts.js';
+import { handRoles, resolveRoles } from './roles.js';
 import { diffEnd, playRoute } from './route.js';
 
 // 场面里展示的区域：手牌、怪兽区（含额外怪兽区）、魔陷区（含场地）、墓地、除外、主卡组、额外卡组
@@ -67,7 +68,7 @@ export function endSummary(deck, endBoard) {
   return { ...viewZones(deck, endBoard, END_ZONES), interrupts: total, breakers: breakers.map((b) => ({ ...cardOf(deck, b.code), copies: b.copies, interrupts: b.interrupts, interruptHow: deck.cards[b.code].interruptHow })) };
 }
 
-// 重放一条路线，返回页面要的全部数据。重放走不通会抛错（带步号），由调用方决定怎么回
+// 重放一条路线，返回页面要的全部数据（每步的 roles：中场每张卡的作用标签，见 src/roles.js）。重放走不通会抛错（带步号），由调用方决定怎么回
 export async function replayRoute(engine, deck, route) {
   const played = await playRoute(engine, deck, route);
   if (played.scriptErrors.length) throw new Error(`引擎脚本报错：${played.scriptErrors[0]}`);
@@ -81,11 +82,17 @@ export async function replayRoute(engine, deck, route) {
       board: viewStepBoard(deck, after, diff), diff, moves: movesOf(deck, played.stepEvents[i]),
     };
   });
+  // 每步中场（怪兽区、魔陷区）每张卡此刻的作用：这一步写了的、沿用之前写的，或默认
+  const roles = resolveRoles(deck, route.id, steps.map((s) => [...s.board.monsters, ...s.board.spellTraps].map((c) => c.code)));
+  steps.forEach((s, i) => { s.roles = roles[i].map((r) => ({ ...cardOf(deck, r.code), ...r })); });
   const end = endSummary(deck, played.endBoard);
+  // 手牌里此刻有作用的卡（手坑、终场算进打断数的手牌），见 handRoles
+  const handView = (hand, breakers) => handRoles(deck, hand.map((c) => c.code), breakers).map((r) => ({ ...cardOf(deck, r.code), ...r }));
+  steps.forEach((s, i) => { s.handRoles = handView(s.board.hand, i === steps.length - 1 ? end.breakers.map((b) => b.code) : []); });
   return {
     id: route.id, name: route.name, needs: cardOf(deck, route.needs), source: route.source, verified: route.verified,
     mismatch: route.mismatch ?? '', engineDiff: diffEnd(route, played.endBoard),
-    start: viewZones(deck, played.startBoard, ZONES), steps, end,
+    start: viewZones(deck, played.startBoard, ZONES), startHandRoles: handView(played.startBoard.hand, []), steps, end,
   };
 }
 

@@ -47,10 +47,12 @@ body{font-family:"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Noto Sans 
 .spot .sk{font-size:15px;color:${COLOR.amber};letter-spacing:3px;font-weight:700}
 .spot .sn{font-size:28px;font-weight:800;margin-top:6px;white-space:nowrap}
 .cbadge{position:absolute;width:26px;height:26px;border-radius:50%;background:${COLOR.amber};color:#000;font-weight:800;font-size:15px;text-align:center;line-height:26px;z-index:60;opacity:0;pointer-events:none}
-.bkt{position:absolute;width:${CW}px;height:22px;line-height:22px;text-align:center;background:${COLOR.amber};color:#000;font-weight:800;font-size:14px;letter-spacing:3px;z-index:66;opacity:0;border-radius:3px;pointer-events:none}
+.rl{position:absolute;left:-6px;width:${CW + 12}px;bottom:4px;display:flex;flex-wrap:wrap-reverse;justify-content:center;gap:2px 3px;opacity:0;z-index:2;pointer-events:auto;cursor:default}
+.rl i{font-style:normal;font-size:13px;line-height:17px;font-weight:800;color:#000;padding:0 5px;border-radius:9px;white-space:nowrap;box-shadow:0 0 0 1.5px #000}
 `;
 
-// 合成页里的交互：悬停 / 点一下把「哪张卡、在合成页里的位置」交给外层（外层 = 页面）；左右键转给外层；host 问「现在每张卡在哪」时回答（验证脚本用）
+// 合成页里的交互：悬停 / 点一下把「哪张卡、在合成页里的位置」交给外层（外层 = 页面），作用标签同样（带作用词和原因）；左右键转给外层；
+// host 问「现在每张卡在哪」时回答每张看得见的卡和看得见的作用标签的位置（验证脚本用）
 const INTERACT = `
 (function () {
   function rectOf(el) { var r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }
@@ -60,6 +62,13 @@ const INTERACT = `
     el.addEventListener('mouseleave', function () { parent.postMessage({ type: 'yg-card-leave', code: Number(el.dataset.code) }, '*'); });
     el.addEventListener('click', function () { parent.postMessage({ type: 'yg-card-tap', code: Number(el.dataset.code), rect: rectOf(el) }, '*'); });
   });
+  var roles = document.querySelectorAll('.card .rl');
+  function roleMsg(type, el) { return { type: type, code: Number(el.dataset.code), tags: el.dataset.tags.split('、'), why: el.dataset.why, rect: rectOf(el) }; }
+  Array.prototype.forEach.call(roles, function (el) {
+    el.addEventListener('mouseenter', function () { parent.postMessage(roleMsg('yg-role-hover', el), '*'); });
+    el.addEventListener('mouseleave', function () { parent.postMessage({ type: 'yg-role-leave', code: Number(el.dataset.code) }, '*'); });
+    el.addEventListener('click', function () { parent.postMessage(roleMsg('yg-role-tap', el), '*'); });
+  });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); parent.postMessage({ type: 'yg-key', key: e.key }, '*'); }
   });
@@ -67,8 +76,10 @@ const INTERACT = `
     var d = e.data;
     if (!d || d.src !== 'yg-host' || d.cmd !== 'rects') return;
     var out = [];
-    Array.prototype.forEach.call(cards, function (el) { if (getComputedStyle(el.parentNode).visibility === 'visible') out.push({ code: Number(el.dataset.code), md: el.dataset.md, rect: rectOf(el) }); });
-    parent.postMessage({ type: 'yg-rects', cards: out }, '*');
+    Array.prototype.forEach.call(cards, function (el) { if (getComputedStyle(el.parentNode).visibility === 'visible') out.push({ code: Number(el.dataset.code), md: el.dataset.md, card: el.parentNode.id, rect: rectOf(el) }); });
+    var tags = [];
+    Array.prototype.forEach.call(roles, function (el) { if (getComputedStyle(el).visibility === 'visible' && getComputedStyle(el.parentNode).visibility === 'visible') tags.push({ code: Number(el.dataset.code), tags: el.dataset.tags.split('、'), card: el.parentNode.id, rect: rectOf(el) }); });
+    parent.postMessage({ type: 'yg-rects', cards: out, roles: tags }, '*');
   });
 })();
 `;

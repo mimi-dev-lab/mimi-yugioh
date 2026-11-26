@@ -49,16 +49,16 @@ OLD="开始一手 继续这一手 结束回合 总分 场面分 速度加成 提
 ev=$(ls -d "$YV_EVIDENCE"/*/ | head -1)
 shot deck
 has deck "游戏王 · 烙印教程" "卡组一览" "展开路线" "起手速查" "主卡组 40 张" "额外卡组 15 张" "Game8（2026-11-20 版）" \
-  "启动" "检索" "融合素材" "终场" "手坑" "白之落胤" "白き竜の落胤" "冰剑龙 镜翠幻种" "灰流丽" "打断 1" "×3" "额外" "点一张卡看效果说明"
+  "初动" "检索" "素材" "打断" "手坑" "白之落胤" "白き竜の落胤" "冰剑龙 镜翠幻种" "灰流丽" "打断 1" "×3" "额外" "点一张卡看效果说明"
 # shellcheck disable=SC2086
 lacks deck $OLD
 shot card --select "冰剑龙 镜翠幻种"
-has card "冰剑龙 镜翠幻种" "氷剣竜ミラジェイド" "终场" "额外卡组 ×1" "干什么" "条件代价" "限制" "对手回合" "终场时能打断 1 次：" "关上"
+has card "冰剑龙 镜翠幻种" "氷剣竜ミラジェイド" "打断" "默认作用" "额外卡组 ×1" "干什么" "条件代价" "限制" "对手回合" "终场时能打断 1 次：" "关上"
 lacks card "点一张卡看效果说明"
 shot card-none --select 白之落胤
-has card-none "白之落胤" "启动" "主卡组 ×1" "终场时不提供打断"
+has card-none "白之落胤" "初动" "展开点" "主卡组 ×1" "终场时不提供打断"
 shot phone --mobile
-has phone "卡组一览" "启动" "白之落胤" "白き竜の落胤"
+has phone "卡组一览" "初动" "白之落胤" "白き竜の落胤"
 # shellcheck disable=SC2086
 lacks phone $OLD
 shot routes --tab 展开路线
@@ -66,16 +66,16 @@ has routes "基本展开｜白之落胤初动" "基本展开｜烙印融合初�
 lacks routes "还没做"
 shot route-start --route white-albaz
 has route-start "起手" "起手 · 共 17 步" "上一步" "下一步" "连播" "墓地 0 张" "来源 Game8"
-lacks route-start "花了什么" "发动了" "个打断"
+lacks route-start "花了什么" "中场的卡" "发动了" "个打断"
 has route-start "先攻" "起手手牌" "除外 0 张"
 shot route-first --route white-albaz --step 1
-has route-first "第 1 / 17 步" "上一步" "下一步" "连播" "发动了 白之落胤" "花了什么" "换来什么" "手牌→场上" "墓地 1 张" "除外 0 张" "来源 Game8" "页面版本 2026-11-20" "引擎验证于 2026-11-24"
+has route-first "第 1 / 17 步" "上一步" "下一步" "连播" "发动了 白之落胤" "花了什么" "换来什么" "手牌→场上" "中场的卡和它们此刻的作用" "初动" "堆墓" "进墓是为了第 8 步检索烙印开幕" "墓地 1 张" "除外 0 张" "来源 Game8" "页面版本 2026-11-20" "引擎验证于 2026-11-24"
 lacks route-first "个打断"
 shot route-mid --route white-albaz --step 9
 has route-mid "第 9 / 17 步"
 lacks route-mid "个打断"
-shot route-end --route white-albaz --step last --keys
-has route-end "第 17 / 17 步 · 终场" "先攻结束" "2个打断" "靠这些卡" "打断 1：" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "剩余手牌" "墓地 " "除外 "
+shot route-end --route white-albaz --step last --keys --require-roles  # 场上的卡带作用标签，每块贴在自己的卡上（plugin-shot 量 yg-rects）
+has route-end "第 17 / 17 步 · 终场" "终场里每张卡的作用" "留场" "先攻结束" "2个打断" "靠这些卡" "打断 1：" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "剩余手牌" "墓地 " "除外 "
 lacks route-end "%" "还差" "估值" "评分" "总分"
 shot route-fusion-end --route branded-fusion --step last
 has route-fusion-end "第 10 / 10 步 · 终场" "1个打断" "烙印断罪"
@@ -86,6 +86,15 @@ shot route-phone --mobile --route white-albaz --step 2
 has route-phone "第 2 / 17 步" "花了什么"
 shot route-phone-end --mobile --route white-albaz --step last
 has route-phone-end "2个打断" "靠这些卡"
+# 术语表页签：每个作用词、解释；手机宽也能看
+shot glossary --tab 术语表
+has glossary "术语表" "初动" "展开点" "检索" "堆墓" "素材" "资源回收" "防手坑" "诱饵" "解场" "打断" "留场" "手坑" "防着对手的手坑"
+lacks glossary "%" "还差" "评分" "总分"
+shot glossary-phone --mobile --tab 术语表
+has glossary-phone "防手坑" "诱饵"
+# 路线里悬停作用标签：标签带原因（title）；步骤面板里原因整句可见
+shot role-step --route white-saint --step 6
+has role-step "赫之圣女 卡尔塔西亚" "打断" "防手坑" "不走卡组，灰流丽打不到"
 shot quick --tab 起手速查
 has quick "手里有哪张关键卡" "白之落胤" "烙印融合" "惨绝戏之导化 阿卢绯尔" "天底的使徒" "白之圣女 艾克利西亚" "烙印之气炎" "阿尔白斯之落胤" "手里有它：走" "基本展开｜白之落胤初动" "终场打断 2" "搭 多多迷宝・软绵雀精" "搭 黑衣龙 阿尔比昂" "搭 阿尔白斯之落胤" "缺 烙印融合" "手里有 惨绝戏之导化 阿卢绯尔 →" "检索烙印融合"
 lacks quick "还没做" "读取速查" "%" "还差" "估值" "评分" "总分"
@@ -153,7 +162,7 @@ done
 for name in anim-jump anim-auto anim-phone-auto hover-route; do
   grep -q '"jsErrors": \[\]' "$ev/$name.json" || { echo "$name 里有没接住的 JS 异常，见 $ev/$name.json"; exit 1; }
 done
-for name in deck card phone phone-card routes route-start route-first route-mid route-end route-fusion-end route-phone-start route-phone route-phone-end quick quick-phone quick-jump quick-jump-end quick-jump-phone; do
+for name in glossary glossary-phone role-step deck card phone phone-card routes route-start route-first route-mid route-end route-fusion-end route-phone-start route-phone route-phone-end quick quick-phone quick-jump quick-jump-end quick-jump-phone; do
   grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
 done
 # 步号条和按钮整条看得见：动画滚到窗口里、弹窗开着时，也不被网页工作区的窗口头部盖住（每个按钮上下沿 elementFromPoint 都落在自己身上）
