@@ -7,21 +7,24 @@ const get = async (url, path) => { const res = await fetch(`${url}${path}`); ret
 const handOf = (id) => BRANDED.routes.find((r) => r.id === id).hand;
 
 describe('起手速查：GET /routes 的 lookup', () => {
-  test('关键卡各一项：白之落胤、烙印融合、阿卢绯尔、天底的使徒，加两卡展开的白之圣女、烙印之气炎', async () => {
+  test('关键卡各一项：白之落胤、烙印融合、阿卢绯尔、天底的使徒、白之圣女、烙印之气炎、阿尔白斯之落胤', async () => {
     const server = await start({ YUGIOH_ENGINE: ENGINE_DIR });
     try {
       const { status, body } = await get(server.url, '/routes');
       assert.equal(status, 200);
-      assert.deepEqual(body.lookup.map((e) => e.card.md), ['白之落胤', '烙印融合', '惨绝戏之导化 阿卢绯尔', '天底的使徒', '白之圣女 艾克利西亚', '烙印之气炎']);
+      assert.deepEqual(body.lookup.map((e) => e.card.md), ['白之落胤', '烙印融合', '惨绝戏之导化 阿卢绯尔', '天底的使徒', '白之圣女 艾克利西亚', '烙印之气炎', '阿尔白斯之落胤']);
       for (const e of body.lookup) assert.ok(e.card.code && e.card.jp, `${e.card.md} 要带密码和日文名`);
       const by = (md) => body.lookup.find((e) => e.card.md === md);
       assert.deepEqual(by('白之落胤').routes.map((r) => r.id), ['white-albaz']);
-      assert.deepEqual(by('烙印融合').routes.map((r) => r.id), ['branded-fusion']);
-      assert.deepEqual(by('惨绝戏之导化 阿卢绯尔').routes.map((r) => r.id), ['aluber']);
+      // 烙印融合和阿卢绯尔都在手：互相指向三卡展开那条（4 个打断）
+      assert.deepEqual(by('烙印融合').routes.map((r) => [r.id, r.with?.md ?? null]), [['branded-fusion', null], ['branded-fusion-aluber', '惨绝戏之导化 阿卢绯尔']]);
+      assert.deepEqual(by('惨绝戏之导化 阿卢绯尔').routes.map((r) => [r.id, r.with?.md ?? null]), [['aluber', null], ['branded-fusion-aluber', '烙印融合']]);
       assert.deepEqual(by('天底的使徒').routes.map((r) => r.id), ['nadir-servant']);
       assert.deepEqual(by('白之圣女 艾克利西亚').routes.map((r) => r.id), ['white-saint']);
       // 烙印之气炎要搭一张怪兽：搭软绵雀精走一条，搭黑衣龙 阿尔比昂走另一条
-      assert.deepEqual(by('烙印之气炎').routes.map((r) => [r.id, r.with.md]), [['high-spirits-fuwalos', '多多迷宝・软绵雀精'], ['high-spirits-shrouded', '黑衣龙 阿尔比昂']]);
+      assert.deepEqual(by('烙印之气炎').routes.map((r) => [r.id, r.with.md]), [['high-spirits-fuwalos', '多多迷宝・软绵雀精'], ['high-spirits-shrouded', '黑衣龙 阿尔比昂'], ['high-spirits-albaz', '阿尔白斯之落胤']]);
+      // 单拿阿尔白斯之落胤展不开：搭烙印之气炎走气炎＋阿尔白斯之落胤线
+      assert.deepEqual(by('阿尔白斯之落胤').routes.map((r) => [r.id, r.with.md, r.interrupts]), [['high-spirits-albaz', '烙印之气炎', 3]]);
       assert.equal(by('烙印融合').routes[0].with, null, '单卡起手没有搭配的卡');
     } finally { server.stop(); }
   });
