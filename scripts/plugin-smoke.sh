@@ -99,6 +99,12 @@ quick-jump-phone --mobile --tab 起手速查 --jump nadir-servant --step 2
 glossary-phone --mobile --tab 术语表
 tap-deck --mobile --tab 起手速查 --tap 白之落胤 --within .yg-lookup --close
 guess-off --route white-albaz --guess on,off,next
+
+map --tab 展开地图
+map-jump --tab 展开地图 --station block:opening-bridge --stop white-albaz
+
+map-phone --mobile --tab 展开地图
+map-jump-phone --mobile --tab 展开地图 --station end:white-saint
 SHOTS
 "$V" batch "$YV_EVIDENCE/shots.txt" --jobs "${YUGIOH_SMOKE_JOBS:-6}" || { echo "有截图没截成（没画出来、断言没过或有不同源的请求），见上面的输出"; exit 1; }
 seen deck
@@ -259,5 +265,24 @@ done
 for name in hover-route anim-mid route-mid; do
   node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!j.bar || !j.bar.clear) { console.error(JSON.stringify(j.bar)); process.exit(1); }' "$ev/$name.json" || { echo "$name 的步号条被盖住了，见 $ev/$name.json"; exit 1; }
 done
+# 展开地图：地铁图每个站都画在图里（json 的 map），9 条路线 9 个终场站；点站跳到路线播放器那一步（枢纽站要先在图下面选路线），窄屏图在框里左右滑、页面不出横向滚动条
+seen map
+has map "展开地图" "汇流地铁图" "起手" "枢纽 · 6 条路线" "落胤起跳" "结束阶段大回收" "冰剑龙封场" "终场 · 基本展开" "个打断" "只看"
+lacks map "%" "还差" "估值"
+seen map-jump
+has map-jump "第 8 / 17 步" "开幕搭桥" "基本展开｜白之落胤初动"
+seen map-phone
+has map-phone "汇流地铁图" "落胤起跳"
+seen map-jump-phone
+has map-jump-phone "第 8 / 8 步 · 终场" "基本展开｜白之圣女初动"
+for name in map map-phone; do
+  node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const m = j.map; if (!m || m.stations < 20 || m.ends !== 9 || m.edges < 20 || m.outside.length) { console.error(JSON.stringify(m)); process.exit(1); }' "$ev/$name.json" || { echo "$name 的地铁图不对（站数、终场站数、边数，或有站画在图外），见 $ev/$name.json"; exit 1; }
+done
+node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!j.map.scrolls) { console.error(JSON.stringify(j.map)); process.exit(1); }' "$ev/map-phone.json" || { echo "map-phone 的图没有在框里左右滑（图比框宽才对），见 $ev/map-phone.json"; exit 1; }
+for name in map map-jump map-phone map-jump-phone; do
+  grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
+  grep -q '"jsErrors": \[\]' "$ev/$name.json" || { echo "$name 里有没接住的 JS 异常，见 $ev/$name.json"; exit 1; }
+done
+node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!j.mapJump || j.mapJump.route !== "white-albaz" || j.mapJump.step !== 8) { console.error(JSON.stringify(j.mapJump)); process.exit(1); }' "$ev/map-jump.json" || { echo "map-jump：枢纽站跳到的不是白之落胤第 8 步，见 $ev/map-jump.json"; exit 1; }
 status=0
-echo "游戏王插件在网页工作区里画出来了：卡组一览按作用分组（简中名、日文名、张数、打断数），点卡出效果说明和对手回合怎么打断，桌面宽和手机宽都能用；展开路线列表和逐步播放（起手、第 1 步、中间一步、终场汇总，桌面宽和手机宽），路线动画（下一步播完停住、点步号跳、连播到终场、中间帧、动画里悬停和点卡、动画框里没有非本地请求）；起手速查按关键卡列出路线和缺卡改走哪条，点一条跳到它的播放页；没有旧功能的字样"
+echo "游戏王插件在网页工作区里画出来了：卡组一览按作用分组（简中名、日文名、张数、打断数），点卡出效果说明和对手回合怎么打断，桌面宽和手机宽都能用；展开路线列表和逐步播放（起手、第 1 步、中间一步、终场汇总，桌面宽和手机宽），路线动画（下一步播完停住、点步号跳、连播到终场、中间帧、动画里悬停和点卡、动画框里没有非本地请求）；起手速查按关键卡列出路线和缺卡改走哪条，点一条跳到它的播放页；展开地图的汇流地铁图（桌面宽、手机宽，点站跳到路线的那一步）；没有旧功能的字样"

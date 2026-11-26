@@ -27,7 +27,7 @@ $P up --images ~/.cache/mimi-yugioh/real-images   # 用真卡图（先 node scri
 ## Drive
 
 ```sh
-$P shot <名字> [--design | --mobile] [--tab 卡组一览|展开路线|起手速查] [--select 卡名] [--route ID或名字 | --jump ID] [--step N|起手|last] [--keys] [--compare PNG]
+$P shot <名字> [--design | --mobile] [--tab 卡组一览|展开路线|起手速查|展开地图] [--station 站id [--stop 路线id]] [--select 卡名] [--route ID或名字 | --jump ID] [--step N|起手|last] [--keys] [--compare PNG]
 ```
 
 从侧栏点「游戏王」（默认是「卡组一览」），可选地：`--tab` 切页签，`--select` 在卡组一览里按卡名点一张卡（等说明区出这张卡）；`--jump ID`（要和 `--tab 起手速查` 一起用）点速查里指向这条路线的第一个按钮，页面应当跳到「展开路线」页签里那条路线的播放页（起手，第 0 步）；`--route` 打开「展开路线」并点列表里的那条（按 id，如 `white-albaz` / `branded-fusion`，或名字的一部分），播放页默认停在「起手」（第 0 步）；`--step N|起手|last`（要和 `--route` 或 `--jump` 一起用）从起手起一步步点「下一步」走到第 N 步（0 或「起手」不动）或最后一步（终场汇总），`--keys` 改按右方向键。手机宽加 `--route` 时整页截长图。视口默认是 1600 宽的桌面、按内容拉高；`--design` 是设计稿的 1280×860 并收起侧栏；`--mobile` 是手机（390×844，按手机模拟）并收起侧栏。网页工作区自己的「Update ready」提示框会被关掉，不盖住页面。`--hover-anim` / `--tap-anim 卡名` 悬停 / 点路线动画里的一张卡（动画框报位置，真鼠标点过去）；`--click-step N|起手` 点步号条；`--play-all` 点「连播」等到终场（用时写进 `.json` 的 `playedMs`）；`--stage-at K:比例` 把动画停在第 K 步的这个比例处（中间帧）；`--net-file 文件` 把这个标签页和动画框发的每个请求写进文件（`.json` 的 `cdp.foreign` 是非本地的）。`--compare` 另写 `<名字>-compare.png`：设计稿在左、这张在右。写进证据目录 `<名字>.png`、`.txt`（页面文字）、`.json`（这个页签发的请求、不同源的请求、有没有横向滚动条 `overflowX`）。

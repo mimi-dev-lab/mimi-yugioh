@@ -37,8 +37,8 @@ const viewKey = (o) => (o.mobile ? 'mobile' : o.design ? 'design' : 'desktop');
 const VIEWS = { mobile: { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }, design: { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false }, desktop: { width: 1600, height: 900, deviceScaleFactor: 1, mobile: false } };
 // 一张截图从新开的页面走到它要的样子经过的点击（页签、选卡、速查跳转、路线），步数另算；下一张能不能接着这张走就看这个前缀
 const pathOf = (o) => {
-  const tab = o.jump ? '起手速查' : o.route && (!o.tab || o.tab === '卡组一览') ? '展开路线' : (o.tab || '卡组一览');
-  return [tab !== '卡组一览' && `tab:${tab}`, o.select && `select:${o.select}`, o.jump && `jump:${o.jump}`, o.route && `route:${o.route}`].filter(Boolean);
+  const tab = o.station ? '展开地图' : o.jump ? '起手速查' : o.route && (!o.tab || o.tab === '卡组一览') ? '展开路线' : (o.tab || '卡组一览');
+  return [tab !== '卡组一览' && `tab:${tab}`, o.select && `select:${o.select}`, o.jump && `jump:${o.jump}`, o.station && `station:${o.station}:${o.stop ?? ''}`, o.route && `route:${o.route}`].filter(Boolean);
 };
 const stepOf = (o) => (o.step === 'last' ? Infinity : o.step === undefined || o.step === null || o.step === '起手' ? 0 : Number(o.step));
 // 做过这些动作的页面不再给下一张接着用：它们改了页面状态（弹窗、动画跳步、连播、本地存储里的开关、滚动、并排图换了页面），不是「从头点到这」的样子
@@ -176,6 +176,7 @@ async function main() {
       if (!(await clickButton(opts.tab))) throw new Error(`页面上没有页签「${opts.tab}」`);
       await until((t) => [...document.querySelectorAll('.yg-tab.on')].some((b) => b.innerText === t), opts.tab, 10000, `「${opts.tab}」页签打开`);
     }
+    if (opts.tab === '展开地图') await until(() => document.querySelectorAll('.yg-subway .yg-station').length > 0, null, 30000, '地铁图出来').catch(fail);
     // 卡组一览里点一张卡（按卡名：aria-label），等说明区出这张卡
     if (opts.select && !did.has(`select:${opts.select}`)) {
       const clicked = await evaluate((n) => { const b = [...document.querySelectorAll('.yg-deck button.yg-tile')].find((x) => x.getAttribute('aria-label') === n); if (!b) return false; b.click(); return true; }, opts.select);
@@ -191,6 +192,21 @@ async function main() {
       if (!jumped) await fail(new Error(`速查里没有指向「${opts.jump}」的路线`));
       await until(() => !!document.querySelector('.yg-player') && [...document.querySelectorAll('.yg-tab.on')].some((b) => b.innerText === '展开路线'), null, 60000, '跳到展开路线的播放页').catch(fail);
     }
+    // 展开地图：点图上的一站（data-station）；这一站有好几条路线经过时，图下面列出可跳的路线，再点 --stop 指的那一条；应当跳到「展开路线」页签里那条路线的播放页，停在这一站的步（data-step 记在 json 的 mapJump）
+    let mapJump = null;
+    if (opts.station && !did.has(`station:${opts.station}:${opts.stop ?? ''}`)) {
+      if (opts.tab !== '展开地图') throw new Error('--station 要和 --tab 展开地图 一起用');
+      await until(() => document.querySelectorAll('.yg-subway .yg-station').length > 0, null, 30000, '地铁图出来').catch(fail);
+      const hit = await evaluate((id) => { const b = [...document.querySelectorAll('.yg-subway .yg-station')].find((x) => x.dataset.station === id); if (!b) return null; const stops = Number(b.dataset.stops); b.click(); return { stops }; }, opts.station);
+      if (!hit) await fail(new Error(`地铁图里没有站「${opts.station}」`));
+      if (hit.stops > 1) {
+        if (!opts.stop) await fail(new Error(`站「${opts.station}」有 ${hit.stops} 条路线经过，要用 --stop 指一条`));
+        await until(() => !!document.querySelector('.yg-picked'), null, 10000, '这一站的详情出来').catch(fail);
+        mapJump = await evaluate((r) => { const b = [...document.querySelectorAll('.yg-picked .yg-jump')].find((x) => x.dataset.routeId === r); if (!b) return null; b.click(); return { route: r, step: Number(b.dataset.step) }; }, opts.stop);
+        if (!mapJump) await fail(new Error(`站「${opts.station}」的详情里没有路线「${opts.stop}」`));
+      }
+      await until(() => !!document.querySelector('.yg-player') && [...document.querySelectorAll('.yg-tab.on')].some((b) => b.innerText === '展开路线'), null, 60000, '跳到展开路线的播放页').catch(fail);
+    }
     if (opts.route && !did.has(`route:${opts.route}`)) {
       if ((!opts.tab || opts.tab === '卡组一览') && !did.has('tab:展开路线')) {
         if (!(await clickButton('展开路线'))) throw new Error('页面上没有页签「展开路线」');
@@ -202,7 +218,7 @@ async function main() {
       await until(() => !!document.querySelector('.yg-player'), null, 60000, '播放页出来').catch(fail);
     }
     // 播放页的动画框架就绪（路线动画页装好、播放器 ready）才算打开
-    if (opts.route || opts.jump) await until(() => document.querySelector('.yg-player')?.dataset.ready === 'true', null, 120000, '路线动画就绪').catch(fail);
+    if (opts.route || opts.jump || opts.station) await until(() => document.querySelector('.yg-player')?.dataset.ready === 'true', null, 120000, '路线动画就绪').catch(fail);
     const idle = (ms = 60000) => until(() => document.querySelector('.yg-player').dataset.mode === 'idle', null, ms, '动画播完停住');
     if (opts.step) {
       if (!opts.route && !opts.jump) throw new Error('--step 要和 --route 或 --jump 一起用');
@@ -349,7 +365,7 @@ async function main() {
       setTimeout(() => resolve(null), 8000);
     }));
     let stage = null;
-    if (opts.route || opts.jump) {
+    if (opts.route || opts.jump || opts.station) {
       const r = await stageRects();
       if (r) {
         const scale = r.cards[0] ? r.cards[0].rect.w / 80 : 1; // 动画缩放：卡宽 80 px 在页面里有多宽
@@ -420,13 +436,23 @@ async function main() {
       const first = btns[0].getBoundingClientRect();
       return { clear: hidden.length === 0, hidden, firstTop: first.top, firstBottom: first.bottom };
     });
+    // 展开地图的地铁图：站数、图的宽和外框的宽（窄屏图比外框宽，在框里左右滑，页面本身不出横向滚动条）、每个站都在图的范围里
+    const map = await evaluate(() => {
+      const g = document.querySelector('.yg-subway'), box = document.querySelector('.yg-subway-scroll');
+      if (!g) return null;
+      const gr = g.getBoundingClientRect();
+      const outside = [...g.querySelectorAll('.yg-station')].filter((st) => { const r = st.getBoundingClientRect(); return r.left < gr.left - 1 || r.right > gr.right + 1 || r.top < gr.top - 1 || r.bottom > gr.bottom + 1; }).map((st) => st.dataset.station);
+      const stations = [...g.querySelectorAll('.yg-station')];
+      const ends = stations.filter((st) => st.dataset.kind === 'end').length;
+      return { stations: stations.length, ends, edges: g.querySelectorAll('.yg-edge').length, graphWidth: gr.width, boxWidth: box.clientWidth, outside, scrolls: box.scrollWidth > box.clientWidth + 1 };
+    });
     const overflowX = await evaluate(() => { const x = document.querySelector('.yg'); return x.scrollWidth > x.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1; });
     const height = await evaluate(() => document.querySelector('.yg').scrollHeight);
     await sleep(600);
     // --design 保持 1280×860 的视口（和设计稿同样大），--mobile 保持一屏手机；平时把视口拉到内容那么高
     if (aim || roleAim) { /* 弹窗开着：不改视口，不然鼠标和弹窗都变了 */ }
     else if (!opts.design && !opts.mobile) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 200, 4000) }); await sleep(500); }
-    else if (opts.mobile && (opts.route || opts.jump || (opts.tab === '起手速查' || opts.tab === '术语表'))) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 100, 5000) }); await sleep(500); }
+    else if (opts.mobile && (opts.route || opts.jump || opts.station || (opts.tab === '起手速查' || opts.tab === '术语表' || opts.tab === '展开地图'))) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 100, 5000) }); await sleep(500); }
     await until(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity), null, 5000, '动画走完').catch(() => {});
     // --clip-stage：只截动画框（场面特写），按 2 倍像素
     const clip = opts.clipStage ? await evaluate(() => { const st = document.querySelector('.yg-stage'); st.scrollIntoView({ block: 'start' }); const b = st.querySelector('iframe').getBoundingClientRect(); return { x: b.left + scrollX, y: b.top + scrollY, width: b.width, height: b.height, scale: 2 }; }) : null;
@@ -458,7 +484,7 @@ async function main() {
     const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
     const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
     if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
-    await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, blocks, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
+    await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, map, mapJump, blocks, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
     page.step = await evaluate(() => Number(document.querySelector('.yg-player')?.dataset.step ?? 0));
     // 并排对照：设计稿 PNG 在左（标签 --compare-label，默认「样子稿」），这张和 --compare-with 列的同一证据目录里先截的几张在右，上下排；在一个 data: 页面里拼好再截一张
     if (opts.compare) {
