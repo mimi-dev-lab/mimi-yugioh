@@ -21,10 +21,10 @@ cleanup() {
   [ "$status" = 0 ] && rm -rf "$YV_EVIDENCE" || echo "证据留在 $YV_EVIDENCE" >&2
 }
 trap cleanup EXIT
-# shot 名字 [参数…]：截一张，页面上不能有 NaN、undefined、Infinity
-shot() {
-  name=$1; shift
-  "$V" shot "$name" "$@" || { echo "$name 失败（有不同源的请求或没画出来）：$*"; exit 1; }
+# seen 名字：这张截出来了，页面上不能有 NaN、undefined、Infinity
+seen() {
+  name=$1
+  [ -f "$ev/$name.txt" ] || { echo "$name 没截出来，见上面 plugin-verify batch 的输出"; exit 1; }
   for bad in "NaN" "undefined" "Infinity"; do
     ! grep -qF "$bad" "$ev/$name.txt" || { echo "$name 上有「${bad}」，见 $ev/$name.txt"; exit 1; }
   done
@@ -47,69 +47,123 @@ lacks() {
 OLD="开始一手 继续这一手 结束回合 总分 场面分 速度加成 提示 记卡 进步 个人最好 基准 到期 %"
 "$V" up || exit 1
 ev=$(ls -d "$YV_EVIDENCE"/*/ | head -1)
-shot deck
+# 截图一次截完（plugin-verify batch），再往下逐张查页面文字和 .json。清单一行一张，参数和 plugin-verify shot 一样；
+# 空行隔开的每一段是一个浏览器，按顺序截，下一张只比上一张多点几下（同一个宽度，页签、卡、路线相同，步数往后）时接着上一张的页面走，
+# 不重新载入（规则在 plugin-shot.mjs 开头）；几段同时跑（YUGIOH_SMOKE_JOBS 段，默认 6）。分段只为了快：哪张放哪段不影响查什么。
+cat >"$YV_EVIDENCE/shots.txt" <<'SHOTS'
+routes --tab 展开路线
+route-start --route white-albaz --require-blocks
+route-first --route white-albaz --step 1 --require-blocks
+route-mid --route white-albaz --step 9 --require-blocks
+route-end --route white-albaz --step last --keys --require-roles  # 场上的卡带作用标签，每块贴在自己的卡上（plugin-shot 量 yg-rects）
+hover-end --route white-albaz --step last --hover "冰剑龙 镜翠幻种" --within .yg-end --close
+guess-flow --route white-albaz --guess on,ask,space,ask,click,ask,next
+
+route-phone-start --mobile --route white-albaz --step 起手
+route-phone --mobile --route white-albaz --step 2 --require-blocks
+route-phone-end --mobile --route white-albaz --step last
+phone --mobile
+phone-card --mobile --tap 灰流丽 --within .yg-deck --close
+tap-route --mobile --route white-albaz --step 1 --tap-anim 白之落胤
+hover-route --route white-albaz --step 1 --hover-anim 白之落胤 --close
+
+route-fusion-end --route branded-fusion --step last --require-blocks
+quick-jump-end --tab 起手速查 --jump white-saint --step last
+guess-midplay --route branded-fusion --guess play,on,wait
+glossary --tab 术语表
+card-none --select 白之落胤
+hover-deck --hover "冰剑龙 镜翠幻种" --close
+hover-lookup --tab 起手速查 --hover 白之落胤 --within .yg-lookup --close
+
+anim-auto --route branded-fusion --play-all
+role-step --route white-saint --step 6
+anim-jump --route white-albaz --step 3 --click-step 9
+guess-reopen --route white-albaz --guess on,reopen
+guess-focus --route white-albaz --step 2 --guess on,ask,autospace
+
+guess-end --route branded-fusion --step 9 --guess on,auto,space
+guess-auto --route branded-fusion --guess on,auto,space,space,off
+anim-back --route white-albaz --step 3 --click-step 起手
+guess-ask --design --route white-albaz --step 2 --guess on,ask
+
+anim-phone-auto --mobile --route branded-fusion --step 2 --click-step 10
+guess-phone --mobile --route white-albaz --step 2 --guess on,ask
+guess-phone-after --mobile --route white-albaz --step 2 --guess on,ask,click
+deck
+card --select "冰剑龙 镜翠幻种"
+anim-mid --route white-albaz --stage-at 3:0.4
+quick --tab 起手速查
+quick-jump --tab 起手速查 --jump aluber
+quick-phone --mobile --tab 起手速查
+quick-jump-phone --mobile --tab 起手速查 --jump nadir-servant --step 2
+glossary-phone --mobile --tab 术语表
+tap-deck --mobile --tab 起手速查 --tap 白之落胤 --within .yg-lookup --close
+guess-off --route white-albaz --guess on,off,next
+SHOTS
+"$V" batch "$YV_EVIDENCE/shots.txt" --jobs "${YUGIOH_SMOKE_JOBS:-6}" || { echo "有截图没截成（没画出来、断言没过或有不同源的请求），见上面的输出"; exit 1; }
+seen deck
 has deck "游戏王 · 烙印教程" "卡组一览" "展开路线" "起手速查" "主卡组 40 张" "额外卡组 15 张" "Game8（2026-11-20 版）" \
   "初动" "检索" "素材" "打断" "手坑" "白之落胤" "白き竜の落胤" "冰剑龙 镜翠幻种" "灰流丽" "打断 1" "×3" "额外" "点一张卡看效果说明"
 # shellcheck disable=SC2086
 lacks deck $OLD
-shot card --select "冰剑龙 镜翠幻种"
+seen card
 has card "冰剑龙 镜翠幻种" "氷剣竜ミラジェイド" "打断" "默认作用" "额外卡组 ×1" "干什么" "条件代价" "限制" "对手回合" "终场时能打断 1 次：" "关上"
 lacks card "点一张卡看效果说明"
-shot card-none --select 白之落胤
+seen card-none
 has card-none "白之落胤" "初动" "展开点" "主卡组 ×1" "终场时不提供打断"
-shot phone --mobile
+seen phone
 has phone "卡组一览" "初动" "白之落胤" "白き竜の落胤"
 # shellcheck disable=SC2086
 lacks phone $OLD
-shot routes --tab 展开路线
+seen routes
 has routes "基本展开｜白之落胤初动" "基本展开｜烙印融合初动" "需要的起手卡" "终场打断 2" "终场打断 1" "来源 Game8（2026-11-20 版）" "引擎验证于 2026-11-24"
 lacks routes "还没做"
-shot route-start --route white-albaz --require-blocks
+seen route-start
 has route-start "起手" "起手 · 共 17 步" "落胤起跳" "圣女接力" "结束阶段大回收" "开幕搭桥" "冰剑龙封场" "这条路线由 5 块积木拼成" "要什么" "给什么" "上一步" "下一步" "连播" "墓地 0 张" "来源 Game8"
 lacks route-start "花了什么" "中场的卡" "发动了" "个打断"
 has route-start "先攻" "起手手牌" "除外 0 张"
-shot route-first --route white-albaz --step 1 --require-blocks
+seen route-first
 has route-first "第 1 / 17 步" "上一步" "下一步" "连播" "发动了 白之落胤" "花了什么" "换来什么" "手牌→场上" "中场的卡和它们此刻的作用" "初动" "堆墓" "进墓是为了第 8 步检索烙印开幕" "墓地 1 张" "除外 0 张" "来源 Game8" "页面版本 2026-11-20" "引擎验证于 2026-11-24"
 has route-first "积木" "落胤起跳" "第 1–2 步 · 这块的第 1 / 2 步" "要什么" "给什么" "白之落胤在手"
 lacks route-first "个打断"
-shot route-mid --route white-albaz --step 9 --require-blocks
+seen route-mid
 has route-mid "第 9 / 17 步" "开幕搭桥" "第 8–13 步 · 这块的第 2 / 6 步"
 lacks route-mid "个打断"
-shot route-end --route white-albaz --step last --keys --require-roles  # 场上的卡带作用标签，每块贴在自己的卡上（plugin-shot 量 yg-rects）
+seen route-end
 has route-end "冰剑龙封场" "第 14–17 步 · 这块的第 4 / 4 步" "第 17 / 17 步 · 终场" "终场里每张卡的作用" "留场" "先攻结束" "2个打断" "靠这些卡" "打断 1：" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "剩余手牌" "墓地 " "除外 "
 lacks route-end "%" "还差" "估值" "评分" "总分"
-shot route-fusion-end --route branded-fusion --step last --require-blocks
+seen route-fusion-end
 has route-fusion-end "第 10 / 10 步 · 终场" "1个打断" "烙印断罪" "融合连发" "结束阶段大回收" "收网"
-shot route-phone-start --mobile --route white-albaz --step 起手
+seen route-phone-start
 has route-phone-start "起手 · 共 17 步"
 lacks route-phone-start "花了什么"
-shot route-phone --mobile --route white-albaz --step 2 --require-blocks
+seen route-phone
 has route-phone "第 2 / 17 步" "花了什么" "落胤起跳" "圣女接力" "要什么" "给什么"
-shot route-phone-end --mobile --route white-albaz --step last
+seen route-phone-end
 has route-phone-end "2个打断" "靠这些卡"
 # 术语表页签：每个作用词、解释；手机宽也能看
-shot glossary --tab 术语表
+seen glossary
 has glossary "术语表" "初动" "展开点" "检索" "堆墓" "素材" "资源回收" "防手坑" "诱饵" "解场" "打断" "留场" "手坑" "防着对手的手坑"
 lacks glossary "%" "还差" "评分" "总分"
-shot glossary-phone --mobile --tab 术语表
+seen glossary-phone
 has glossary-phone "防手坑" "诱饵"
 # 路线里悬停作用标签：标签带原因（title）；步骤面板里原因整句可见
-shot role-step --route white-saint --step 6
+seen role-step
 has role-step "赫之圣女 卡尔塔西亚" "打断" "防手坑" "不走卡组，灰流丽打不到"
-shot quick --tab 起手速查
+seen quick
 has quick "手里有哪张关键卡" "白之落胤" "烙印融合" "惨绝戏之导化 阿卢绯尔" "天底的使徒" "白之圣女 艾克利西亚" "烙印之气炎" "阿尔白斯之落胤" "手里有它：走" "基本展开｜白之落胤初动" "终场打断 2" "搭 多多迷宝・软绵雀精" "搭 黑衣龙 阿尔比昂" "搭 阿尔白斯之落胤" "缺 烙印融合" "手里有 惨绝戏之导化 阿卢绯尔 →" "检索烙印融合"
 lacks quick "还没做" "读取速查" "%" "还差" "估值" "评分" "总分"
 # shellcheck disable=SC2086
 lacks quick $OLD
-shot quick-phone --mobile --tab 起手速查
+seen quick-phone
 has quick-phone "缺 烙印融合" "基本展开｜烙印融合初动" "终场打断 1"
 # 点一条速查里的路线：跳到展开路线页签里那条路线的播放页，停在起手；再翻到终场
-shot quick-jump --tab 起手速查 --jump aluber
+seen quick-jump
 has quick-jump "展开路线" "基本展开｜阿卢绯尔初动" "← 路线列表" "起手 · 共 12 步" "手牌"
 lacks quick-jump "花了什么" "手里有哪张关键卡"
-shot quick-jump-end --tab 起手速查 --jump white-saint --step last
+seen quick-jump-end
 has quick-jump-end "基本展开｜白之圣女初动" "2个打断" "三英的相剑师" "赫之圣女 卡尔塔西亚"
-shot quick-jump-phone --mobile --tab 起手速查 --jump nadir-servant --step 2
+seen quick-jump-phone
 has quick-jump-phone "基本展开｜天底的使徒初动" "第 2 / 13 步" "花了什么"
 # 卡片弹窗：悬停（桌面）/ 点一下（手机）弹出放大卡图 + 两个名字 + 作用 + 三件事 + 对手回合怎么打断；整块在窗口里；关得掉
 popup() {
@@ -123,66 +177,66 @@ popup() {
     if (bad.length) { console.error(bad.join("；")); process.exit(1); }
   ' "$ev/$name.json" "$2" || { echo "$name 的弹窗不对，见 $ev/$name.json"; exit 1; }
 }
-shot hover-deck --hover "冰剑龙 镜翠幻种" --close
+seen hover-deck
 popup hover-deck close
 grep -q '"text": ".*氷剣竜ミラジェイド.*干什么.*对手回合.*终场时能打断 1 次' "$ev/hover-deck.json" || { echo "hover-deck 的弹窗里缺日文名、干什么或对手回合，见 $ev/hover-deck.json"; exit 1; }
-shot hover-route --route white-albaz --step 1 --hover-anim 白之落胤 --close
+seen hover-route
 popup hover-route close
-shot hover-lookup --tab 起手速查 --hover 白之落胤 --within .yg-lookup --close
+seen hover-lookup
 popup hover-lookup close
-shot hover-end --route white-albaz --step last --hover "冰剑龙 镜翠幻种" --within .yg-end --close
+seen hover-end
 popup hover-end close
-shot tap-route --mobile --route white-albaz --step 1 --tap-anim 白之落胤
+seen tap-route
 popup tap-route
 grep -qF "× 关上" "$ev/tap-route.json" || { echo "tap-route 的弹窗里没有「× 关上」，见 $ev/tap-route.json"; exit 1; }
 # 卡组一览在手机上点卡：弹窗（带「× 关上」），不开页面里的说明区
-shot phone-card --mobile --tap 灰流丽 --within .yg-deck --close
+seen phone-card
 popup phone-card close
 grep -q '"text": ".*灰流うらら.*手坑.*× 关上.*干什么.*从手牌发动，不算终场的打断' "$ev/phone-card.json" || { echo "phone-card 的弹窗里缺日文名、作用、干什么、对手回合或「× 关上」，见 $ev/phone-card.json"; exit 1; }
 lacks phone-card "点一张卡看效果说明"
-shot tap-deck --mobile --tab 起手速查 --tap 白之落胤 --within .yg-lookup --close
+seen tap-deck
 popup tap-deck close
 # 路线动画：下一步播完停住；点步号跳到那一步的结束帧；连播到终场；动画中间帧；只有本地请求（动画框架里也不联网）
-shot anim-mid --route white-albaz --stage-at 3:0.4
+seen anim-mid
 has anim-mid "起手 · 共 17 步"
-shot anim-jump --route white-albaz --step 3 --click-step 9
+seen anim-jump
 has anim-jump "第 9 / 17 步" "发动了 烙印开幕"
 lacks anim-jump "个打断"
-shot anim-back --route white-albaz --step 3 --click-step 起手
+seen anim-back
 has anim-back "起手 · 共 17 步"
-shot anim-auto --route branded-fusion --play-all
+seen anim-auto
 has anim-auto "第 10 / 10 步 · 终场" "1个打断"
-shot anim-phone-auto --mobile --route branded-fusion --step 2 --click-step 10
+seen anim-phone-auto
 has anim-phone-auto "个打断"
 # 先猜再看：开关开着时每步动画前先停住，只写「第 n 步：想想下一步做什么？」，按空格 / 点一下 / 点「下一步」才播这一步；连播每步也停；开关记在浏览器本地；关着时和平常一样
 # guess 名字 'JS 表达式'：对 <名字>.json 的 guess.log（每个动作之后的页面状态）求值，要为真
 guess() {
   node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const log = j.guess && j.guess.log; if (!log || !(new Function("log", "return (" + process.argv[2] + ")"))(log)) { console.error(JSON.stringify(log, null, 1)); process.exit(1); }' "$ev/$1.json" "$2" || { echo "$1 的先猜再看不对：$2，见 $ev/$1.json"; exit 1; }
 }
-shot guess-ask --design --route white-albaz --step 2 --guess on,ask
+seen guess-ask
 has guess-ask "先猜再看" "第 3 步：想想下一步做什么？" "第 2 / 17 步" "落胤起跳"
 lacks guess-ask "花了什么" "发动了" "中场的卡" "%" "还差" "评分" "总分" "圣女接力" "开幕搭桥" "冰剑龙封场" "要什么"
 guess guess-ask 'log[1].pending === "true" && log[1].step === 2 && log[1].mode === "idle" && log[1].prompt.includes("第 3 步：想想下一步做什么？") && !/花了什么|发动了/.test(log[1].panel) && log[1].panel.includes("第 3 步") && log[0].stored === "true"'
-shot guess-flow --route white-albaz --guess on,ask,space,ask,click,ask,next
+seen guess-flow
 has guess-flow "第 3 / 17 步" "花了什么"
 guess guess-flow 'log[1].step === 0 && log[2].step === 1 && log[2].pending === "false" && log[2].mode === "idle" && log[3].step === 1 && log[4].step === 2 && log[5].step === 2 && log[6].step === 3 && log[6].pending === "false" && log.filter((l) => l.act === "ask").every((l) => l.pending === "true")'
-shot guess-phone --mobile --route white-albaz --step 2 --guess on,ask
+seen guess-phone
 has guess-phone "先猜再看" "第 3 步：想想下一步做什么？" "落胤起跳"
 lacks guess-phone "花了什么" "圣女接力" "要什么"
-shot guess-phone-after --mobile --route white-albaz --step 2 --guess on,ask,click
+seen guess-phone-after
 has guess-phone-after "第 3 / 17 步" "花了什么"
-shot guess-auto --route branded-fusion --guess on,auto,space,space,off
+seen guess-auto
 has guess-auto "第 2 / 10 步"
 guess guess-auto 'log[1].pending === "true" && log[1].step === 0 && log[2].step === 1 && log[2].pending === "true" && log[3].step === 2 && log[3].pending === "true" && log[4].pending === "false" && log[4].guess === "false" && log[4].stored === "false"'
-shot guess-reopen --route white-albaz --guess on,reopen
+seen guess-reopen
 guess guess-reopen 'log[1].guess === "true" && log[1].checked === "true" && log[1].stored === "true"'
-shot guess-midplay --route branded-fusion --guess play,on,wait
+seen guess-midplay
 guess guess-midplay 'log[1].guess === "true" && log[1].mode === "idle" && log[1].pending === "false" && log[1].autoLabel === "连播" && log[2].mode === "idle" && log[2].step === log[1].step && log[2].pending === "false"'
-shot guess-end --route branded-fusion --step 9 --guess on,auto,space
+seen guess-end
 guess guess-end 'log[2].step === 10 && log[2].mode === "idle" && log[2].pending === "false" && log[2].autoLabel === "连播"'
-shot guess-focus --route white-albaz --step 2 --guess on,ask,autospace
+seen guess-focus
 guess guess-focus 'log[2].step === 2 && log[2].pending === "true" && log[2].autoLabel === "暂停"'
-shot guess-off --route white-albaz --guess on,off,next
+seen guess-off
 has guess-off "第 1 / 17 步" "花了什么"
 guess guess-off 'log[2].step === 1 && log[2].pending === "false" && log[2].guess === "false" && log[2].checked === "false"'
 for name in guess-ask guess-phone guess-phone-after guess-flow guess-auto; do

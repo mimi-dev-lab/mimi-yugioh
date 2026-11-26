@@ -45,6 +45,7 @@ scripts/deploy.js    部署到 mini：导出 origin/main、核对、装依赖、
 scripts/smoke.js     线上冒烟（只读）：部署的版本、/health、/deck、/routes（有路线、每条重放通过）、卡组用到的卡图
 scripts/plugin-setup  把插件链进 Hermes 的插件目录（`--home <目录>` 沙盒用；`--live` 是上线那一步，单独一张票，要用户点头）
 scripts/plugin-smoke.sh  ./ci 的插件冒烟：临时 Hermes 网页工作区里看卡组一览、点卡看说明、展开路线列表和逐步播放（起手、第 1 步、中间一步、终场），路线动画（下一步播完停住、点步号跳、连播到终场、中间帧、动画里悬停 / 点卡、网络记录里没有非本地请求；积木分段（步号条每段一块积木、面板写要什么 → 给什么、起手面板列全部积木；先猜再看时没播到的积木名不露）；guess-* 几条：先猜再看的停住提示（面板里没有这一步的内容）、空格 / 点 / 下一步揭晓、连播每步停、连播中切开关会停住、播到终场不留提示、焦点在按钮上空格不抢、开关记在本地），桌面宽和手机宽各一遍
+scripts/ci-lock.sh   ./ci 的第一项：同一个检出同时只跑一份 ./ci，第二份等前一份结束（锁在 git 目录下的 ci-lock/，主人是 ./ci 的进程，进程没了锁就算放了）
 scripts/check.js     ./ci 用的架构约定检查（boundary、deps-whitelist、outbound、test-isolation、plugin、plugin-loads）
 plugin/              Hermes 插件「游戏王」（路由 /yugioh）：plugin.yaml、dashboard/（后端，只转发给本机服务）、webapp/plugin.js（页面）
 .claude/skills/verify-yugioh/  在真页面上验证的技能：yv.mjs（临时服务）、plugin-verify（临时网页工作区）、plugin-shot.mjs（无头 Chromium）
@@ -80,7 +81,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 冒烟（`npm run smoke`，`scripts/smoke.js`）只读：`DEPLOYED` 等于期望的 sha（默认 `origin/main`）；`127.0.0.1:4519` 的 `/health`（`{ok:true}`）、`/deck`（有卡）、`/routes`（有路线和起手速查、速查指向的路线都在列表里；引擎数据在、每条重放得通才是 200）都 200；卡组用到的每张卡图经 `/card-image` 都读得到（缺了只提醒：页面改写卡名）；服务日志超过 10 MB 时提醒。输出一行一项「通过 / 失败 / 提醒」，有失败就非 0。
 
-`./ci` 的插件冒烟（`scripts/plugin-smoke.sh`，临时网页工作区里无头 Chromium 截图，截图拷到 `YUGIOH_SMOKE_KEEP` 目录）除卡组一览外，还截 `/routes` 的路线列表和白之落胤线的播放页：起手（第 0 步）、第 1 步、中间一步、终场（桌面宽按钮和右方向键各一次、手机宽），烙印融合线的终场；起手速查截桌面宽和手机宽，并从速查点路线（阿卢绯尔线、白之圣女线、天底的使徒线）看跳到播放页、翻到终场；每张查页面文字和不横向滚动。
+`./ci` 的插件冒烟（`scripts/plugin-smoke.sh`，临时网页工作区里无头 Chromium 截图，截图拷到 `YUGIOH_SMOKE_KEEP` 目录）除卡组一览外，还截 `/routes` 的路线列表和白之落胤线的播放页：起手（第 0 步）、第 1 步、中间一步、终场（桌面宽按钮和右方向键各一次、手机宽），烙印融合线的终场；起手速查截桌面宽和手机宽，并从速查点路线（阿卢绯尔线、白之圣女线、天底的使徒线）看跳到播放页、翻到终场；每张查页面文字和不横向滚动。全部截图由 `plugin-verify batch` 一次截完：分几路（几个浏览器）同时跑，每路里下一张只比上一张多点几下时接着上一张的页面走，不重新载入，截完再逐张查。
 
 日志在 `~/Library/Logs/mimi-yugioh.log`。查跑的是哪个版本：`cat "$HOME/Library/Application Support/MimiYugioh/DEPLOYED"`。node 用 mise 装的绝对路径（`…/mise/installs/node/22/bin/node`，`22` 是指向当前小版本的软链接）；服务不读 iCloud，不要完全磁盘访问权限，也不连 NAS（卡图由 `sync-card-images.js` 手动复制进 `images/`）。上线的整个顺序（准备数据、部署、装插件、回退）见 README「上线清单」。
 

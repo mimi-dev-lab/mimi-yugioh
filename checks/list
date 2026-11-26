@@ -2,9 +2,11 @@
 # 名字前带 ! 的是前提，没过就停；格式的全文在 ./ci 开头。
 # 不碰线上：测试用临时目录、PORT=0、编的数据，不读 ~/.mimi-yugioh，不连常驻的服务（4519）。
 # 唯一联网的是 engine：把固定版本的公开引擎数据（卡库和卡牌脚本）下载到复用的缓存目录 ~/.cache/mimi-yugioh/engine，已经是这个版本就不下载。
-# plugin-smoke：在临时的 Hermes 网页工作区里打开游戏王插件、看卡组一览、点卡看说明，桌面宽和手机宽各一遍（编的数据、编的卡图，不连 NAS）；CI_SKIP_PLUGIN_SMOKE=1 跳过（没有 Hermes 的机器）。
+# plugin-smoke：在临时的 Hermes 网页工作区里打开游戏王插件、看卡组一览、点卡看说明，桌面宽和手机宽各一遍（编的数据、编的卡图，不连 NAS）；CI_SKIP_PLUGIN_SMOKE=1 跳过（没有 Hermes 的机器，或改到一半只想快点看别的检查）。
+# ci-lock：同一个检出同时只跑一份 ./ci，第二份在这里等前一份结束（锁的主人是 ./ci 的进程，进程没了锁就算放了；scripts/ci-lock.sh）。
 # 架构约定的几条（AGENTS.md「架构约定」）各一行，规则写在 scripts/check.js。
 
+!ci-lock         sh scripts/ci-lock.sh
 !engine          node scripts/prepare-engine.js "$HOME/.cache/mimi-yugioh/engine"
 !deps            npm ci --silent --ignore-scripts
 test             npm test --silent

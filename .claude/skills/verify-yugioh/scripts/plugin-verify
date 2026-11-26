@@ -14,6 +14,11 @@
                                          --design is 1280x860 with the sidebar hidden, --mobile a 390x844 phone; --compare also writes NAME-compare.png
                                          (a design PNG on the left); writes NAME.png, NAME.txt and NAME.json (every request the tab made, and the ones not
                                          to this origin)
+  plugin-verify batch FILE [--jobs N]     many shots in one go: FILE has one shot per line (the same words as `shot` takes after
+                                         `shot`; # starts a comment); blank lines split it into lanes. Each lane is one browser
+                                         that takes its shots in order and carries on from the previous shot's page when this
+                                         shot only adds clicks to it (plugin-shot.mjs says when); up to N lanes (default 3) run at
+                                         once. Exit 1 when a shot failed or made a request to another origin.
   plugin-verify down                     stop the gateway and the yugioh service, delete the run; evidence stays
 
 Run folder: $TMPDIR/yugioh-plugin-verify/<run-id>/ (the web workspace's HERMES_HOME, logs, run.json).
@@ -26,6 +31,7 @@ Login:      mac-mini's bin/panel-login --webapp signs the cookies with the run h
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import contextlib
 import fcntl
 import hashlib
@@ -33,6 +39,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import signal
 import socket
@@ -207,7 +214,23 @@ def ready(run: dict) -> bool:
         return False
 
 
+def preflight() -> None:
+    """Fail at once, saying how to fix it, when the yugioh service cannot start here (else yv launch waits 15 s for an
+    address that never comes)."""
+    n = node()
+    v = subprocess.run([n, "--version"], capture_output=True, text=True).stdout.strip()
+    m = re.match(r"v(\d+)\.", v)
+    if not m or int(m.group(1)) < 22:
+        sys.exit(f"plugin-verify: node {v or '(no version)'} at {n} is too old: the service needs Node 22+ (package.json engines). "
+                 "Put Node 22+ first on PATH (e.g. export PATH=/usr/local/bin:/opt/homebrew/bin:$PATH) and run again")
+    deps = json.loads((REPO / "package.json").read_text()).get("dependencies", {})
+    missing = [d for d in deps if not (REPO / "node_modules" / d / "package.json").is_file()]
+    if missing:
+        sys.exit(f"plugin-verify: dependencies not installed in {REPO} ({', '.join(missing)}): run npm ci there and run again")
+
+
 def cmd_up(a) -> int:
+    preflight()
     started = yv("launch", *(["--images", a.images] if a.images else []))
     sys.stderr.write(started.stderr)
     m_run, m_url = re.search(r"^run: (\S+)", started.stdout, re.M), re.search(r"就绪：(http://127\.0\.0\.1:\d+)", started.stdout)
@@ -304,15 +327,29 @@ def cmd_doctor(a) -> int:
     return 0 if all(checks) else 1
 
 
+def shot_opts(a) -> dict:
+    return {"name": a.name, "design": a.design, "mobile": a.mobile, "tab": a.tab, "select": a.select, "route": a.route, "jump": a.jump, "step": a.step, "keys": a.keys, "hover": a.hover, "tap": a.tap, "within": a.within, "close": a.close, "compare": a.compare, "compareLabel": a.compare_label, "compareWith": a.compare_with, "hoverAnim": a.hover_anim, "tapAnim": a.tap_anim, "clickStep": a.click_step, "playAll": a.play_all, "stageAt": a.stage_at, "nextMid": a.next_mid, "netFile": a.net_file, "hoverRole": a.hover_role, "tapRole": a.tap_role, "clipStage": a.clip_stage, "requireRoles": a.require_roles, "requireBlocks": a.require_blocks, "guess": a.guess}
+
+
+def shot_target(run: dict) -> dict:
+    if not run["evidence"]:
+        sys.exit("no evidence folder in run.json")
+    return {"id": run["id"], "base": run["base"], "evidence": run["evidence"], "cookies": [kv.split("=", 1) for kv in cookie(run).split("; ")]}
+
+
+def plugin_shot(pub: dict, shots: list, timeout: int) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run([node(), str(YV.parent / "plugin-shot.mjs"), json.dumps({**pub, "shots": shots}, ensure_ascii=False)],
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        out = lambda b: b.decode(errors="replace") if isinstance(b, bytes) else (b or "")
+        return subprocess.CompletedProcess(e.cmd, 1, out(e.stdout), out(e.stderr) + f"plugin-shot: did not finish within {timeout} s\n")
+
+
 def cmd_shot(a) -> int:
     run = load(a.run)
     evidence = run["evidence"]
-    if not evidence:
-        sys.exit("no evidence folder in run.json")
-    opts = {"name": a.name, "design": a.design, "mobile": a.mobile, "tab": a.tab, "select": a.select, "route": a.route, "jump": a.jump, "step": a.step, "keys": a.keys, "hover": a.hover, "tap": a.tap, "within": a.within, "close": a.close, "compare": a.compare, "compareLabel": a.compare_label, "compareWith": a.compare_with, "hoverAnim": a.hover_anim, "tapAnim": a.tap_anim, "clickStep": a.click_step, "playAll": a.play_all, "stageAt": a.stage_at, "nextMid": a.next_mid, "netFile": a.net_file, "hoverRole": a.hover_role, "tapRole": a.tap_role, "clipStage": a.clip_stage, "requireRoles": a.require_roles, "requireBlocks": a.require_blocks, "guess": a.guess}
-    pub = {"id": run["id"], "base": run["base"], "evidence": evidence, "cookies": [kv.split("=", 1) for kv in cookie(run).split("; ")]}
-    r = subprocess.run([node(), str(YV.parent / "plugin-shot.mjs"), json.dumps({**pub, **opts}, ensure_ascii=False)],
-                       capture_output=True, text=True, timeout=300)
+    r = plugin_shot(shot_target(run), [shot_opts(a)], 300)
     sys.stderr.write(r.stdout + r.stderr)
     if r.returncode != 0:
         return r.returncode
@@ -321,6 +358,55 @@ def cmd_shot(a) -> int:
     print(json.dumps({"screenshot": str(ev / f"{a.name}.png"), "text": str(ev / f"{a.name}.txt"), "requests": got["requests"],
                       "foreign_requests": got["foreign"], "web_workspace_own_foreign": got["hostLoad"], "horizontal_scroll": got["overflowX"]}, ensure_ascii=False))
     return 1 if got["foreign"] else 0
+
+
+def lanes_of(text: str, parser: argparse.ArgumentParser) -> list:
+    """FILE of `batch` -> lanes, each a list of shot option dicts; blank lines split lanes, # starts a comment."""
+    lanes, lane = [], []
+    for no, raw in enumerate(text.splitlines(), 1):
+        words = shlex.split(raw, comments=True)
+        if not words:
+            if lane and not raw.strip():
+                lanes.append(lane)
+                lane = []
+            continue
+        try:
+            lane.append(shot_opts(parser.parse_args(words)))
+        except ValueError as e:
+            sys.exit(f"batch: line {no} is not a shot ({e}): {raw}")
+    if lane:
+        lanes.append(lane)
+    names = [s["name"] for lane in lanes for s in lane]
+    dup = sorted({n for n in names if names.count(n) > 1})
+    if dup:
+        sys.exit(f"batch: shot names used twice: {', '.join(dup)}")
+    return lanes
+
+
+def cmd_batch(a) -> int:
+    run = load(a.run)
+    lanes = lanes_of(Path(a.file).read_text(), SHOT_PARSER)
+    if not lanes:
+        sys.exit(f"batch: no shots in {a.file}")
+    pub = shot_target(run)
+    for s in (s for lane in lanes for s in lane):  # an earlier run's evidence of the same name must not pass for this one's
+        for ext in (".json", ".txt", ".png", ".failed.txt"):
+            (Path(run["evidence"]) / f"{s['name']}{ext}").unlink(missing_ok=True)
+    t = time.time()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, a.jobs)) as pool:
+        results = list(pool.map(lambda lane: plugin_shot(pub, lane, 900), lanes))
+    bad = 0
+    for i, (lane, r) in enumerate(zip(lanes, results), 1):
+        sys.stderr.write("".join(f"[lane {i}] {line}\n" for line in (r.stdout + r.stderr).splitlines()))
+        bad += r.returncode != 0
+        for s in lane:
+            f = Path(run["evidence"]) / f"{s['name']}.json"
+            foreign = json.loads(f.read_text())["foreign"] if f.is_file() else []
+            if foreign:
+                print(f"batch: {s['name']} made requests to another origin: {foreign}", file=sys.stderr)
+                bad += 1
+    print(f"batch: {sum(map(len, lanes))} shots in {len(lanes)} lanes, {time.time() - t:.0f} s, {'all ok' if not bad else 'FAILED'}", file=sys.stderr)
+    return 1 if bad else 0
 
 
 def cmd_down(a) -> int:
@@ -343,6 +429,23 @@ def main() -> int:
     u.set_defaults(f=cmd_up)
     sub.add_parser("doctor").set_defaults(f=cmd_doctor)
     s = sub.add_parser("shot")
+    add_shot_args(s)
+    s.set_defaults(f=cmd_shot)
+    b = sub.add_parser("batch")
+    b.add_argument("file", help="one shot per line (the words after `shot`); blank lines split lanes")
+    b.add_argument("--jobs", type=int, default=3, help="lanes (browsers) at once")
+    b.set_defaults(f=cmd_batch)
+    sub.add_parser("down").set_defaults(f=cmd_down)
+    a = p.parse_args()
+    return a.f(a)
+
+
+class _ShotParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ValueError(message)
+
+
+def add_shot_args(s: argparse.ArgumentParser) -> None:
     s.add_argument("name")
     view = s.add_mutually_exclusive_group()
     view.add_argument("--design", action="store_true", help="1280x860 with the sidebar hidden, the size of design-r3's PNGs")
@@ -373,10 +476,10 @@ def main() -> int:
     s.add_argument("--compare", metavar="PNG", help="also write NAME-compare.png: the design PNG on the left, this screenshot on the right")
     s.add_argument("--compare-label", metavar="TEXT", help="with --compare: the label over the design PNG (default 样子稿), e.g. 样子稿 c-flat contact.png")
     s.add_argument("--compare-with", metavar="NAME", action="append", help="with --compare: also put this earlier shot of the same run (NAME.png in the evidence folder) on the right, under this one; repeatable")
-    s.set_defaults(f=cmd_shot)
-    sub.add_parser("down").set_defaults(f=cmd_down)
-    a = p.parse_args()
-    return a.f(a)
+
+
+SHOT_PARSER = _ShotParser(prog="batch line", add_help=False)
+add_shot_args(SHOT_PARSER)
 
 
 if __name__ == "__main__":
