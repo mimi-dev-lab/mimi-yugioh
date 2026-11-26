@@ -7,6 +7,7 @@ import { deckOverview } from './deck.js';
 import { BRANDED } from './decks/branded.js';
 import { openEngine } from './duel-session.js';
 import { openEngineFiles } from './engine-files.js';
+import { featuresFrom } from './features.js';
 import { lookupView } from './lookup.js';
 import { replayRoute, routeListItem } from './route-view.js';
 import { openStore } from './store.js';
@@ -18,6 +19,8 @@ const DATA = process.env.YUGIOH_DATA ?? join(homedir(), '.mimi-yugioh');
 // 引擎数据（卡库、脚本）：路线要用它重放；默认在数据目录里，测试和 ./ci 指到复用的缓存目录
 const ENGINE = process.env.YUGIOH_ENGINE ?? join(DATA, 'engine');
 const OVERVIEW = deckOverview(BRANDED);
+// 试用功能的开关：YUGIOH_FEATURES_OFF=ledger,tree 关掉哪几个（名字见 src/features.js）
+const FEATURES = featuresFrom((process.env.YUGIOH_FEATURES_OFF ?? '').split(',').map((s) => s.trim()).filter(Boolean));
 
 const store = openStore(DATA);
 
@@ -30,7 +33,7 @@ const ROUTES = (async () => {
       const engine = await openEngine(files);
       const routes = [];
       for (const def of BRANDED.routes) {
-        try { routes.push(await replayRoute(engine, BRANDED, def)); } catch (e) { throw new Error(`路线「${def.name}」重放不通：${e.message}`); }
+        try { routes.push(await replayRoute(engine, BRANDED, def, { features: FEATURES })); } catch (e) { throw new Error(`路线「${def.name}」重放不通：${e.message}`); }
       }
       return { routes, lookup: lookupView(BRANDED, routes) };
     } finally { files.close(); }
@@ -62,7 +65,7 @@ async function route(req, pathname, query) {
     // 展开路线：列表（需要的起手卡、终场打断数、来源、验证日期；另带起手速查 lookup：关键卡 → 路线，缺卡改走哪条）和单条（每一步的说明、场面快照、和上一步的差异、终场汇总）
     case 'GET /routes': {
       const { routes, lookup, error } = await ROUTES;
-      return error ? [503, { error }] : [200, { routes: routes.map(routeListItem), lookup }];
+      return error ? [503, { error }] : [200, { routes: routes.map(routeListItem), lookup, features: FEATURES }];
     }
     case 'GET /route': {
       const { routes, error } = await ROUTES;
