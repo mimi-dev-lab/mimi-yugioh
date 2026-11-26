@@ -10,6 +10,7 @@ import { openEngineFiles } from './engine-files.js';
 import { featuresFrom } from './features.js';
 import { lookupView } from './lookup.js';
 import { replayRoute, routeListItem } from './route-view.js';
+import { buildSubway } from './subway.js';
 import { openStore } from './store.js';
 import { readHyperframes } from './vendor-files.js';
 
@@ -35,7 +36,7 @@ const ROUTES = (async () => {
       for (const def of BRANDED.routes) {
         try { routes.push(await replayRoute(engine, BRANDED, def, { features: FEATURES })); } catch (e) { throw new Error(`路线「${def.name}」重放不通：${e.message}`); }
       }
-      return { routes, lookup: lookupView(BRANDED, routes) };
+      return { routes, lookup: lookupView(BRANDED, routes), subway: FEATURES.subway ? buildSubway(BRANDED, routes) : null };
     } finally { files.close(); }
   } catch (e) {
     const reason = e.code === 'ENGINE_MISSING' ? `引擎数据不在 ${ENGINE}（${e.message}）` : e.message;
@@ -72,6 +73,12 @@ async function route(req, pathname, query) {
       if (error) return [503, { error }];
       const found = routes.find((r) => r.id === query.get('id'));
       return found ? [200, found] : [404, { error: '没有这条路线' }];
+    }
+    // 汇流地铁图（试用功能 subway，关了是 404）：{ stations, edges, layers, rows, routes }，见 src/subway.js；站的 stops 是点它跳到的路线步骤
+    case 'GET /subway': {
+      const { subway, error } = await ROUTES;
+      if (error) return [503, { error }];
+      return subway ? [200, subway] : [404, { error: '地铁图这个功能关着（YUGIOH_FEATURES_OFF 里有 subway）' }];
     }
     // 路线动画：{ src（data:text/html 地址，插件页放进 SandboxedFrame）, starts / ends（位置 0 = 起手、1..N = 第几步的开始帧、结束帧，秒）, duration, stage }
     case 'GET /route-anim': {
