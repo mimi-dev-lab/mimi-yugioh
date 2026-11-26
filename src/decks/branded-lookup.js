@@ -10,14 +10,15 @@ export const LOOKUP = [
     card: C.albaz,
     routes: [{ route: 'white-albaz' }],
     fallbacks: [
-      { lack: C.albaz, have: [C.whiteSaint], route: 'white-saint', how: '白之圣女②解放自己，从卡组特殊召唤白之落胤，之后接上白之落胤线的中段' },
+      { lack: C.albaz, have: [C.whiteSaint], route: 'white-saint', how: '白之圣女②解放自己，从卡组特殊召唤白之落胤，白之落胤再叫第二张白之圣女，两只同调三英的相剑师' },
       { lack: C.albaz, have: [C.nadir], route: 'nadir-servant', how: '天底的使徒发动时从卡组检索白之落胤；这条线不做融合，靠墓地的融合怪兽在结束阶段铺场' },
       { lack: C.albaz, have: [C.highSpirits, C.fuwalos], route: 'high-spirits-fuwalos', how: '烙印之气炎给对方看软绵雀精、弃它，从卡组检索白之落胤，之后和白之落胤线一样' },
+      { lack: C.albaz, have: [C.highSpirits, C.albazOrig], route: 'high-spirits-albaz', how: '烙印之气炎给对方看阿尔白斯之落胤、弃它，从卡组检索白之落胤，之后同调三英的相剑师' },
     ],
   },
   {
     card: C.brandedFusion,
-    routes: [{ route: 'branded-fusion' }],
+    routes: [{ route: 'branded-fusion' }, { route: 'branded-fusion-aluber', with: C.aluber }],
     fallbacks: [
       { lack: C.brandedFusion, have: [C.aluber], route: 'aluber', how: '通常召唤阿卢绯尔，从卡组检索烙印融合，之后和烙印融合线几乎一样，第二次融合用阿卢绯尔当素材' },
       { lack: C.brandedFusion, have: [C.albaz], route: 'white-albaz', how: '白之落胤线全程不用烙印融合' },
@@ -25,7 +26,7 @@ export const LOOKUP = [
   },
   {
     card: C.aluber,
-    routes: [{ route: 'aluber' }],
+    routes: [{ route: 'aluber' }, { route: 'branded-fusion-aluber', with: C.brandedFusion }],
     fallbacks: [
       { lack: C.aluber, have: [C.brandedFusion], route: 'branded-fusion', how: '烙印融合线不用阿卢绯尔，第二次融合用墓地的阿尔白斯之落胤当素材' },
     ],
@@ -46,10 +47,18 @@ export const LOOKUP = [
   },
   {
     card: C.highSpirits,
-    routes: [{ route: 'high-spirits-fuwalos', with: C.fuwalos }, { route: 'high-spirits-shrouded', with: C.shroudedAlbion }],
+    routes: [{ route: 'high-spirits-fuwalos', with: C.fuwalos }, { route: 'high-spirits-shrouded', with: C.shroudedAlbion }, { route: 'high-spirits-albaz', with: C.albazOrig }],
     fallbacks: [
       { lack: C.fuwalos, have: [C.highSpirits, C.shroudedAlbion], route: 'high-spirits-shrouded', how: '烙印之气炎给对方看黑衣龙 阿尔比昂、从额外卡组把灰烬龙 落尘劣种送去墓地，再弃黑衣龙 阿尔比昂检索白之落胤；前几步和白之落胤线一样，中段不同：黑衣龙之艾克利西亚除外自己，改叫铁兽鸟 墨丘利耶，结束阶段由灰烬龙从卡组特殊召唤库妸㽗；终场多一只铁兽鸟 墨丘利耶' },
       { lack: C.shroudedAlbion, have: [C.highSpirits, C.fuwalos], route: 'high-spirits-fuwalos', how: '烙印之气炎给对方看软绵雀精、从额外卡组把击铁龙 猎宝机装送去墓地，再弃软绵雀精检索白之落胤；拿到白之落胤之后的步骤和白之落胤线完全一样' },
+    ],
+  },
+  {
+    card: C.albazOrig,
+    // 单拿阿尔白斯之落胤展不开（召唤后只能用自己和对方场上的怪兽融合，先攻时对方场上没有怪兽），要搭烙印之气炎当给对方看的龙族
+    routes: [{ route: 'high-spirits-albaz', with: C.highSpirits }],
+    fallbacks: [
+      { lack: C.albazOrig, have: [C.highSpirits, C.fuwalos], route: 'high-spirits-fuwalos', how: '烙印之气炎改给对方看软绵雀精（鸟兽族，送击铁龙 猎宝机装），一样检索白之落胤，之后走白之落胤线' },
     ],
   },
 ];

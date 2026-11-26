@@ -1,5 +1,6 @@
 // 烙印的展开路线。前两条出处 Game8「烙印デッキのレシピと回し方・対策」（https://game8.jp/yugioh-masterduel/534262，2026-11-20 版）；
-// 后面几条补自 B站专栏「烙印展开路线图汇总」（東京西瓜，路线图）和 T³ 文库 Mas《【MD 烙印】展开路线一览》的译文（Duel Simulator 回放），每条的 source 写出处。
+// 后面几条补自 B站专栏「烙印展开路线图汇总」（東京西瓜，路线图）和 T³ 文库 Mas《【MD 烙印】展开路线一览》的译文（Duel Simulator 回放），
+// 还有几条取自本仓的 500 手随机起手模拟（docs/opening-analysis.md，#37）里搜索比已知路线更好的手（#41），每条的 source 写出处。
 // 每条路线是引擎可重放的步骤序列：每步一句我们自己的说明（text）和这一步要给引擎的回应（do）。回应的写法见 src/route.js。
 // 路线只写「从哪些牌出发」（hand 是起手 5 张：出处说的初动卡，其余是填充用的无关牌），不写具体的洗牌顺序。
 // end 是出处写的我方回合结束时的终场（出处没写剩几张手牌时，按起手张数减去用掉的算）；测试把引擎重放出来的终场和它对照。
@@ -18,12 +19,16 @@ export const C = {
   nadir: 1984618, dogmatika: 60303688, // 天底的使徒、教导之圣女 艾克利西亚
   highSpirits: 29948294, fuwalos: 42141493, rindbrumm: 51409648, // 烙印之气炎、多多迷宝・软绵雀精、击铁龙 猎宝机装
   shroudedAlbion: 25451383, mercourier: 19096726, // 黑衣龙 阿尔比昂、铁兽鸟 墨丘利耶
+  sword: 74405783, // 三英的相剑师
 };
 
 const SOURCE = { name: 'Game8', url: 'https://game8.jp/yugioh-masterduel/534262', date: '2026-11-20' };
 const BILI_ROUTES = { name: 'B站专栏 東京西瓜「烙印展开路线图汇总」', url: 'https://www.bilibili.com/opus/1209923211067654167', date: '2026-06-04' };
 const MAS_ROUTES = { name: 'T³ 文库 Mas「展开路线一览」', url: 'https://docs.ihex.dev/public/yugioh/md/branded-md-mas-combo-routes/', date: '2026-06-05' };
 const VERIFIED = '2026-11-24';
+// 本仓的随机起手模拟：一条路线取自报告里的哪一手（seed 是那一手的发牌种子，报告里能按它找到搜出的步骤）；date 是报告那一版的日期
+const simSource = (seed) => ({ name: `本仓 500 手模拟（seed ${seed}）`, url: 'https://github.com/mimi-dev-lab/mimi-yugioh/blob/main/docs/opening-analysis.md', date: '2026-11-26' });
+const VERIFIED_SIM = '2026-11-26';
 
 const act = (code) => ({ idle: 'activate', code });
 const chain = (code) => ({ chain: code });
@@ -47,6 +52,9 @@ const albazCallsSaint = { text: '白之落胤②：从卡组特殊召唤白之�
 const albazSaintSynchroEcclesia = { text: '白之落胤＋白之圣女同调召唤黑衣龙之艾克利西亚', do: [{ idle: 'special-summon', code: C.blackEcclesia }, pick(C.whiteSaint), pick(C.albaz), place, position, 'pass', 'pass'] };
 const ecclesiaCallsQuem = { text: '黑衣龙之艾克利西亚除外自己，从卡组特殊召唤引导之圣女 库妸㽗', do: [act(C.blackEcclesia), 'pass', pick(C.quem), place, position] };
 const quemSendsCartesia = { text: '库妸㽗①：从卡组把赫之圣女 卡尔塔西亚送去墓地', do: ['yes', 'pass', pick(C.cartesia), 'pass'] };
+// 白之落胤＋白之圣女同调三英的相剑师，三英检索卡尔塔西亚（白之圣女新线、气炎＋阿尔白斯之落胤线共用）
+const albazSaintSynchroSword = { text: '白之落胤＋白之圣女同调召唤三英的相剑师，而不是黑衣龙之艾克利西亚：三英留在场上，对手回合能让一张表侧表示的卡效果无效', do: [{ idle: 'special-summon', code: C.sword }, pick(C.whiteSaint), pick(C.albaz), place, position, 'pass'] };
+const swordSearchesCartesia = { text: '三英的相剑师同调召唤成功：从卡组把魔法师族的赫之圣女 卡尔塔西亚加入手牌', do: ['yes', 'pass', pick(C.cartesia), 'pass'] };
 const endPhaseSaintCartesiaReturn = { text: '结束阶段：墓地的白之圣女和卡尔塔西亚各自回到手牌', do: [chain(C.whiteSaint), 'pass', 'pass', chain(C.cartesia), 'pass', 'pass'] };
 // 结束阶段 开幕 → 阿卢绯尔 → 赫之烙印 → 卢绯里昂：从墓地的烙印龙阿尔比昂检索烙印开幕，到融合出神炎龙 卢绯里昂为止
 const albionOpeningToLubellion = [
@@ -144,21 +152,42 @@ export const ROUTES = [
   {
     id: 'white-saint',
     name: '基本展开｜白之圣女初动',
-    source: BILI_ROUTES,
-    verified: VERIFIED,
+    source: simSource(1046371689),
+    verified: VERIFIED_SIM,
     needs: C.whiteSaint,
-    // 起手：白之圣女 + FILLER。不经过额外卡组送墓，所以结束阶段没有回收；路线图在对手回合还有后续（黑衣龙叫白之落胤再融合），这里只到我方回合结束
+    // 起手：白之圣女 + FILLER。模拟里那一手另有教导之圣女和封印的黄金柜（多盖一张落胤与圣女，3 个打断）；只拿白之圣女时去掉那几步，留下三英 + 卡尔塔西亚两个打断。
+    // 取代 B站专栏路线图的旧版（黑衣龙之艾克利西亚叫库妸㽗，到我方回合结束 0 个打断）
     hand: [C.whiteSaint, ...FILLER],
-    end: { monsters: [C.quem, C.blackEcclesia], spellTraps: [], hand: 4 },
+    end: { monsters: [C.sword, C.cartesia], spellTraps: [], hand: 4 },
     steps: [
       { text: '通常召唤白之圣女', do: [{ idle: 'summon', code: C.whiteSaint }, place, 'pass'] },
       { text: '白之圣女②：解放自己，从卡组特殊召唤白之落胤（规则上算阿尔白斯之落胤）', do: [chain(C.whiteSaint), 'pass', pick(C.albaz), place, position] },
-      albazCallsSaint,
-      albazSaintSynchroEcclesia,
-      ecclesiaCallsQuem,
-      { text: '库妸㽗①：从卡组把赫之圣女 卡尔塔西亚送去墓地，留给下一回合', do: ['yes', 'pass', pick(C.cartesia), 'pass'] },
+      { text: '白之落胤②：从卡组特殊召唤第二张白之圣女（第一张刚解放进了墓地）', do: ['yes', 'pass', pick(C.whiteSaint), place, position, 'pass'] },
+      albazSaintSynchroSword,
+      swordSearchesCartesia,
+      { text: '墓地有白之落胤（规则上算阿尔白斯之落胤），手牌的卡尔塔西亚能自己特殊召唤；它在对手回合能用手牌、场上的怪兽融合召唤，再算一个打断', do: [act(C.cartesia), 'pass', place, position, 'pass'] },
       endTurn,
-      { text: '结束阶段：除外的黑衣龙之艾克利西亚回到场上', do: [place] },
+      finish,
+    ],
+  },
+  {
+    id: 'branded-fusion-aluber',
+    name: '三卡展开｜烙印融合＋阿卢绯尔＋超融合',
+    source: simSource(2607126297),
+    verified: VERIFIED_SIM,
+    needs: C.brandedFusion,
+    // 起手：烙印融合 + 阿卢绯尔 + 超融合 + 铁兽鸟 墨丘利耶 + 抽牌小丑与封锁鸟。和烙印融合线不同：不融合烙印龙阿尔比昂再叫格兰吉尼奥尔（终场 0 个打断的怪兽），
+    // 而是直接融合击铁龙 猎宝机装，让烙印断罪和墨丘利耶的条件（场上有以阿尔白斯之落胤为素材的融合怪兽）成立。
+    // 模拟里那一手的墨丘利耶是黑衣龙 阿尔比昂回卡组底后抽到的（随洗牌变，抽到别的就少一个打断）；这里把墨丘利耶直接放进起手、去掉黑衣龙那一步，路线不依赖洗牌
+    hand: [C.brandedFusion, C.aluber, C.superPoly, C.mercourier, C.lockBird],
+    end: { monsters: [C.aluber, C.rindbrumm], spellTraps: [C.superPoly, C.retribution], hand: 2 },
+    steps: [
+      { text: '通常召唤阿卢绯尔', do: [{ idle: 'summon', code: C.aluber }, place, 'pass'] },
+      { text: '阿卢绯尔：从卡组把烙印断罪加入手牌（烙印融合手里已经有了，这次拿终场用的陷阱）', do: ['yes', 'pass', pick(C.retribution), 'pass'] },
+      { text: '发动烙印融合：用卡组的阿尔白斯之落胤和鸟兽族的软绵雀精融合召唤击铁龙 猎宝机装。它对手回合能无效一次融合、同调、超量、连接怪兽的效果，也是烙印断罪和墨丘利耶要的那只融合怪兽', do: [act(C.brandedFusion), place, 'pass', pick(C.rindbrumm), pick(C.fuwalos), pick(C.albazOrig), place, position, 'pass'] },
+      { text: '盖放超融合：对手回合弃一张手牌发动，能拿对方场上的怪兽当素材', do: [{ idle: 'spell-set', code: C.superPoly }, place, 'pass'] },
+      { text: '盖放烙印断罪：对方发动带特殊召唤的效果时，让击铁龙回额外卡组来无效它', do: [{ idle: 'spell-set', code: C.retribution }, place, 'pass'] },
+      { text: '结束回合；铁兽鸟 墨丘利耶留在手里，场上有击铁龙时能从手牌无效对方一次怪兽效果', do: ['end-turn'] },
       finish,
     ],
   },
@@ -207,6 +236,35 @@ export const ROUTES = [
       ...albionOpeningToLubellion,
       { text: '卢绯里昂的效果：弃手牌的卡尔塔西亚', do: [chain(C.lubellion), pick(C.cartesia), 'pass', 'pass'] },
       ...lubellionFusionToTurnEnd,
+    ],
+  },
+  {
+    id: 'high-spirits-albaz',
+    name: '两卡展开｜烙印之气炎＋阿尔白斯之落胤',
+    source: simSource(339283851),
+    verified: VERIFIED_SIM,
+    needs: C.highSpirits,
+    // 起手：烙印之气炎 + 阿尔白斯之落胤 + FILLER_TWO_CARD（模拟里那一手还盖了一张超融合，4 个打断；这里不盖，和别的路线一样只算展开本身）。
+    // 和另两条气炎线不同：给对方看的是阿尔白斯之落胤自己（龙族，送灰烬龙），中段同调三英的相剑师而不是黑衣龙之艾克利西亚
+    hand: [C.highSpirits, C.albazOrig, ...FILLER_TWO_CARD],
+    end: { monsters: [C.mirrorjade, C.quem, C.sword, C.cartesia], spellTraps: [], hand: 4 },
+    steps: [
+      { text: '回合一开始发动烙印之气炎：给对方看阿尔白斯之落胤，从额外卡组把同是龙族的灰烬龙 落尘劣种送去墓地（结束阶段靠它叫库妸㽗），再弃阿尔白斯之落胤检索白之落胤', do: [chain(C.highSpirits), place, 'pass', pick(C.albazOrig), pick(C.titaniklad), 'yes', pick(C.albaz), 'pass'] },
+      albazSendsAlbionAndSummons,
+      albazCallsSaint,
+      albazSaintSynchroSword,
+      swordSearchesCartesia,
+      { text: '结束回合，进结束阶段（卡尔塔西亚先留在手里，结束阶段当开幕和卢绯里昂的弃牌）', do: ['end-turn'] },
+      { text: '结束阶段：墓地的灰烬龙从卡组特殊召唤引导之圣女 库妸㽗', do: [chain(C.titaniklad), 'pass', pick(C.quem), { option: 1 }, place, position] },
+      quemSendsCartesia,
+      endPhaseSaintCartesiaReturn,
+      { text: '墓地的烙印龙阿尔比昂：从卡组把烙印开幕加入手牌', do: ['yes', 'pass', pick(C.opening), { option: 0 }] },
+      { text: '发动烙印开幕：弃一张卡尔塔西亚，从卡组守备表示叫出阿卢绯尔', do: [chain(C.opening), place, 'pass', pick(C.cartesia), pick(C.aluber), { option: 1 }, place, 'yes', 'pass'] },
+      ...albionOpeningToLubellion.slice(2),
+      { text: '卢绯里昂的效果：弃手牌的另一张卡尔塔西亚', do: [chain(C.lubellion), pick(C.cartesia), 'pass', 'pass'] },
+      lubellionFusionToTurnEnd[0],
+      lubellionFusionToTurnEnd[1],
+      finish,
     ],
   },
   {

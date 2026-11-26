@@ -44,7 +44,7 @@ describe('报告的统计：全部由 JSONL 的行算出', () => {
 
   test('按关键卡分组：单张关键卡归它那组，两张以上归多张组合，没有归都没有；每组手数、平均、最好、卡手数', () => {
     const by = Object.fromEntries(stats.groups.map((g) => [g.name, g]));
-    assert.deepEqual(stats.groups.map((g) => g.name), ['白之落胤', '烙印融合', '惨绝戏之导化 阿卢绯尔', '天底的使徒', '白之圣女 艾克利西亚', '烙印之气炎', '多张组合', '都没有']);
+    assert.deepEqual(stats.groups.map((g) => g.name), ['白之落胤', '烙印融合', '惨绝戏之导化 阿卢绯尔', '天底的使徒', '白之圣女 艾克利西亚', '烙印之气炎', '阿尔白斯之落胤', '多张组合', '都没有']);
     assert.deepEqual([by['白之落胤'].n, by['白之落胤'].avg, by['白之落胤'].best, by['白之落胤'].bricks], [2, 2.5, 3, 0]);
     assert.deepEqual([by['烙印融合'].n, by['烙印融合'].avg, by['烙印融合'].best], [1, 2, 2]);
     assert.deepEqual([by['惨绝戏之导化 阿卢绯尔'].n, by['天底的使徒'].n, by['烙印之气炎'].n], [0, 0, 0]);
@@ -52,6 +52,10 @@ describe('报告的统计：全部由 JSONL 的行算出', () => {
     assert.deepEqual([by['多张组合'].n, by['多张组合'].avg, by['多张组合'].best], [1, 4, 4]);
     assert.deepEqual([by['都没有'].n, by['都没有'].avg, by['都没有'].best, by['都没有'].bricks], [3, 1 / 3, 1, 2]);
     assert.equal(stats.groups.reduce((s, g) => s + g.n, 0), 8);
+    // 阿尔白斯之落胤是关键卡：只有它的手归它那组，不再归「都没有」
+    const ALBAZ_ORIG = 68468459;
+    const own = analyze([row(0, [ALBAZ_ORIG, ASH, G, FARA, LOCK], [], 1, 4)], BRANDED, { minLiftHands: 1 }).groups;
+    assert.deepEqual(own.filter((g) => g.n).map((g) => g.name), ['阿尔白斯之落胤']);
   });
 
   test('常见终场：按终场在场的卡（名字排序）合并，空场单独写', () => {
@@ -120,6 +124,14 @@ describe('报告文字：同一份 JSONL 同一份报告', () => {
 
   test('搜索范围的说明引用 search.js 导出的上限，不是写死的数字', () => {
     assert.ok(text.includes(`每条路线最多 ${MAX_DISCREPANCY} 处不走排在第一的回应，选卡时最多试 ${MAX_BRANCH} 个不同的卡、${MAX_COMBOS} 种组合`));
+  });
+
+  test('卡组数据里有、JSONL 没记录的路线写明不在数字里；路线和 JSONL 一样时不写', () => {
+    // ROWS 只记了 white-albaz 一条路线
+    assert.match(text, /「已知路线」指跑模拟时卡组数据里的那 1 条（white-albaz）/);
+    for (const r of BRANDED.routes.filter((x) => x.id !== 'white-albaz')) assert.ok(text.includes(`${r.name}（${r.id}）`), r.id);
+    const allRoutes = Object.fromEntries(BRANDED.routes.map((r) => [r.id, null]));
+    assert.doesNotMatch(buildReport(ROWS.map((r) => ({ ...r, routeValues: allRoutes })), BRANDED), /之后新加的路线/);
   });
 
   test('打断数分布和卡手率的数字在文字里', () => {

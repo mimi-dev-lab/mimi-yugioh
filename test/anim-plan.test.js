@@ -33,7 +33,7 @@ describe('路线动画生成器：每条路线每一步的动作和引擎一致'
   });
 
   test('每步的卡片移动（密码、起点区→终点区、顺序）和引擎的 moves 一一对应；起手是 5 张从卡组到手牌', () => {
-    assert.equal(plans.size, 7);
+    assert.equal(plans.size, 9);
     for (const [id, route] of routes) {
       const plan = plans.get(id);
       assert.equal(plan.moves.length, route.steps.length + 1, id);

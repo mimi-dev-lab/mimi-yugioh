@@ -121,7 +121,11 @@ export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS, firstVe
   line();
   line(`- 手数：${s.total} 手。总种子 ${s.masterSeed}，每手的发牌种子由它按 mulberry32 派生；每手把 40 张主卡组按这个种子洗牌，取前 5 张当先攻起手，引擎里剩下的牌用同一个种子洗。`);
   line('- 评价：场面值 = 10 × 我方回合结束时终场的打断数 + 1 × 剩余手牌数。打断数按卡组数据里每张卡的打断数和发动条件算（`src/interrupts.js`，见 DESIGN「卡组数据」）：例如铁兽鸟 墨丘利耶要场上有以阿尔白斯之落胤为素材的融合怪兽才算（在手牌、在场上都算），盖着的超融合每张要弃一张手牌。下面「打断数」都指终场的打断数。');
-  line(`- 每手两路取更好的：一路是规则引擎里的有限偏离深度优先搜索（上限 ${s.maxNodes} 个节点，见最后一节），一路是把卡组数据里的 ${Object.keys(rows[0]?.routeValues ?? {}).length} 条已知展开路线用这手的起手和种子各重放一遍（对不上引擎提示的就算走不了）。`);
+  const simRoutes = Object.keys(rows[0]?.routeValues ?? {});
+  line(`- 每手两路取更好的：一路是规则引擎里的有限偏离深度优先搜索（上限 ${s.maxNodes} 个节点，见最后一节），一路是把卡组数据里的 ${simRoutes.length} 条已知展开路线用这手的起手和种子各重放一遍（对不上引擎提示的就算走不了）。`);
+  // 报告只重新生成、不重跑模拟时，卡组数据里的路线可能已经和 JSONL 记录的不同：列出 id 不在 JSONL 里的路线；同 id 换了步骤的查不出来，只写去哪查
+  const added = deck.routes.filter((r) => !simRoutes.includes(r.id));
+  if (added.length) line(`- 「已知路线」指跑模拟时卡组数据里的那 ${simRoutes.length} 条（${simRoutes.join('、')}）当时的步骤，数字没有跟着之后的路线改动重算。之后新加的路线（id 不在 JSONL 里）：${added.map((r) => `${r.name}（${r.id}）`).join('、')}；同一个 id 之后换了步骤的，这里看不出来，查 \`src/decks/branded-routes.js\` 的 git 历史。`);
   line(`- 最好值来源：${Object.entries(s.sources).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([k, n]) => `${k === 'search' ? '搜索' : `路线 ${k}`} ${n} 手`).join('，')}（搜索和路线同值记搜索）。`);
   line();
 

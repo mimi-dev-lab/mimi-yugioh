@@ -8,28 +8,37 @@ import { ZONES } from '../src/route-view.js';
 import { ENGINE_DIR, start } from './helpers.js';
 
 const isGame8 = (r) => r.source.url.startsWith('https://game8.jp/');
+const isSim = (r) => r.source.url.endsWith('/docs/opening-analysis.md'); // 本仓 500 手模拟（#37）里找到的路线
 const get = async (url, path) => { const res = await fetch(`${url}${path}`); return { status: res.status, body: await res.json() }; };
 
 describe('路线接口：GET /routes、GET /route?id=', () => {
-  test('GET /routes：Game8 两条 + B站、T³ 文库补的五条路线，各写需要的起手卡、终场打断数、来源和引擎验证日期', async () => {
+  test('GET /routes：Game8 两条 + B站、T³ 文库补的四条 + 模拟里找到的三条路线，各写需要的起手卡、终场打断数、来源和引擎验证日期', async () => {
     const server = await start({ YUGIOH_ENGINE: ENGINE_DIR });
     try {
       const { status, body } = await get(server.url, '/routes');
       assert.equal(status, 200);
-      assert.deepEqual(body.routes.map((r) => r.id), ['white-albaz', 'branded-fusion', 'aluber', 'white-saint', 'high-spirits-fuwalos', 'high-spirits-shrouded', 'nadir-servant']);
+      assert.deepEqual(body.routes.map((r) => r.id), ['white-albaz', 'branded-fusion', 'aluber', 'white-saint', 'branded-fusion-aluber', 'high-spirits-fuwalos', 'high-spirits-shrouded', 'high-spirits-albaz', 'nadir-servant']);
       const albaz = body.routes.find((r) => r.id === 'white-albaz');
       assert.deepEqual([albaz.name, albaz.needs.code, albaz.needs.md, albaz.needs.jp], ['基本展开｜白之落胤初动', 73819701, '白之落胤', '白き竜の落胤']);
       assert.equal(albaz.interrupts, 2); // 终场：冰剑龙 镜翠幻种 1 + 赫之圣女 卡尔塔西亚 1，另两只 0
       assert.equal(body.routes.find((r) => r.id === 'branded-fusion').needs.md, '烙印融合');
-      assert.deepEqual(body.routes.filter((r) => !isGame8(r)).map((r) => r.needs.md), ['惨绝戏之导化 阿卢绯尔', '白之圣女 艾克利西亚', '烙印之气炎', '烙印之气炎', '天底的使徒']);
+      assert.deepEqual(body.routes.filter((r) => !isGame8(r) && !isSim(r)).map((r) => r.needs.md), ['惨绝戏之导化 阿卢绯尔', '烙印之气炎', '烙印之气炎', '天底的使徒']);
       const nadir = body.routes.find((r) => r.id === 'nadir-servant');
       assert.equal(nadir.interrupts, 3); // 终场：赫之圣女 卡尔塔西亚 1 + 盖着的落胤与圣女 1 + 烙印断罪 1
       const shrouded = body.routes.find((r) => r.id === 'high-spirits-shrouded');
       assert.equal(shrouded.interrupts, 3); // 终场：冰剑龙 镜翠幻种 1 + 赫之圣女 卡尔塔西亚 1 + 铁兽鸟 墨丘利耶 1（场上也能用），库妸㽗、黑衣龙之艾克利西亚 0
       assert.deepEqual(body.routes.filter(isGame8).map((r) => r.id), ['white-albaz', 'branded-fusion']);
       for (const r of body.routes.filter(isGame8)) assert.equal(r.source.date, '2026-11-20');
-      for (const r of body.routes.filter((x) => !isGame8(x))) assert.match(r.source.url, /^https:\/\/(www\.bilibili\.com\/opus\/|docs\.ihex\.dev\/)/);
-      for (const r of body.routes) assert.equal(r.verified, '2026-11-24');
+      for (const r of body.routes.filter((x) => !isGame8(x) && !isSim(x))) assert.match(r.source.url, /^https:\/\/(www\.bilibili\.com\/opus\/|docs\.ihex\.dev\/)/);
+      for (const r of body.routes.filter((x) => !isSim(x))) assert.equal(r.verified, '2026-11-24');
+      // 模拟里找到的路线：来源写那一手的种子（报告里按种子找得到搜出的步骤），打断数由共用的打断函数按终场算
+      const sim = body.routes.filter(isSim);
+      assert.deepEqual(sim.map((r) => [r.id, r.needs.md, r.source.name, r.interrupts]), [
+        ['white-saint', '白之圣女 艾克利西亚', '本仓 500 手模拟（seed 1046371689）', 2], // 三英的相剑师 1 + 赫之圣女 卡尔塔西亚 1
+        ['branded-fusion-aluber', '烙印融合', '本仓 500 手模拟（seed 2607126297）', 4], // 击铁龙 猎宝机装 1 + 烙印断罪 1 + 超融合 1 + 手里的铁兽鸟 墨丘利耶 1
+        ['high-spirits-albaz', '烙印之气炎', '本仓 500 手模拟（seed 339283851）', 3], // 冰剑龙 镜翠幻种 1 + 三英的相剑师 1 + 赫之圣女 卡尔塔西亚 1，库妸㽗 0
+      ]);
+      for (const r of sim) assert.deepEqual([r.source.date, r.verified], ['2026-11-26', '2026-11-26'], r.id);
     } finally { server.stop(); }
   });
 
