@@ -13,6 +13,8 @@ import { ENDGAMES } from './branded-endgames.js';
 import { LOOKUP } from './branded-lookup.js';
 import { DEFAULTS as ROLE_DEFAULTS, ROUTES as ROLE_ROUTES, TERMS as ROLE_TERMS } from './branded-roles.js';
 import { ROUTES } from './branded-routes.js';
+import { TREE } from './branded-tree.js';
+import { QUESTIONS as TREE_QUESTIONS } from './branded-tree-text.js';
 
 export const SOURCE = { name: 'Game8', url: 'https://game8.jp/yugioh-masterduel/534262', date: '2026-11-20' };
 
@@ -112,4 +114,4 @@ export const EXTRA = [
   { code: 54757758, count: 1 }, // 沼地のドロゴン
 ];
 
-export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, levels: LEVELS, routes: ROUTES, lookup: LOOKUP, roleTags: { terms: ROLE_TERMS, defaults: ROLE_DEFAULTS, routes: ROLE_ROUTES }, blocks: { list: BLOCKS, segments: BLOCK_SEGMENTS }, ledger: { oncePerTurn: ONCE_PER_TURN }, endgames: ENDGAMES };
+export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, levels: LEVELS, routes: ROUTES, lookup: LOOKUP, roleTags: { terms: ROLE_TERMS, defaults: ROLE_DEFAULTS, routes: ROLE_ROUTES }, blocks: { list: BLOCKS, segments: BLOCK_SEGMENTS }, ledger: { oncePerTurn: ONCE_PER_TURN }, endgames: ENDGAMES, tree: TREE, treeText: { questions: TREE_QUESTIONS } };

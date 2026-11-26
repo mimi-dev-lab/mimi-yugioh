@@ -13,6 +13,7 @@ import { featuresFrom } from './features.js';
 import { lookupView } from './lookup.js';
 import { replayRoute, routeListItem } from './route-view.js';
 import { buildSubway } from './subway.js';
+import { treeView } from './tree.js';
 import { openStore } from './store.js';
 import { readHyperframes } from './vendor-files.js';
 
@@ -38,7 +39,7 @@ const ROUTES = (async () => {
       for (const def of BRANDED.routes) {
         try { routes.push(await replayRoute(engine, BRANDED, def, { features: FEATURES })); } catch (e) { throw new Error(`路线「${def.name}」重放不通：${e.message}`); }
       }
-      return { routes, lookup: lookupView(BRANDED, routes), subway: FEATURES.subway ? buildSubway(BRANDED, routes) : null, endgames: FEATURES.endgame ? buildEndgames(BRANDED, routes, { hands: SIM_HANDS }) : null };
+      return { routes, lookup: lookupView(BRANDED, routes), subway: FEATURES.subway ? buildSubway(BRANDED, routes) : null, endgames: FEATURES.endgame ? buildEndgames(BRANDED, routes, { hands: SIM_HANDS }) : null, tree: FEATURES.tree ? treeView(BRANDED, routes) : null };
     } finally { files.close(); }
   } catch (e) {
     const reason = e.code === 'ENGINE_MISSING' ? `引擎数据不在 ${ENGINE}（${e.message}）` : e.message;
@@ -87,6 +88,12 @@ async function route(req, pathname, query) {
       const { endgames, error } = await ROUTES;
       if (error) return [503, { error }];
       return endgames ? [200, endgames] : [404, { error: '终场倒推这个功能关着（YUGIOH_FEATURES_OFF 里有 endgame）' }];
+    }
+    // 决策树（试用功能 tree，关了是 404）：{ root（嵌套的问题 / 叶子）, leaves（平铺的叶子，带从根走来的回答）}，见 src/tree.js
+    case 'GET /tree': {
+      const { tree, error } = await ROUTES;
+      if (error) return [503, { error }];
+      return tree ? [200, tree] : [404, { error: '决策树这个功能关着（YUGIOH_FEATURES_OFF 里有 tree）' }];
     }
     // 路线动画：{ src（data:text/html 地址，插件页放进 SandboxedFrame）, starts / ends（位置 0 = 起手、1..N = 第几步的开始帧、结束帧，秒）, duration, stage }
     case 'GET /route-anim': {
