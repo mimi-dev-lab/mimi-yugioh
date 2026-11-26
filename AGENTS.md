@@ -13,6 +13,7 @@
 
 - 检查的统一入口是仓根的 `./ci`：跑 `checks/list` 里的每一项，有一项没过就退出 1。增删检查只改 `checks/list`
 - `./ci` 是 `lifaninjp/mac-mini` 里共用运行器的拷贝，不在本仓改：要改先改 mac-mini 的 `./ci`，再用它的 `bin/ci-sync` 拷过来（`bin/ci-sync --check <本仓目录>` 核对有没有漂移）
+- 改到一半用 `CI_SKIP_PLUGIN_SMOKE=1 ./ci`（跳过插件冒烟，其余照跑）或单独 `sh scripts/plugin-smoke.sh`；开 PR 前跑一次完整的 `./ci`。同一个检出里同时只跑一份 `./ci`：第二份会在 `ci-lock` 那一项等前一份结束（`scripts/ci-lock.sh`）
 - 合并 PR 只用 `land <PR号> --repo mimi-dev-lab/mimi-yugioh`（mac-mini 的 `bin/land`）：它在干净的 worktree 里把 main 合进 PR，跑 `./ci`，过了才合
 - 测试和检查不碰线上：不连外部服务、不读真实数据目录，要数据就用临时目录和编的数据
 
