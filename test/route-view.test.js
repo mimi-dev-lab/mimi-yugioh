@@ -30,6 +30,21 @@ describe('路线展示数据：教程和引擎不一致、重放不通', () => {
     await assert.rejects(replayRoute(engine, BRANDED, broken), /第 1 步「故意写错」/);
   });
 
+  test('终场打断数：自己回合用过冰剑龙的除外效果，冰剑龙不计；没用过的计 1', async () => {
+    const C = { mirrorjade: 44146295, sanctifire: 38811586, quem: 45883110 };
+    const breakerCodes = (view) => view.end.breakers.map((b) => b.code);
+    const unused = await replayRoute(engine, BRANDED, albaz);
+    assert.ok(breakerCodes(unused).includes(C.mirrorjade));
+    // 白之落胤线在结束阶段融合出冰剑龙：在那之后的连锁窗口里发动一次除外（送真炎龙阿尔比昂，除外引导之圣女），再走完原来的最后两步
+    const banish = { text: '冰剑龙：送额外卡组的真炎龙阿尔比昂去墓地，除外引导之圣女', do: [{ chain: C.mirrorjade }, { pick: [C.sanctifire] }, 'pass', { pick: [C.quem] }] };
+    const used = { ...albaz, end: { ...albaz.end, monsters: albaz.end.monsters.filter((c) => c !== C.quem) }, steps: [...albaz.steps.slice(0, -2), banish, ...albaz.steps.slice(-2)] };
+    const view = await replayRoute(engine, BRANDED, used);
+    assert.deepEqual(view.engineDiff, []);
+    assert.ok(view.end.monsters.some((c) => c.code === C.mirrorjade)); // 冰剑龙还在场上
+    assert.ok(!breakerCodes(view).includes(C.mirrorjade));
+    assert.equal(view.end.interrupts, unused.end.interrupts - 1);
+  });
+
   test('同一张卡有几张能发动：打断数按张数算，合成一条说明', async () => {
     const board = { hand: [{ code: 14558127, sequence: 0 }, { code: 14558127, sequence: 1 }], monsters: [], spellTraps: [{ code: 48130397, sequence: 0 }, { code: 48130397, sequence: 1 }], grave: [], banished: [], extra: [] };
     const end = endSummary(BRANDED, board);

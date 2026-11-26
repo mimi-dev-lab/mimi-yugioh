@@ -147,17 +147,25 @@ describe('报告文字：同一份 JSONL 同一份报告', () => {
     assert.match(text, /\{"idle":"activate","code":73819701\}/);
   });
 
-  test('返工说明：总种子、上限、手数和第一版一样时，第一版的分布原样列出并和这次对照；对不上就不写', () => {
-    const fv = { commit: 'abc1234', masterSeed: 20261126, maxNodes: 5000, total: 8, distribution: { 0: 1, 1: 1, 2: 2, '3+': 4 }, avgInterrupts: 2.5, avgHandLeft: 3, better: 5, uncovered: 2, mercurierOnField: 3 };
-    const text = buildReport(ROWS, BRANDED, { firstVersion: fv });
+  test('返工说明：之前每一版的总种子、上限、手数和这次一样时，写它的说明，分布和这次并排对照；对不上的那一版不写，都对不上就没有这一节', () => {
+    const v = (label, commit, distribution, avgInterrupts) => ({ label, commit, masterSeed: 20261126, maxNodes: 5000, total: 8, distribution, avgInterrupts, avgHandLeft: 3, better: 5, uncovered: 2, note: `${label}的说明（commit ${commit}）` });
+    const v1 = v('第一版', 'abc1234', { 0: 1, 1: 1, 2: 2, '3+': 4 }, 2.5);
+    const v2 = v('第二版', 'def5678', { 0: 2, 1: 1, 2: 2, '3+': 3 }, 2.25);
+    const text = buildReport(ROWS, BRANDED, { priorVersions: [v1, v2] });
     assert.match(text, /## 返工说明/);
-    assert.match(text, /commit abc1234/);
-    assert.match(text, /\| 0 \| 1 \| 12\.5% \| 3 \| 37\.5% \|/);
-    assert.match(text, /\| 3\+ \| 4 \| 50\.0% \| 2 \| 25\.0% \|/);
-    assert.match(text, /\| 平均打断数 \| 2\.50 \| 1\.50 \|/);
+    assert.match(text, /第一版的说明（commit abc1234）/);
+    assert.match(text, /第二版的说明（commit def5678）/);
+    assert.ok(text.indexOf('第一版的说明') < text.indexOf('第二版的说明'));
+    assert.match(text, /\| 打断数 \| 第一版手数 \| 第一版占比 \| 第二版手数 \| 第二版占比 \| 这一版手数 \| 这一版占比 \|/);
+    assert.match(text, /\| 0 \| 1 \| 12\.5% \| 2 \| 25\.0% \| 3 \| 37\.5% \|/);
+    assert.match(text, /\| 3\+ \| 4 \| 50\.0% \| 3 \| 37\.5% \| 2 \| 25\.0% \|/);
+    assert.match(text, /\| 平均打断数 \| 2\.50 \| 2\.25 \| 1\.50 \|/);
     assert.ok(text.indexOf('## 返工说明') < text.indexOf('## 打断数分布'));
-    assert.doesNotMatch(buildReport(ROWS, BRANDED, { firstVersion: { ...fv, maxNodes: 100000 } }), /返工说明/);
-    assert.doesNotMatch(buildReport(ROWS, BRANDED), /返工说明/); // 默认的第一版是 500 手、上限 100000
+    const onlySecond = buildReport(ROWS, BRANDED, { priorVersions: [{ ...v1, maxNodes: 100000 }, v2] });
+    assert.doesNotMatch(onlySecond, /第一版的说明/);
+    assert.match(onlySecond, /\| 打断数 \| 第二版手数 \| 第二版占比 \| 这一版手数 \| 这一版占比 \|/);
+    assert.doesNotMatch(buildReport(ROWS, BRANDED, { priorVersions: [{ ...v1, total: 500 }] }), /返工说明/);
+    assert.doesNotMatch(buildReport(ROWS, BRANDED), /返工说明/); // 默认的之前几版是 500 手、上限 100000
   });
 
   test('没有任何手超上限、没有候选时也能生成（写「没有」）', () => {

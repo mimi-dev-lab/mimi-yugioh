@@ -2,7 +2,7 @@
 // 卡表照 Game8「烙印デッキのレシピと回し方・対策」（https://game8.jp/yugioh-masterduel/534262，2026-11-20 版取用，页面写着 Tier3、ミッド型）。
 // 卡名：md_name 是 Master Duel 简体中文客户端的译名，取自百鸽 ygocdb 接口（scripts/fetch-card-names.js 查到后写死在这里）；jp 是日文名。
 // 三件事（does / cost / limit）、作用、打断数和 interruptHow 是我们自己的概括，不是原文转载；打断数 = 这张卡在终场时，对手回合里能打断几次（手牌里的手坑不算），interruptHow 写怎么打断，打断数是 0 就留空。
-// 打断的条件（from / perTurn / needs / cost / tags）照卡片原文（ygocdb，https://ygocdb.com/card/<密码>）写成结构化字段，由 src/interrupts.js 按终场判断；写法见那个文件开头和 DESIGN「卡组数据」。
+// 打断的条件（from / perTurn / needs / pay / ownTurnLock / tags）照卡片原文（ygocdb，https://ygocdb.com/card/<密码>）写成结构化字段，由 src/interrupts.js 按终场判断；写法见那个文件开头和 DESIGN「卡组数据」。
 // tags：albazFusion = 以阿尔白斯之落胤为融合素材的融合怪兽；mentionsAlbaz = 卡名记述了阿尔白斯之落胤（只给额外卡组的卡标，落胤与圣女的代价用）；albazName = 规则上算阿尔白斯之落胤（在哪都算）；albazNameOnField = 在场上算（黑衣龙 阿尔比昂只在场上、墓地算）；lightDark = 光或暗属性怪兽。
 // 和 Game8 页面不一致的另一处：2026-11-24 公告的禁限表（12-04 起适用）把白之落胤限为 1 张，Game8 2026-11-25 的页面还写 ×2、没跟着改；这里白之落胤 ×1、阿尔白斯之落胤 ×2（两者规则上同名，合起来仍 3 张），其余照页面。
 // 和 Game8 页面不一致的一处：路线 A 要用阿卢绯尔检索「赫之烙印」，但页面的卡表里没有它，只有烙印之气炎 ×3；这里按路线走得通改成 烙印之气炎 ×2 + 赫之烙印 ×1，其余照页面。
@@ -49,7 +49,7 @@ export const CARDS = {
   17751597: { jp: "烙印断罪", md: "烙印断罪", role: "终场", interrupts: 1, interruptHow: "对方发动带特殊召唤的怪兽效果或魔法陷阱时，让自己场上一只以阿尔白斯之落胤为素材的融合怪兽（或墓地两只）回额外卡组，无效那次发动并破坏", perTurn: 1, needs: { anyOf: [{ field: 'albazFusion' }, { grave: { of: 'albazFusion', n: 2 } }] }, does: "陷阱：对方发动包含特召效果的怪兽效果或魔陷时无效并破坏，代价是让一只以阿尔白斯之落胤为素材的融合怪兽回额外卡组", cost: "要把场上一只或墓地两只以阿尔白斯之落胤为素材的融合怪兽回额外卡组", limit: "①②每回合只能用其中一个" },
   82738008: { jp: "赫の烙印", md: "赫之烙印", role: "检索", interrupts: 0, interruptHow: "", does: "选墓地的死狱乡怪兽或阿尔白斯之落胤回手，之后可用手牌场上的怪兽除外融合召唤8星以上融合怪兽", cost: "要选墓地的目标；融合时素材被除外", limit: "每回合只能发动一张；融合出的怪兽当回合不能直接攻击" },
   87746184: { jp: "烙印竜アルビオン", md: "烙印龙 阿尔比昂", role: "融合素材", interrupts: 0, interruptHow: "", tags: ['albazFusion', 'mentionsAlbaz', 'lightDark'], does: "融合召唤时用手牌/场上/墓地的怪兽再融合召唤一只8星以下融合怪兽；进墓的回合结束阶段检索或盖放一张烙印魔陷", cost: "融合素材要除外", limit: "①②每回合各一次" },
-  44146295: { jp: "氷剣竜ミラジェイド", md: "冰剑龙 镜翠幻种", role: "终场", interrupts: 1, interruptHow: "送一只以阿尔白斯之落胤为素材的融合怪兽去墓地，除外场上一只怪兽（对方回合也能用，每回合一次）", perTurn: 1, pay: { extra: 'albazFusion' }, tags: ['albazFusion', 'mentionsAlbaz', 'lightDark'], does: "每回合一次，送一只以阿尔白斯为素材的融合怪兽去墓地，除外场上一只怪兽；被对方弄离场时结束阶段破坏对方全部怪兽", cost: "每次要送额外卡组一只融合怪兽", limit: "除外效果下个回合不能再用；场上只能有一只" },
+  44146295: { jp: "氷剣竜ミラジェイド", md: "冰剑龙 镜翠幻种", role: "终场", interrupts: 1, interruptHow: "送一只以阿尔白斯之落胤为素材的融合怪兽去墓地，除外场上一只怪兽（对方回合也能用，每回合一次）", perTurn: 1, ownTurnLock: 0, pay: { extra: 'albazFusion' }, tags: ['albazFusion', 'mentionsAlbaz', 'lightDark'], does: "每回合一次，送一只以阿尔白斯为素材的融合怪兽去墓地，除外场上一只怪兽；被对方弄离场时结束阶段破坏对方全部怪兽", cost: "每次要送额外卡组一只融合怪兽", limit: "除外效果下个回合不能再用；场上只能有一只" },
   70534340: { jp: "神炎竜ルベリオン", md: "神炎龙 卢绯里昂", role: "融合素材", interrupts: 0, interruptHow: "", tags: ['albazFusion', 'mentionsAlbaz', 'lightDark'], does: "融合召唤时弃一张手牌，把场上/墓地/除外的怪兽洗回卡组，融合召唤一只8星以下融合怪兽", cost: "要弃一张手牌", limit: "每回合一次；当回合自己不能出非融合怪兽" },
   41373230: { jp: "灰燼竜バスタード", md: "灰烬龙 落尘劣种", role: "检索", interrupts: 0, interruptHow: "", tags: ['albazFusion', 'mentionsAlbaz', 'lightDark'], does: "进墓的回合结束阶段，从卡组选一只教导怪兽或阿尔白斯之落胤，加入手牌或特召", cost: "要在进墓的回合才能用", limit: "③每回合一次" },
   24915933: { jp: "赫焉竜グランギニョル", md: "赫焉龙 格兰吉尼奥尔", role: "终场", interrupts: 0, interruptHow: "", tags: ['lightDark'], does: "融合召唤时从卡组/额外卡组送一只6星以上光暗怪兽去墓地；对方的怪兽效果造成特召时，除外自己，从卡组特召教导怪兽或从额外卡组特召死狱乡怪兽", cost: "②要除外自己", limit: "①②每回合各一次" },
