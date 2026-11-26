@@ -10,7 +10,7 @@
 //                    yg-time { t }（播放中每帧一次、seek 之后一次）、yg-ended { t }（播到 to）、yg-error { detail }
 //                    yg-card-hover { code, rect } / yg-card-leave { code } / yg-card-tap { code, rect }（rect 已换算成外壳页视口里的像素，
 //                    插件页再加上框架自己的位置）、yg-role-hover / yg-role-tap { code, tags, why, rect } / yg-role-leave { code }（场上的作用标签，rect 同上）、
-//                    yg-key { key }（左右键转给插件页）、yg-rects { cards, roles }（roles 是看得见的作用标签：{ code, tags, card（卡的元素 id）, rect }）
+//                    yg-key { key }（左右键转给插件页）、yg-rects { cards, roles }（cards 是看得见的卡：{ code, md, card（卡的元素 id）, rect }；roles 是看得见的作用标签：{ code, tags, card（卡的元素 id）, rect }）
 // 不联网有三道：合成页自带 HyperFrames 运行时（播放器看到合成页已带运行时，就不会去 CDN 注入）；页面头上的 CSP 把 connect / 脚本 / 图片
 // 都限在页面内和 data:；本仓不放 gsap。卡图一律 data: 地址。
 import { planRoute } from './anim-plan.js';
@@ -56,7 +56,7 @@ export function buildGuestHtml({ player, composition, stage }) {
       var r = pl.iframeElement.getBoundingClientRect(), s = r.width / W;
       var fix = function (b) { return { x: r.left + b.x * s, y: r.top + b.y * s, w: b.w * s, h: b.h * s }; };
       if (d.rect) d.rect = fix(d.rect);
-      if (d.cards) d.cards = d.cards.map(function (c) { return { code: c.code, md: c.md, rect: fix(c.rect) }; });
+      if (d.cards) d.cards = d.cards.map(function (c) { return { code: c.code, md: c.md, card: c.card, rect: fix(c.rect) }; });
       if (d.roles) d.roles = d.roles.map(function (c) { return { code: c.code, tags: c.tags, card: c.card, rect: fix(c.rect) }; });
       up(d);
     }

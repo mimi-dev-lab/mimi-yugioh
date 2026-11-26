@@ -76,7 +76,7 @@ const INTERACT = `
     var d = e.data;
     if (!d || d.src !== 'yg-host' || d.cmd !== 'rects') return;
     var out = [];
-    Array.prototype.forEach.call(cards, function (el) { if (getComputedStyle(el.parentNode).visibility === 'visible') out.push({ code: Number(el.dataset.code), md: el.dataset.md, rect: rectOf(el) }); });
+    Array.prototype.forEach.call(cards, function (el) { if (getComputedStyle(el.parentNode).visibility === 'visible') out.push({ code: Number(el.dataset.code), md: el.dataset.md, card: el.parentNode.id, rect: rectOf(el) }); });
     var tags = [];
     Array.prototype.forEach.call(roles, function (el) { if (getComputedStyle(el).visibility === 'visible' && getComputedStyle(el.parentNode).visibility === 'visible') tags.push({ code: Number(el.dataset.code), tags: el.dataset.tags.split('、'), card: el.parentNode.id, rect: rectOf(el) }); });
     parent.postMessage({ type: 'yg-rects', cards: out, roles: tags }, '*');

@@ -74,7 +74,7 @@ lacks route-first "个打断"
 shot route-mid --route white-albaz --step 9
 has route-mid "第 9 / 17 步"
 lacks route-mid "个打断"
-shot route-end --route white-albaz --step last --keys
+shot route-end --route white-albaz --step last --keys --require-roles  # 场上的卡带作用标签，每块贴在自己的卡上（plugin-shot 量 yg-rects）
 has route-end "第 17 / 17 步 · 终场" "终场里每张卡的作用" "留场" "先攻结束" "2个打断" "靠这些卡" "打断 1：" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "剩余手牌" "墓地 " "除外 "
 lacks route-end "%" "还差" "估值" "评分" "总分"
 shot route-fusion-end --route branded-fusion --step last

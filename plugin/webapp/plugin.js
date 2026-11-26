@@ -178,7 +178,7 @@ function DeckView({ rest, deck }) {
 function GlossaryView({ deck }) {
   const used = (name) => deck.cards.filter((c) => c.roleTags.includes(name)).length;
   return h("div", { className: "yg-glossary" },
-    h("p", { className: "yg-lab yg-sum" }, "路线每一步中场的卡都带 1–2 个作用词，悬停词或打开卡片弹窗能看到「此刻为什么是这个作用」。同一张卡在不同路线、不同步骤作用会变。"),
+    h("p", { className: "yg-lab yg-sum" }, "路线动画里场上的每张卡（和手牌里的手坑、终场算打断的手牌）都带 1–2 个作用词，悬停（手机点一下）这个词或打开卡片弹窗能看到「此刻为什么是这个作用」。同一张卡在不同路线、不同步骤作用会变。"),
     deck.roleTerms.map((t) => h("section", { key: t.name, className: "yg-term", "aria-label": t.name },
       h("div", { className: "yg-term-head" }, h("span", { className: "yg-role", style: { background: t.color } }, t.name), h("span", { className: "yg-lab" }, used(t.name) ? `默认带这个作用的卡 ${used(t.name)} 种` : "没有默认带它的卡，只在路线某一步出现")),
       h("p", { className: "yg-term-note" }, t.note))));
