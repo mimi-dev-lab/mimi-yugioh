@@ -283,6 +283,7 @@ function OpeningPanel({ rest, board, handRoles, blocks }) {
     h("div", { className: "yg-phd" }, "起手手牌"),
     h("div", { className: "yg-hand" }, hand.map((c, i) => h("div", { key: `${c.code}-${i}`, className: "yg-hc" }, h(Thumb, { rest, card: c, w: 70, h: 101 }), h("span", { className: "yg-hcn" }, c.md),
       roleOf(c.code) ? h("span", { className: "yg-roles" }, h(RoleChips, { tags: roleOf(c.code).tags, why: roleOf(c.code).why, small: true })) : null))),
+    blocks ? h(BlockList, { blocks }) : null,
     h(Piles, { board }));
 }
 
