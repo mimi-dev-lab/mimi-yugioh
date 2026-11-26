@@ -153,6 +153,34 @@ shot anim-auto --route branded-fusion --play-all
 has anim-auto "第 10 / 10 步 · 终场" "1个打断"
 shot anim-phone-auto --mobile --route branded-fusion --step 2 --click-step 10
 has anim-phone-auto "个打断"
+# 先猜再看：开关开着时每步动画前先停住，只写「第 n 步：想想下一步做什么？」，按空格 / 点一下 / 点「下一步」才播这一步；连播每步也停；开关记在浏览器本地；关着时和平常一样
+# guess 名字 'JS 表达式'：对 <名字>.json 的 guess.log（每个动作之后的页面状态）求值，要为真
+guess() {
+  node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const log = j.guess && j.guess.log; if (!log || !(new Function("log", "return (" + process.argv[2] + ")"))(log)) { console.error(JSON.stringify(log, null, 1)); process.exit(1); }' "$ev/$1.json" "$2" || { echo "$1 的先猜再看不对：$2，见 $ev/$1.json"; exit 1; }
+}
+shot guess-ask --design --route white-albaz --step 2 --guess on,ask
+has guess-ask "先猜再看" "第 3 步：想想下一步做什么？" "第 2 / 17 步"
+lacks guess-ask "花了什么" "发动了" "中场的卡" "%" "还差" "评分" "总分"
+guess guess-ask 'log[1].pending === "true" && log[1].step === 2 && log[1].mode === "idle" && log[1].prompt.includes("第 3 步：想想下一步做什么？") && !/花了什么|发动了/.test(log[1].panel) && log[0].stored === "true"'
+shot guess-flow --route white-albaz --guess on,ask,space,ask,click,ask,next
+has guess-flow "第 3 / 17 步" "花了什么"
+guess guess-flow 'log[3].step === 1 && log[3].pending === "false" && log[3].mode === "idle" && log[5].step === 2 && log[7].step === 3 && log[7].pending === "false" && log.slice(0, 7).filter((l) => l.act === "ask").every((l) => l.pending === "true")'
+shot guess-phone --mobile --route white-albaz --step 2 --guess on,ask
+has guess-phone "先猜再看" "第 3 步：想想下一步做什么？"
+lacks guess-phone "花了什么"
+shot guess-phone-after --mobile --route white-albaz --step 2 --guess on,ask,click
+has guess-phone-after "第 3 / 17 步" "花了什么"
+shot guess-auto --route branded-fusion --guess on,auto,space,space,off
+has guess-auto "第 2 / 10 步"
+guess guess-auto 'log[1].pending === "true" && log[1].step === 0 && log[2].step === 1 && log[2].pending === "true" && log[3].step === 2 && log[3].pending === "true" && log[4].pending === "false" && log[4].guess === "false" && log[4].stored === "false"'
+shot guess-reopen --route white-albaz --guess on,reopen
+guess guess-reopen 'log[1].guess === "true" && log[1].pressed === "true" && log[1].stored === "true"'
+shot guess-off --route white-albaz --guess on,off,next
+has guess-off "第 1 / 17 步" "花了什么"
+guess guess-off 'log[2].step === 1 && log[2].pending === "false" && log[2].guess === "false" && log[2].pressed === "false"'
+for name in guess-ask guess-phone guess-phone-after guess-flow guess-auto; do
+  grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
+done
 for name in hover-deck hover-route anim-mid anim-jump anim-back anim-auto anim-phone-auto hover-lookup hover-end tap-route tap-deck; do
   grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
 done
