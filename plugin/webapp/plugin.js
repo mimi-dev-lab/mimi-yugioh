@@ -14,7 +14,9 @@
    why, the card popup shows the card's default role and, inside a route, the role at the step on screen; the step panel and the end summary list every midfield card with its chips and
    the reason line (visible on a phone too). On the route animation every card on the field (and a hand card with a job this step: a hand trap, an interrupt kept in the hand)
    carries its chips; hovering (phone: tapping) a chip there shows the reason in a small tip (the frame sends yg-role-hover / yg-role-tap / yg-role-leave). 卡组一览 groups by each card's first default tag; the 术语表 tab explains every word.
-   Nothing to play and no scores: the page only reads.
+   先猜再看 (a switch next to 连播, kept in localStorage, off by default): on, a step does not play until it is revealed: the panel shows only 「第 n 步：想想下一步做什么？」, a click on it, the space bar
+  or 下一步 plays that step; 连播 stops at every step the same way. Off, the player is as before.
+  Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
    The look is its own (design-r3): a true-black ground, #c8ff3d as the accent, grey text no darker than #bdbdbd,
@@ -327,6 +329,19 @@ function Stage({ anim, frameRef, error }) {
         : h("p", { className: "yg-lab yg-stage-wait" }, "读取动画…"));
 }
 
+// 先猜再看 (a player switch, kept in this browser's localStorage; off by default): with it on, a step does not play until the player reveals it
+const GUESS_KEY = "yugioh.guess-first";
+function readGuess() { try { return window.localStorage.getItem(GUESS_KEY) === "true"; } catch { return false; } }
+function writeGuess(on) { try { window.localStorage.setItem(GUESS_KEY, String(on)); } catch { /* storage blocked: the switch still works for this page */ } }
+
+// the paused prompt in the panel's place: only the step number and the question, nothing about the step; a click reveals it (so does the space bar)
+function GuessPanel({ n, onReveal }) {
+  return h("div", { className: "yg-panel yg-guess-panel" },
+    h("button", { className: "yg-guess", onClick: onReveal, "aria-label": `第 ${n} 步：想想下一步做什么？` },
+      h("span", { className: "yg-guess-q" }, `第 ${n} 步：想想下一步做什么？`),
+      h("span", { className: "yg-lab" }, "按空格或点一下，看这一步")));
+}
+
 function Player({ rest, id, onBack }) {
   const popup = useCardPopup();
   const [route, setRoute] = useState(null);
@@ -334,16 +349,19 @@ function Player({ rest, id, onBack }) {
   const [error, setError] = useState("");
   const [animError, setAnimError] = useState("");
   const [roleTip, setRoleTip] = useState(null); // a chip on the board hovered (phone: tapped): { tags, why, rect } in the page's viewport
-  const [view, setView] = useState({ index: 0, mode: "idle", ready: false }); // mode: idle | step (one step playing) | auto (连播)
-  const S = useRef({ index: 0, mode: "idle", ready: false, t: 0, mid: false }); // the same state for the message handlers (mid: paused part-way through a step)
+  // mode: idle | step (one step playing) | auto (连播). 先猜再看: guess = the switch; pending = paused on the prompt for step index + 1; chain = 连播 is on (it stops at every step's prompt)
+  const fresh = () => ({ index: 0, mode: "idle", ready: false, t: 0, mid: false, guess: readGuess(), pending: false, chain: false });
+  const shown = (v) => ({ index: v.index, mode: v.mode, ready: v.ready, guess: v.guess, pending: v.pending, chain: v.chain });
+  const [view, setView] = useState(() => shown(fresh()));
+  const S = useRef(fresh()); // the same state for the message handlers (mid: paused part-way through a step)
   const frameRef = useRef(null);
   const playerRef = useRef(null);
   const barRef = useRef(null);
   const ctl = useRef(null);
-  const commit = (patch) => { Object.assign(S.current, patch); setView({ index: S.current.index, mode: S.current.mode, ready: S.current.ready }); };
+  const commit = (patch) => { Object.assign(S.current, patch); setView(shown(S.current)); };
   useEffect(() => {
     let live = true;
-    setRoute(null); setAnim(null); setError(""); setAnimError(""); S.current = { index: 0, mode: "idle", ready: false, t: 0, mid: false }; setView({ index: 0, mode: "idle", ready: false });
+    setRoute(null); setAnim(null); setError(""); setAnimError(""); S.current = fresh(); setView(shown(S.current));
     rest(`/route?id=${id}`).then((r) => { if (live) setRoute(r); }).catch((e) => { if (live) setError(message(e)); });
     rest(`/route-anim?id=${id}`).then((a) => { if (live) setAnim(a); }).catch((e) => { if (live) setAnimError(message(e)); });
     return () => { live = false; };
@@ -357,27 +375,46 @@ function Player({ rest, id, onBack }) {
     k = Math.max(0, Math.min(total, k));
     popup.hide();
     post({ cmd: "seek", t: anim.ends[k] });
-    commit({ index: k, mode: "idle", mid: false });
+    commit({ index: k, mode: "idle", mid: false, pending: false, chain: false });
   };
   const playStep = () => {
     const from = S.current.index;
     popup.hide();
     post({ cmd: "playRange", from: anim.ends[from], to: anim.ends[from + 1] });
-    commit({ index: from + 1, mode: "step", mid: false });
+    commit({ index: from + 1, mode: "step", mid: false, pending: false });
   };
+  const reveal = () => { if (S.current.ready && S.current.pending) playStep(); };
   const next = () => {
     if (!S.current.ready) return;
     if (S.current.mode !== "idle") jump(segAt(S.current.t));
-    else if (S.current.index < total) playStep();
+    else if (S.current.pending) reveal();
+    else if (S.current.index < total) { if (S.current.guess) { popup.hide(); commit({ pending: true }); } else playStep(); }
   };
   const prev = () => {
     if (!S.current.ready) return;
     if (S.current.mode !== "idle") jump(segAt(S.current.t) - 1);
     else jump(S.current.index - 1);
   };
+  const toggleGuess = () => {
+    const on = !S.current.guess;
+    writeGuess(on);
+    commit({ guess: on, pending: false, chain: false });
+  };
   const auto = () => {
     if (!S.current.ready) return;
     popup.hide();
+    if (S.current.guess) {
+      // 连播 with the switch on stops at every step: it asks, the reveal plays that one step, and when it ends the next ask comes (yg-ended)
+      if (S.current.chain) {
+        if (S.current.mode !== "idle") { post({ cmd: "pause" }); commit({ mode: "idle", index: segAt(S.current.t), mid: true, chain: false, pending: false }); } else commit({ chain: false, pending: false });
+        return;
+      }
+      const i = S.current.index;
+      if (S.current.mid && S.current.t > anim.starts[i] && S.current.t < anim.ends[i]) { post({ cmd: "playRange", from: S.current.t, to: anim.ends[i] }); commit({ mode: "step", mid: false, chain: true }); return; }
+      if (i >= total) { post({ cmd: "seek", t: anim.ends[0] }); commit({ index: 0, mid: false, chain: true, pending: true }); return; }
+      commit({ chain: true, pending: true, mid: false });
+      return;
+    }
     if (S.current.mode === "auto") { post({ cmd: "pause" }); commit({ mode: "idle", index: segAt(S.current.t), mid: true }); return; }
     if (S.current.mode === "step") post({ cmd: "pause" });
     let from = S.current.index >= total ? 0 : S.current.index === 0 ? 0 : anim.ends[S.current.index];
@@ -385,13 +422,14 @@ function Player({ rest, id, onBack }) {
     post({ cmd: "playRange", from, to: anim.ends[total] });
     commit({ mode: "auto", mid: false, ...(S.current.index >= total ? { index: 0 } : {}) });
   };
-  ctl.current = { next, prev, jump, auto, segAt, anim, total };
+  ctl.current = { next, prev, jump, auto, reveal, segAt, anim, total };
 
   useEffect(() => {
     const onKey = (e) => {
       if (!ctl.current.anim || e.target?.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? "")) return;
       if (e.key === "ArrowLeft") ctl.current.prev();
       if (e.key === "ArrowRight") ctl.current.next();
+      if (e.key === " " && S.current.pending) { e.preventDefault(); ctl.current.reveal(); }
     };
     const onMessage = (e) => {
       const frame = frameRef.current;
@@ -402,9 +440,9 @@ function Player({ rest, id, onBack }) {
       else if (d.type === "yg-time") {
         S.current.t = d.t;
         if (S.current.mode !== "idle") { const k = c.segAt(d.t); if (k !== S.current.index) commit({ index: k }); }
-      } else if (d.type === "yg-ended") commit({ mode: "idle", index: c.segAt(d.t), mid: false });
+      } else if (d.type === "yg-ended") { const k = c.segAt(d.t); commit({ mode: "idle", index: k, mid: false, ...(S.current.chain ? (k < c.total ? { pending: true } : { chain: false }) : {}) }); }
       else if (d.type === "yg-error") setAnimError(`动画出错：${d.detail}`);
-      else if (d.type === "yg-key") { if (d.key === "ArrowLeft") c.prev(); if (d.key === "ArrowRight") c.next(); }
+      else if (d.type === "yg-key") { if (d.key === "ArrowLeft") c.prev(); if (d.key === "ArrowRight") c.next(); if (d.key === " " && S.current.pending) c.reveal(); }
       else if (d.type === "yg-role-hover" || d.type === "yg-role-tap" || d.type === "yg-role-leave") {
         if (d.type === "yg-role-leave") { if (!isPhone()) setRoleTip(null); return; }
         if (d.type === "yg-role-hover" === isPhone()) return; // hover on a desktop, a tap on a phone
@@ -446,13 +484,13 @@ function Player({ rest, id, onBack }) {
 
   if (error) return h("div", { className: "yg-error", role: "alert" }, error);
   if (!route) return h("p", { className: "yg-lab" }, "读取路线…");
-  const { index, mode } = view;
+  const { index, mode, guess, pending, chain } = view;
   const opening = index === 0;
   const step = opening ? null : route.steps[index - 1];
   const last = index === total;
   const playing = mode !== "idle";
   const mismatch = [route.mismatch, ...route.engineDiff.map((d) => `引擎重放和教程写的终场不一致：${d}`)].filter(Boolean);
-  return h("div", { ref: playerRef, className: "yg-player", "data-step": String(index), "data-total": String(total), "data-mode": mode, "data-ready": String(view.ready) },
+  return h("div", { ref: playerRef, className: "yg-player", "data-step": String(index), "data-total": String(total), "data-mode": mode, "data-ready": String(view.ready), "data-guess": String(guess), "data-pending": String(pending) },
     h("div", { className: "yg-row wrap" },
       h("button", { className: "yg-btn small", onClick: onBack }, "← 路线列表"),
       h("h2", { className: "yg-route-title" }, route.name)),
@@ -468,11 +506,13 @@ function Player({ rest, id, onBack }) {
       h("div", { className: "yg-nav" },
         h("button", { className: "yg-btn", disabled: !view.ready || (opening && !playing), onClick: prev }, "上一步"),
         h("button", { className: "yg-btn", disabled: !view.ready || (last && !playing), onClick: next }, "下一步"),
-        h("button", { className: `yg-btn${mode === "auto" ? " on" : ""}`, disabled: !view.ready, onClick: auto }, mode === "auto" ? "暂停" : "连播"),
+        h("button", { className: `yg-btn${mode === "auto" || chain ? " on" : ""}`, disabled: !view.ready, onClick: auto }, mode === "auto" || chain ? "暂停" : "连播"),
+        h("button", { className: `yg-btn yg-toggle${guess ? " on" : ""}`, role: "switch", "aria-pressed": String(guess), "aria-label": "先猜再看", onClick: toggleGuess }, "先猜再看"),
         h("span", { className: "yg-lab yg-pos" }, opening ? `起手 · 共 ${total} 步` : `第 ${index} / ${total} 步${last ? " · 终场" : ""}`))),
     h("div", { className: "yg-play" },
       h(Stage, { anim, frameRef, error: animError }),
-      opening ? h(OpeningPanel, { rest, board: route.start, handRoles: route.startHandRoles })
+      pending ? h(GuessPanel, { n: index + 1, onReveal: reveal })
+      : opening ? h(OpeningPanel, { rest, board: route.start, handRoles: route.startHandRoles })
         : last && !playing ? h(EndPanel, { rest, end: route.end, step })
           : h(StepPanel, { rest, step, total })),
     roleTip ? h(RoleTip, { ...roleTip, onClose: () => setRoleTip(null) }) : null);
@@ -724,6 +764,9 @@ const CSS = `
 .yg-engine { font-size: 11px; color: #8b8b93; line-height: 1.6; border-top: 1px solid #1c1c1c; padding-top: 8px; }
 .yg-engine summary { cursor: pointer; color: #8b8b93; }
 .yg-engine p { margin: 0; }
+.yg-guess-panel { justify-content: center; }
+.yg-guess { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; text-align: left; padding: 28px 20px; border: 2px dashed #c8ff3d; border-radius: 8px; background: #000; min-height: 140px; justify-content: center; }
+.yg-guess-q { font-size: 22px; font-weight: 700; line-height: 1.4; }
 .yg-btn.on { background: #c8ff3d; color: #000; border-color: #c8ff3d; }
 @media (max-width: 760px) {
   .yg { padding: 12px; }

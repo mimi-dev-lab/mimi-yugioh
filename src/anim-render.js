@@ -70,7 +70,7 @@ const INTERACT = `
     el.addEventListener('click', function () { parent.postMessage(roleMsg('yg-role-tap', el), '*'); });
   });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); parent.postMessage({ type: 'yg-key', key: e.key }, '*'); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); parent.postMessage({ type: 'yg-key', key: e.key }, '*'); }
   });
   addEventListener('message', function (e) {
     var d = e.data;

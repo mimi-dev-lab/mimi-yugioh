@@ -164,7 +164,7 @@ lacks guess-ask "花了什么" "发动了" "中场的卡" "%" "还差" "评分" 
 guess guess-ask 'log[1].pending === "true" && log[1].step === 2 && log[1].mode === "idle" && log[1].prompt.includes("第 3 步：想想下一步做什么？") && !/花了什么|发动了/.test(log[1].panel) && log[0].stored === "true"'
 shot guess-flow --route white-albaz --guess on,ask,space,ask,click,ask,next
 has guess-flow "第 3 / 17 步" "花了什么"
-guess guess-flow 'log[3].step === 1 && log[3].pending === "false" && log[3].mode === "idle" && log[5].step === 2 && log[7].step === 3 && log[7].pending === "false" && log.slice(0, 7).filter((l) => l.act === "ask").every((l) => l.pending === "true")'
+guess guess-flow 'log[1].step === 0 && log[2].step === 1 && log[2].pending === "false" && log[2].mode === "idle" && log[3].step === 1 && log[4].step === 2 && log[5].step === 2 && log[6].step === 3 && log[6].pending === "false" && log.filter((l) => l.act === "ask").every((l) => l.pending === "true")'
 shot guess-phone --mobile --route white-albaz --step 2 --guess on,ask
 has guess-phone "先猜再看" "第 3 步：想想下一步做什么？"
 lacks guess-phone "花了什么"
