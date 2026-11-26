@@ -161,7 +161,7 @@ guess() {
 shot guess-ask --design --route white-albaz --step 2 --guess on,ask
 has guess-ask "先猜再看" "第 3 步：想想下一步做什么？" "第 2 / 17 步"
 lacks guess-ask "花了什么" "发动了" "中场的卡" "%" "还差" "评分" "总分"
-guess guess-ask 'log[1].pending === "true" && log[1].step === 2 && log[1].mode === "idle" && log[1].prompt.includes("第 3 步：想想下一步做什么？") && !/花了什么|发动了/.test(log[1].panel) && log[0].stored === "true"'
+guess guess-ask 'log[1].pending === "true" && log[1].step === 2 && log[1].mode === "idle" && log[1].prompt.includes("第 3 步：想想下一步做什么？") && !/花了什么|发动了/.test(log[1].panel) && log[1].panel.includes("第 3 步") && log[0].stored === "true"'
 shot guess-flow --route white-albaz --guess on,ask,space,ask,click,ask,next
 has guess-flow "第 3 / 17 步" "花了什么"
 guess guess-flow 'log[1].step === 0 && log[2].step === 1 && log[2].pending === "false" && log[2].mode === "idle" && log[3].step === 1 && log[4].step === 2 && log[5].step === 2 && log[6].step === 3 && log[6].pending === "false" && log.filter((l) => l.act === "ask").every((l) => l.pending === "true")'
@@ -174,10 +174,16 @@ shot guess-auto --route branded-fusion --guess on,auto,space,space,off
 has guess-auto "第 2 / 10 步"
 guess guess-auto 'log[1].pending === "true" && log[1].step === 0 && log[2].step === 1 && log[2].pending === "true" && log[3].step === 2 && log[3].pending === "true" && log[4].pending === "false" && log[4].guess === "false" && log[4].stored === "false"'
 shot guess-reopen --route white-albaz --guess on,reopen
-guess guess-reopen 'log[1].guess === "true" && log[1].pressed === "true" && log[1].stored === "true"'
+guess guess-reopen 'log[1].guess === "true" && log[1].checked === "true" && log[1].stored === "true"'
+shot guess-midplay --route branded-fusion --guess play,on,wait
+guess guess-midplay 'log[1].guess === "true" && log[1].mode === "idle" && log[1].pending === "false" && log[1].autoLabel === "连播" && log[2].mode === "idle" && log[2].step === log[1].step && log[2].pending === "false"'
+shot guess-end --route branded-fusion --step 9 --guess on,auto,space
+guess guess-end 'log[2].step === 10 && log[2].mode === "idle" && log[2].pending === "false" && log[2].autoLabel === "连播"'
+shot guess-focus --route white-albaz --step 2 --guess on,ask,autospace
+guess guess-focus 'log[2].step === 2 && log[2].pending === "true" && log[2].autoLabel === "暂停"'
 shot guess-off --route white-albaz --guess on,off,next
 has guess-off "第 1 / 17 步" "花了什么"
-guess guess-off 'log[2].step === 1 && log[2].pending === "false" && log[2].guess === "false" && log[2].pressed === "false"'
+guess guess-off 'log[2].step === 1 && log[2].pending === "false" && log[2].guess === "false" && log[2].checked === "false"'
 for name in guess-ask guess-phone guess-phone-after guess-flow guess-auto; do
   grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
 done

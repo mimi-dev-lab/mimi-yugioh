@@ -366,7 +366,7 @@ def main() -> int:
     s.add_argument("--tap-role", metavar="卡名", help="phone: tap the role chip of this card inside the route animation")
     s.add_argument("--clip-stage", action="store_true", help="screenshot only the animation frame (a close-up of the board, 2x pixels)")
     s.add_argument("--require-roles", action="store_true", help="with --route/--jump: fail when the animation shows no role chips (every route shot already fails when a chip is not on its card)")
-    s.add_argument("--guess", metavar="动作,动作…", help="with --route/--jump (after --step): drive 先猜再看 with real input: on|off (the toggle), ask (下一步, wait for the paused prompt), auto (连播, wait for the prompt), space|click|next (reveal, wait for the step to finish), reopen (back to the list and into the route again); the state after each action goes to <name>.json guess")
+    s.add_argument("--guess", metavar="动作,动作…", help="with --route/--jump (after --step): drive 先猜再看 with real input: on|off (the toggle), play (连播, wait until it plays), wait (1.5 s), autospace (space with focus on 连播), ask (下一步, wait for the paused prompt), auto (连播, wait for the prompt), space|click|next (reveal, wait for the step to finish), reopen (back to the list and into the route again); the state after each action goes to <name>.json guess")
     s.add_argument("--net-file", metavar="FILE", help="write every request the tab and its frames made (CDP) to FILE; non-local hosts are flagged")
     s.add_argument("--close", action="store_true", help="with --hover/--tap: close the popup (phone: the 关上 button, then tap again and Esc; desktop: Esc) and record it")
     s.add_argument("--compare", metavar="PNG", help="also write NAME-compare.png: the design PNG on the left, this screenshot on the right")

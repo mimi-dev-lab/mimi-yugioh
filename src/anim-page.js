@@ -6,11 +6,13 @@
 //                    { src: 'yg-host', cmd: 'playRange', from, to }  从 from 播到 to，播完停住
 //                    { src: 'yg-host', cmd: 'pause' }                暂停
 //                    { src: 'yg-host', cmd: 'rects' }                问现在每张看得见的卡在哪（验证脚本用）
+//                    { src: 'yg-host', cmd: 'keys', space }          空格键要不要转给插件页：space 为 true（「先猜再看」开着）时框里按空格转 yg-key 并拦下默认动作，
+//                                                                   否则（默认、关着）框里的空格不转、不拦，和没有这个开关时一样；插件页在 yg-ready 时和开关变化时发
 //   外壳页 → 插件页  { src: 'yg-guest', type: 'yg-ready', duration }  播放器就绪
 //                    yg-time { t }（播放中每帧一次、seek 之后一次）、yg-ended { t }（播到 to）、yg-error { detail }
 //                    yg-card-hover { code, rect } / yg-card-leave { code } / yg-card-tap { code, rect }（rect 已换算成外壳页视口里的像素，
 //                    插件页再加上框架自己的位置）、yg-role-hover / yg-role-tap { code, tags, why, rect } / yg-role-leave { code }（场上的作用标签，rect 同上）、
-//                    yg-key { key }（左右键和空格转给插件页）、yg-rects { cards, roles }（cards 是看得见的卡：{ code, md, card（卡的元素 id）, rect }；roles 是看得见的作用标签：{ code, tags, card（卡的元素 id）, rect }）
+//                    yg-key { key }（左右键转给插件页；空格要 host 发过 keys { space: true } 才转）、yg-rects { cards, roles }（cards 是看得见的卡：{ code, md, card（卡的元素 id）, rect }；roles 是看得见的作用标签：{ code, tags, card（卡的元素 id）, rect }）
 // 不联网有三道：合成页自带 HyperFrames 运行时（播放器看到合成页已带运行时，就不会去 CDN 注入）；页面头上的 CSP 把 connect / 脚本 / 图片
 // 都限在页面内和 data:；本仓不放 gsap。卡图一律 data: 地址。
 import { planRoute } from './anim-plan.js';
@@ -28,7 +30,7 @@ export function buildGuestHtml({ player, composition, stage }) {
 <body><hyperframes-player id="pl" interactive disable-click-to-play muted assets-loading-ui="none"></hyperframes-player>
 <script>${inlineJs(player)}</script>
 <script>(function () {
-  var W = ${stage.w}, pl = document.getElementById('pl'), raf = 0;
+  var W = ${stage.w}, pl = document.getElementById('pl'), raf = 0, space = false;
   function up(m) { m.src = 'yg-guest'; parent.postMessage(m, '*'); }
   function clearRange() { pl.rangeStart = null; pl.rangeEnd = null; }
   function tick() { up({ type: 'yg-time', t: pl.currentTime }); if (!pl.paused) raf = requestAnimationFrame(tick); else raf = 0; }
@@ -49,6 +51,7 @@ export function buildGuestHtml({ player, composition, stage }) {
       if (d.cmd === 'seek') { pl.pause(); clearRange(); pl.seek(d.t); up({ type: 'yg-time', t: d.t }); }
       else if (d.cmd === 'playRange') { pl.pause(); clearRange(); pl.seek(d.from); pl.rangeStart = d.from; pl.rangeEnd = d.to; pl.play(); poll(); }
       else if (d.cmd === 'pause') { pl.pause(); up({ type: 'yg-time', t: pl.currentTime }); }
+      else if (d.cmd === 'keys') { space = d.space === true; if (pl.iframeElement && pl.iframeElement.contentWindow) pl.iframeElement.contentWindow.postMessage(d, '*'); }
       else if (d.cmd === 'rects' && pl.iframeElement && pl.iframeElement.contentWindow) pl.iframeElement.contentWindow.postMessage(d, '*');
       return;
     }
@@ -61,7 +64,7 @@ export function buildGuestHtml({ player, composition, stage }) {
       up(d);
     }
   });
-  document.addEventListener('keydown', function (e) { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); up({ type: 'yg-key', key: e.key }); } });
+  document.addEventListener('keydown', function (e) { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || (e.key === ' ' && space)) { e.preventDefault(); up({ type: 'yg-key', key: e.key }); } });
 })();</script></body></html>`;
 }
 

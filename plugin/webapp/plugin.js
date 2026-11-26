@@ -15,8 +15,8 @@
    the reason line (visible on a phone too). On the route animation every card on the field (and a hand card with a job this step: a hand trap, an interrupt kept in the hand)
    carries its chips; hovering (phone: tapping) a chip there shows the reason in a small tip (the frame sends yg-role-hover / yg-role-tap / yg-role-leave). 卡组一览 groups by each card's first default tag; the 术语表 tab explains every word.
    先猜再看 (a switch next to 连播, kept in localStorage, off by default): on, a step does not play until it is revealed: the panel shows only 「第 n 步：想想下一步做什么？」, a click on it, the space bar
-  or 下一步 plays that step; 连播 stops at every step the same way. Off, the player is as before.
-  Nothing to play and no scores: the page only reads.
+   or 下一步 plays that step; 连播 stops at every step the same way. Off, the player is as before.
+   Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
    The look is its own (design-r3): a true-black ground, #c8ff3d as the accent, grey text no darker than #bdbdbd,
@@ -337,7 +337,7 @@ function writeGuess(on) { try { window.localStorage.setItem(GUESS_KEY, String(on
 // the paused prompt in the panel's place: only the step number and the question, nothing about the step; a click reveals it (so does the space bar)
 function GuessPanel({ n, onReveal }) {
   return h("div", { className: "yg-panel yg-guess-panel" },
-    h("button", { className: "yg-guess", onClick: onReveal, "aria-label": `第 ${n} 步：想想下一步做什么？` },
+    h("button", { className: "yg-guess", onClick: onReveal, },
       h("span", { className: "yg-guess-q" }, `第 ${n} 步：想想下一步做什么？`),
       h("span", { className: "yg-lab" }, "按空格或点一下，看这一步")));
 }
@@ -352,8 +352,9 @@ function Player({ rest, id, onBack }) {
   // mode: idle | step (one step playing) | auto (连播). 先猜再看: guess = the switch; pending = paused on the prompt for step index + 1; chain = 连播 is on (it stops at every step's prompt)
   const fresh = () => ({ index: 0, mode: "idle", ready: false, t: 0, mid: false, guess: readGuess(), pending: false, chain: false });
   const shown = (v) => ({ index: v.index, mode: v.mode, ready: v.ready, guess: v.guess, pending: v.pending, chain: v.chain });
-  const [view, setView] = useState(() => shown(fresh()));
-  const S = useRef(fresh()); // the same state for the message handlers (mid: paused part-way through a step)
+  const S = useRef(null); // the same state for the message handlers (mid: paused part-way through a step)
+  if (!S.current) S.current = fresh(); // lazily: fresh() reads localStorage
+  const [view, setView] = useState(() => shown(S.current));
   const frameRef = useRef(null);
   const playerRef = useRef(null);
   const barRef = useRef(null);
@@ -398,7 +399,10 @@ function Player({ rest, id, onBack }) {
   const toggleGuess = () => {
     const on = !S.current.guess;
     writeGuess(on);
-    commit({ guess: on, pending: false, chain: false });
+    post({ cmd: "keys", space: on });
+    // whatever is playing stops where it is (a 连播 must not carry on into the prompts, or past the end with one open)
+    if (S.current.mode !== "idle") { post({ cmd: "pause" }); commit({ guess: on, mode: "idle", index: segAt(S.current.t), mid: true, pending: false, chain: false }); }
+    else commit({ guess: on, pending: false, chain: false });
   };
   const auto = () => {
     if (!S.current.ready) return;
@@ -422,27 +426,34 @@ function Player({ rest, id, onBack }) {
     post({ cmd: "playRange", from, to: anim.ends[total] });
     commit({ mode: "auto", mid: false, ...(S.current.index >= total ? { index: 0 } : {}) });
   };
-  ctl.current = { next, prev, jump, auto, reveal, segAt, anim, total };
+  const onPlayerKey = (key) => {
+    if (key === "ArrowLeft") prev();
+    if (key === "ArrowRight") next();
+    if (key === " ") reveal();
+  };
+  ctl.current = { onPlayerKey, segAt, anim, total };
 
   useEffect(() => {
     const onKey = (e) => {
       if (!ctl.current.anim || e.target?.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName ?? "")) return;
-      if (e.key === "ArrowLeft") ctl.current.prev();
-      if (e.key === "ArrowRight") ctl.current.next();
-      if (e.key === " " && S.current.pending) { e.preventDefault(); ctl.current.reveal(); }
+      if (e.key === " ") { // on a focused button / link the space bar belongs to it (a native click)
+        if (/^(BUTTON|A|SUMMARY)$/.test(e.target?.tagName ?? "")) return;
+        if (S.current.pending) e.preventDefault();
+      }
+      ctl.current.onPlayerKey(e.key);
     };
     const onMessage = (e) => {
       const frame = frameRef.current;
       const d = e.data;
       if (!frame || e.source !== frame.contentWindow || !d || typeof d.type !== "string") return;
       const c = ctl.current;
-      if (d.type === "yg-ready") { commit({ ready: true }); post({ cmd: "seek", t: c.anim.ends[S.current.index] }); }
+      if (d.type === "yg-ready") { commit({ ready: true }); post({ cmd: "keys", space: S.current.guess }); post({ cmd: "seek", t: c.anim.ends[S.current.index] }); }
       else if (d.type === "yg-time") {
         S.current.t = d.t;
         if (S.current.mode !== "idle") { const k = c.segAt(d.t); if (k !== S.current.index) commit({ index: k }); }
-      } else if (d.type === "yg-ended") { const k = c.segAt(d.t); commit({ mode: "idle", index: k, mid: false, ...(S.current.chain ? (k < c.total ? { pending: true } : { chain: false }) : {}) }); }
+      } else if (d.type === "yg-ended") { const k = c.segAt(d.t); const more = S.current.chain && k < c.total; commit({ mode: "idle", index: k, mid: false, pending: more, chain: more }); }
       else if (d.type === "yg-error") setAnimError(`动画出错：${d.detail}`);
-      else if (d.type === "yg-key") { if (d.key === "ArrowLeft") c.prev(); if (d.key === "ArrowRight") c.next(); if (d.key === " " && S.current.pending) c.reveal(); }
+      else if (d.type === "yg-key") c.onPlayerKey(d.key);
       else if (d.type === "yg-role-hover" || d.type === "yg-role-tap" || d.type === "yg-role-leave") {
         if (d.type === "yg-role-leave") { if (!isPhone()) setRoleTip(null); return; }
         if (d.type === "yg-role-hover" === isPhone()) return; // hover on a desktop, a tap on a phone
@@ -507,7 +518,7 @@ function Player({ rest, id, onBack }) {
         h("button", { className: "yg-btn", disabled: !view.ready || (opening && !playing), onClick: prev }, "上一步"),
         h("button", { className: "yg-btn", disabled: !view.ready || (last && !playing), onClick: next }, "下一步"),
         h("button", { className: `yg-btn${mode === "auto" || chain ? " on" : ""}`, disabled: !view.ready, onClick: auto }, mode === "auto" || chain ? "暂停" : "连播"),
-        h("button", { className: `yg-btn yg-toggle${guess ? " on" : ""}`, role: "switch", "aria-pressed": String(guess), "aria-label": "先猜再看", onClick: toggleGuess }, "先猜再看"),
+        h("button", { className: `yg-btn yg-toggle${guess ? " on" : ""}`, role: "switch", "aria-checked": String(guess), "aria-label": "先猜再看", onClick: toggleGuess }, "先猜再看"),
         h("span", { className: "yg-lab yg-pos" }, opening ? `起手 · 共 ${total} 步` : `第 ${index} / ${total} 步${last ? " · 终场" : ""}`))),
     h("div", { className: "yg-play" },
       h(Stage, { anim, frameRef, error: animError }),

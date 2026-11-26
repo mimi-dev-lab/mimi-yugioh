@@ -181,16 +181,26 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     playedMs = Date.now() - t;
   }
   // --guess 动作,动作…：「先猜再看」的一串真操作（在 --step 走完之后做）。on / off 点开关；ask 点「下一步」等停住的提示；auto 点「连播」等停住的提示；
-  // space / click / next 揭晓（按空格 / 点提示 / 点「下一步」），等这一步播完（连播时等下一个提示）；reopen 回路线列表再点进同一条路线，看开关还开着。.json 的 guess 记每一步之后的状态
+  // play 点「连播」等它真播起来（不等提示）；wait 停 1.5 秒；autospace 焦点放在「连播」按钮上按空格；space / click / next 揭晓（按空格 / 点提示 / 点「下一步」），等这一步播完（连播时等下一个提示）；reopen 回路线列表再点进同一条路线，看开关还开着。.json 的 guess 记每一步之后的状态
   let guess = null;
   if (opts.guess) {
     guess = { log: [] };
-    const data = () => evaluate(() => { const p = document.querySelector('.yg-player'); const g = document.querySelector('.yg-guess'); return { step: Number(p.dataset.step), mode: p.dataset.mode, guess: p.dataset.guess, pending: p.dataset.pending, prompt: g ? g.innerText : null, panel: g ? g.closest('.yg-panel').innerText : null, pressed: document.querySelector('.yg-toggle')?.getAttribute('aria-pressed'), stored: localStorage.getItem('yugioh.guess-first') }; });
+    const data = () => evaluate(() => { const p = document.querySelector('.yg-player'); const g = document.querySelector('.yg-guess'); return { step: Number(p.dataset.step), mode: p.dataset.mode, guess: p.dataset.guess, pending: p.dataset.pending, prompt: g ? g.innerText : null, panel: document.querySelector('.yg-play')?.innerText ?? null, checked: document.querySelector('.yg-toggle')?.getAttribute('aria-checked'), autoLabel: document.querySelector('.yg-nav')?.children[2]?.innerText, stored: localStorage.getItem('yugioh.guess-first') }; });
     for (const act of opts.guess.split(',')) {
       const before = await data();
       if (act === 'on' || act === 'off') {
         if (!(await clickButton('先猜再看'))) await fail(new Error('页面上没有「先猜再看」开关'));
         await until((v) => document.querySelector('.yg-player').dataset.guess === v, String(act === 'on'), 5000, `开关${act}`).catch(fail);
+      } else if (act === 'play') {
+        if (!(await clickButton('连播'))) await fail(new Error('点不了「连播」'));
+        await until(() => document.querySelector('.yg-player').dataset.mode === 'auto', null, 10000, '开始连播').catch(fail);
+      } else if (act === 'wait') {
+        await new Promise((r) => setTimeout(r, 1500));
+      } else if (act === 'autospace') {
+        // 焦点在「连播」按钮上按空格：空格归这个按钮（原生点击），不该同时揭晓
+        if (!(await evaluate(() => { const b = document.querySelector('.yg-nav')?.children[2]; if (!b) return false; b.focus(); return true; }))) await fail(new Error('没有「连播」按钮'));
+        for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32, ...(type === 'keyDown' ? { text: ' ' } : {}) });
+        await new Promise((r) => setTimeout(r, 1500));
       } else if (act === 'ask' || act === 'auto') {
         if (!(await clickButton(act === 'ask' ? '下一步' : '连播'))) await fail(new Error(`点不了${act}`));
         await until(() => document.querySelector('.yg-player').dataset.pending === 'true', null, 10000, '停住，出现「想想下一步做什么」').catch(fail);

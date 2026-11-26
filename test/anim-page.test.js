@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
+import vm from 'node:vm';
 import { CSP, buildGuestHtml, buildRouteAnim, imageUri } from '../src/anim-page.js';
+import { INTERACT } from '../src/anim-render.js';
 import { STAGE } from '../src/anim-stage.js';
 import { ENGINE_SOURCE } from '../src/anim-engine.js';
 import { readHyperframes } from '../src/vendor-files.js';
@@ -59,6 +61,40 @@ describe('路线动画页：本地、不联网', () => {
     assert.ok(html.includes('interactive'));
     assert.ok(html.includes('assets-loading-ui="none"')); // 不然卡图还在解码时播放器盖一层模糊的加载牌 // 没有 interactive，播放器会把鼠标事件吃掉，悬停就没了
   });
+});
+
+// 空格键：在最小的假浏览器里跑页面脚本，看它拦不拦、转不转
+const shellScript = () => buildGuestHtml({ player: '', composition: '', stage: { w: 800, h: 700 } }).match(/<script>[\s\S]*?<\/script>/g)[1].replace(/^<script>|<\/script>$/g, '');
+function fakePage(code) {
+  const doc = {}, win = {}, sent = [], toIframe = [];
+  const parent = { postMessage: (m) => sent.push(m) };
+  const pl = { addEventListener() {}, setAttribute() {}, iframeElement: { contentWindow: { postMessage: (m) => toIframe.push(m) } } };
+  const on = (bag) => (type, fn) => { bag[type] = fn; };
+  vm.runInNewContext(code, { document: { addEventListener: on(doc), getElementById: () => pl, querySelectorAll: () => [] }, addEventListener: on(win), parent, requestAnimationFrame: () => 1, getComputedStyle: () => ({}) });
+  return {
+    toIframe,
+    keys: () => sent.filter((m) => m.type === 'yg-key').map((m) => m.key),
+    press: (k) => { let prevented = false; doc.keydown({ key: k, preventDefault: () => { prevented = true; } }); return prevented; },
+    space: (on) => win.message({ source: parent, data: { src: 'yg-host', cmd: 'keys', space: on } }),
+  };
+}
+
+describe('空格键：只在「先猜再看」开着时由框转给插件页，关着时和没有这个开关一样', () => {
+  for (const [name, code] of [['外壳页', shellScript], ['合成页', () => INTERACT]]) {
+    test(`${name}：默认空格不拦不转，左右键照旧；host 发 keys space:true 后转并拦，再发 false 又不转`, () => {
+      const page = fakePage(code());
+      assert.equal(page.press(' '), false);
+      assert.equal(page.press('ArrowLeft'), true);
+      assert.deepEqual(page.keys(), ['ArrowLeft']);
+      page.space(true);
+      assert.equal(page.press(' '), true);
+      assert.deepEqual(page.keys(), ['ArrowLeft', ' ']);
+      page.space(false);
+      assert.equal(page.press(' '), false);
+      assert.deepEqual(page.keys(), ['ArrowLeft', ' ']);
+      if (name === '外壳页') assert.deepEqual(page.toIframe.map((m) => m.space), [true, false]); // 外壳页把开关再转给合成页
+    });
+  }
 });
 
 describe('动画引擎 valueAt', () => {
