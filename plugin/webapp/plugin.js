@@ -16,7 +16,7 @@
    carries its chips; hovering (phone: tapping) a chip there shows the reason in a small tip (the frame sends yg-role-hover / yg-role-tap / yg-role-leave). 卡组一览 groups by each card's first default tag; the 术语表 tab explains every word.
    先猜再看 (a switch next to 连播, kept in localStorage, off by default): on, a step does not play until it is revealed: the panel shows only 「第 n 步：想想下一步做什么？」, a click on it, the space bar
    or 下一步 plays that step; 连播 stops at every step the same way. Off, the player is as before.
-   积木 (blocks, from GET /route's blocks and steps[].block): the route is a few named, reusable pieces; the step bar is split into one coloured segment per block with its name
+   积木 (blocks, from GET /route's blocks and steps[].block, the id of the block each step belongs to, which the service works out): the route is a few named, reusable pieces; the step bar is split into one coloured segment per block with its name
    above the step numbers, and the step panel (and the end panel) shows the current block: its name, which steps it spans and 要什么 → 给什么; the 起手 panel lists the route's blocks.
    With 先猜再看 on, a block's name stays hidden until its first step has been played. The colours come from the service (each block has one), they are not copied here.
    Nothing to play and no scores: the page only reads.
@@ -299,9 +299,10 @@ function BlockFlow({ block }) {
 }
 
 // the block the step on screen belongs to
-function BlockCard({ blocks, n }) {
-  const block = blocks.find((b) => b.from <= n && n <= b.to);
+function BlockCard({ blocks, step }) {
+  const block = blocks.find((b) => b.id === step.block); // the service names each step's block (steps[].block); the page does not work out ranges itself
   if (!block) return null;
+  const n = step.n;
   return h("section", { className: "yg-blk", "data-block": block.id, style: { "--blk": block.color }, "aria-label": "这一步所在的积木" },
     h("div", { className: "yg-blk-head" },
       h("span", { className: "yg-phd" }, "积木"),
@@ -326,7 +327,7 @@ function StepPanel({ rest, step, total, blocks }) {
     h("div", { className: "yg-pg", "aria-hidden": "true" }, Array.from({ length: total }, (_, i) => h("i", { key: i, className: i + 1 < step.n ? "d" : i + 1 === step.n ? "c" : "" }))),
     h(PanelHead, { big: String(step.n).padStart(2, "0"), numeric: true, tag, color }),
     h("p", { className: "yg-ptext" }, step.text),
-    h(BlockCard, { blocks, n: step.n }),
+    h(BlockCard, { blocks, step }),
     h("div", { className: "yg-trade", "aria-label": "花了什么 → 换来什么" },
       h("div", { className: "yg-phd" }, "花了什么"), h("span", null), h("div", { className: "yg-phd" }, "换来什么"),
       h(TradeCol, { rest, rows: cost, side: "cost" }), h("span", { className: "yg-arrow", "aria-hidden": "true" }, "→"), h(TradeCol, { rest, rows: gain, side: "gain" })),
@@ -341,7 +342,7 @@ function EndPanel({ rest, end, step, blocks }) {
   return h("section", { className: "yg-panel yg-end", "aria-label": "终场" },
     h(PanelHead, { big: "终场", tag: "先攻结束", color: COLOR.amber }),
     h("p", { className: "yg-endnum" }, h("b", null, end.interrupts), h("span", null, "个打断")),
-    h(BlockCard, { blocks, n: step.n }),
+    h(BlockCard, { blocks, step }),
     h("div", { className: "yg-phd" }, "靠这些卡"),
     end.breakers.length ? h("div", { className: "yg-bks" }, end.breakers.map((b) => h("div", { key: b.code, className: "yg-brow" },
       h(Thumb, { rest, card: b, w: 52, h: 75 }),

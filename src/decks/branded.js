@@ -110,4 +110,4 @@ export const EXTRA = [
   { code: 54757758, count: 1 }, // 沼地のドロゴン
 ];
 
-export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, levels: LEVELS, routes: ROUTES, lookup: LOOKUP, roleTags: { terms: ROLE_TERMS, defaults: ROLE_DEFAULTS, routes: ROLE_ROUTES }, blocks: { blocks: BLOCKS, segments: BLOCK_SEGMENTS } };
+export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, levels: LEVELS, routes: ROUTES, lookup: LOOKUP, roleTags: { terms: ROLE_TERMS, defaults: ROLE_DEFAULTS, routes: ROLE_ROUTES }, blocks: { list: BLOCKS, segments: BLOCK_SEGMENTS } };

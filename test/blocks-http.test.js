@@ -60,6 +60,6 @@ describe('积木：GET /route 返回的分段', () => {
   test('GLOSSARY.md 解释了「积木」；覆盖率报告列出每块积木', () => {
     assert.ok(glossary.includes('**积木**'));
     const report = readFileSync(new URL('../docs/opening-analysis.md', import.meta.url), 'utf8');
-    for (const b of BRANDED.blocks.blocks) assert.ok(report.includes(`| ${b.name} |`), `报告里没有积木 ${b.name}`);
+    for (const b of BRANDED.blocks.list) assert.ok(report.includes(`| ${b.name} |`), `报告里没有积木 ${b.name}`);
   });
 });

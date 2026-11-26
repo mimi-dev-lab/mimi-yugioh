@@ -157,6 +157,39 @@ describe('积木覆盖率：只用积木能拼出多少手的最好展开', () =
     assert.deepEqual(blocks.uncovered.cards.map((c) => c.uncoveredShare - c.coveredShare), [...blocks.uncovered.cards.map((c) => c.uncoveredShare - c.coveredShare)].sort((a, b) => b - a));
   });
 
+  test('按全部手算的分母也给：严格 / 放宽口径各占全部手的多少；放宽比严格多拼出几手', () => {
+    assert.equal(blocks.total, 7);
+    assert.equal(blocks.loose.covered - blocks.strict.covered, 1); // 第 5 手：选的卡不同
+    assert.equal(blocks.uncovered.looseN, 2);
+    assert.equal(blocks.uncovered.looseUnknownOp, 1); // 放宽后仍拼不出的两手里，停在积木没有的动作上的：第 6 手的灰流丽
+  });
+
+  test('每块积木的写法整段出现在多少手的最好展开里（不要求从头接上），不会比拼得出的手里用到的少', () => {
+    const anywhere = Object.fromEntries(blocks.usage.map((u) => [u.name, u.anywhere]));
+    assert.deepEqual(anywhere, { 落胤起跳: 3, 三英压场: 1, 收网: 2, 融合连发: 1, 结束阶段大回收: 1, 气炎换落胤: 0, 圣女接力: 0, 开幕搭桥: 0, 冰剑龙封场: 0, 阿卢绯尔点火: 0 });
+    for (const u of blocks.usage) assert.ok(u.anywhere >= u.hands, u.name);
+  });
+
+  test('起手里常见（占有展开的手 ≥ 10%）、拼得出的手里一手都没有的卡：先多后少', () => {
+    assert.deepEqual(blocks.neverCovered.map((c) => [c.code, c.hands]), [[A, 2], [C, 1]]);
+    assert.equal(blocks.neverCovered[0].share, 2 / 5);
+  });
+
+  test('没拼出的手的最好展开平均多长、从头平均拼到第几个操作', () => {
+    const ops = (r) => r.steps.flatMap((x) => x.do).filter((op) => op !== 'finish').length;
+    const rows = [4, 5, 6].map((i) => BLOCK_ROWS[i]);
+    assert.equal(blocks.uncovered.avgOps, rows.map(ops).reduce((a, b) => a + b, 0) / 3);
+    assert.ok(blocks.uncovered.avgDepth > 0 && blocks.uncovered.avgDepth < blocks.uncovered.avgOps);
+  });
+
+  test('报告里写出结论：两个分母的数字、原因（选卡不是主因、圣女接力 0 手、常见起手卡拼得出的手里 0）', () => {
+    const text = buildReport(BLOCK_ROWS, BRANDED, { minLiftHands: 1 });
+    assert.match(text, /按全部 7 手算：严格口径 2 手（28\.6%），放宽口径 3 手（42\.9%）/);
+    assert.match(text, /放宽口径只多拼出 1 手（占严格口径没拼出的 3 手的 33\.3%）[^\n]*放宽后仍有 2 手拼不出/);
+    assert.match(text, /拼得出的手里一手都没用到的积木：[^\n]*圣女接力（用在 3 条路线）/);
+    assert.match(text, /起手里常见[^\n]*拼得出的手里一手都没有的卡：[^\n]*白之落胤[^\n]*2 手，40\.0%/);
+  });
+
   test('报告里有这一节：覆盖率数字、口径、每块积木的用处、没拼出的手的共同点；用的是现在的路线数据', () => {
     const text = buildReport(BLOCK_ROWS, BRANDED, { minLiftHands: 1 });
     assert.match(text, /## 积木覆盖率/);
