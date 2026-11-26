@@ -9,7 +9,8 @@
 //   外壳页 → 插件页  { src: 'yg-guest', type: 'yg-ready', duration }  播放器就绪
 //                    yg-time { t }（播放中每帧一次、seek 之后一次）、yg-ended { t }（播到 to）、yg-error { detail }
 //                    yg-card-hover { code, rect } / yg-card-leave { code } / yg-card-tap { code, rect }（rect 已换算成外壳页视口里的像素，
-//                    插件页再加上框架自己的位置）、yg-key { key }（左右键转给插件页）、yg-rects { cards }
+//                    插件页再加上框架自己的位置）、yg-role-hover / yg-role-tap { code, tags, why, rect } / yg-role-leave { code }（场上的作用标签，rect 同上）、
+//                    yg-key { key }（左右键转给插件页）、yg-rects { cards, roles }（roles 是看得见的作用标签：{ code, tags, card（卡的元素 id）, rect }）
 // 不联网有三道：合成页自带 HyperFrames 运行时（播放器看到合成页已带运行时，就不会去 CDN 注入）；页面头上的 CSP 把 connect / 脚本 / 图片
 // 都限在页面内和 data:；本仓不放 gsap。卡图一律 data: 地址。
 import { planRoute } from './anim-plan.js';
@@ -51,11 +52,12 @@ export function buildGuestHtml({ player, composition, stage }) {
       else if (d.cmd === 'rects' && pl.iframeElement && pl.iframeElement.contentWindow) pl.iframeElement.contentWindow.postMessage(d, '*');
       return;
     }
-    if (d && /^yg-(card-hover|card-leave|card-tap|key|rects)$/.test(d.type)) {   // 来自合成页：把合成页里的像素换算成本页视口里的
+    if (d && /^yg-(card-hover|card-leave|card-tap|role-hover|role-leave|role-tap|key|rects)$/.test(d.type)) {   // 来自合成页：把合成页里的像素换算成本页视口里的
       var r = pl.iframeElement.getBoundingClientRect(), s = r.width / W;
       var fix = function (b) { return { x: r.left + b.x * s, y: r.top + b.y * s, w: b.w * s, h: b.h * s }; };
       if (d.rect) d.rect = fix(d.rect);
       if (d.cards) d.cards = d.cards.map(function (c) { return { code: c.code, md: c.md, rect: fix(c.rect) }; });
+      if (d.roles) d.roles = d.roles.map(function (c) { return { code: c.code, tags: c.tags, card: c.card, rect: fix(c.rect) }; });
       up(d);
     }
   });
@@ -67,9 +69,9 @@ const dataUrl = (html) => `data:text/html;base64,${Buffer.from(html, 'utf8').toS
 export const imageUri = (bytes) => (bytes ? `data:image/webp;base64,${Buffer.from(bytes).toString('base64')}` : null);
 
 // 一条路线的动画页：{ src（data: 地址，给 SandboxedFrame）、starts / ends（每个位置：0 = 起手，1..N = 第几步；开始帧、结束帧的秒数）、duration、stage }
-// readImage(code) 读卡图（没有就 null，画卡名牌）；vendor 是 { player, runtime }（vendor-files.js 读的）
-export function buildRouteAnim({ route, readImage, vendor }) {
-  const plan = planRoute(route);
+// roleTerms 是作用标签的术语表（给场上的作用标签着色）；readImage(code) 读卡图（没有就 null，画卡名牌）；vendor 是 { player, runtime }（vendor-files.js 读的）
+export function buildRouteAnim({ route, roleTerms, readImage, vendor }) {
+  const plan = planRoute(route, { roleTerms });
   const images = new Map(plan.codes.map((code) => [code, imageUri(readImage(code))]));
   const composition = renderComposition(plan, { images, runtime: vendor.runtime });
   const html = buildGuestHtml({ player: vendor.player, composition, stage: STAGE });

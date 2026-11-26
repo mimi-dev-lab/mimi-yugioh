@@ -47,7 +47,7 @@ const ANIMS = new Map();
 function animFor(route) {
   if (!ANIMS.has(route.id)) {
     VENDOR ??= readHyperframes();
-    ANIMS.set(route.id, buildRouteAnim({ route, readImage: (code) => store.readImage(code), vendor: VENDOR }));
+    ANIMS.set(route.id, buildRouteAnim({ route, roleTerms: BRANDED.roleTags.terms, readImage: (code) => store.readImage(code), vendor: VENDOR }));
   }
   return ANIMS.get(route.id);
 }

@@ -92,6 +92,51 @@ describe('路线动画生成器：每条路线每一步的动作和引擎一致'
     }
   });
 
+  test('每一步的结束帧：中场每张卡带着这一步的作用标签（roles），手牌只有 handRoles 里的卡带，墓地、除外和别的手牌不带；终场不另画「打断」横幅', () => {
+    let handTagged = 0;
+    for (const [id, route] of routes) {
+      const plan = plans.get(id);
+      const stepRoles = [{ field: [], hand: route.startHandRoles }, ...route.steps.map((s) => ({ field: s.roles, hand: s.handRoles }))];
+      plan.segments.forEach((seg, k) => {
+        const { field, hand } = stepRoles[k];
+        for (const f of frameAt(plan, seg.mark)) {
+          if (f.opacity < 0.99) { assert.deepEqual(f.roles, [], `${id} 位置 ${k}：看不见的 ${f.md} 不该有作用标签`); continue; }
+          const [zone] = zoneAt(f);
+          const want = zone === 'monsters' || zone === 'spellTraps' ? field.find((r) => r.code === f.code) : zone === 'hand' ? hand.find((r) => r.code === f.code) : null;
+          if (zone === 'hand' && want) handTagged += 1;
+          assert.deepEqual(f.roles.map((r) => [r.tags, r.why, r.opacity]), want ? [[want.tags, want.why, 1]] : [], `${id} 位置 ${k}：${zone} 的 ${f.md}`);
+          if (zone === 'monsters' || zone === 'spellTraps') assert.ok(want, `${id} 位置 ${k}：中场的 ${f.md} 没有作用`);
+        }
+      });
+      assert.doesNotMatch(renderComposition(plan, { runtime: '/* runtime */' }), /class="bkt"/, `${id} 终场`);
+      // 终场：打断的卡标的作用里有「打断」（同一个「打断」只出现一次）
+      const last = frameAt(plan, plan.segments.at(-1).mark).filter((f) => f.opacity > 0.99);
+      for (const b of route.end.breakers) {
+        const f = last.find((x) => x.code === b.code && x.roles.length);
+        assert.ok(f, `${id} 终场的 ${b.md} 没有作用标签`);
+        assert.equal(f.roles[0].tags.filter((t) => t === '打断').length, 1, `${id} 终场的 ${b.md}`);
+      }
+    }
+    assert.ok(handTagged > 0, '至少有一手手牌里的手坑带着作用标签');
+  });
+
+  test('作用标签照术语表着色，悬停用的作用词和原因写在标签上', () => {
+    const plan = planRoute(routes.get(WHITE_ALBAZ), { roleTerms: BRANDED.roleTags.terms });
+    const html = renderComposition(plan, { runtime: '/* runtime */' });
+    const amber = BRANDED.roleTags.terms.find((t) => t.name === '打断').color;
+    assert.ok(html.includes(`<i style="background:${amber}">打断</i>`), '打断用术语表的颜色');
+    assert.match(html, /class="rl" data-code="\d+" data-tags="[^"]+" data-why="[^"]{10,}"/);
+  });
+
+  test('作用标签是卡的子元素、跟着卡走：整条时间轴上每 0.1 秒，看得见的标签都长在看得见的卡上（卡消失前标签先收起）', () => {
+    for (const [id, plan] of plans) {
+      for (let t = 0; t <= plan.duration; t += 0.1) {
+        for (const f of frameAt(plan, t)) if (f.roles.length) assert.ok(f.opacity > 0, `${id} ${t.toFixed(1)}s：${f.md} 看不见了，作用标签还在`);
+      }
+    }
+    assert.match(renderComposition(plans.get(WHITE_ALBAZ), { runtime: '/* runtime */' }), /<div id="c\d+" class="card"[^]*?<div id="c\d+r1" class="rl"/);
+  });
+
   test('第 9 步阿卢绯尔守备表示：结束帧横放（转角 90），攻击表示的怪兽不转', () => {
     const plan = plans.get(WHITE_ALBAZ);
     const f = frameAt(plan, plan.segments[9].mark).find((x) => x.code === 62962630 && x.opacity > 0.99);

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { checkDeck } from '../src/deck.js';
-import { checkRoleTags, defaultRoleOf, resolveRoles } from '../src/roles.js';
+import { checkRoleTags, defaultRoleOf, handRoles, resolveRoles } from '../src/roles.js';
 import { BRANDED } from '../src/decks/branded.js';
+import { C } from '../src/decks/branded-routes.js';
 
 describe('作用数据的检查（纯函数，不起服务）', () => {
   test('烙印的作用数据没有问题，卡组检查也带上它', () => {
@@ -54,5 +55,19 @@ describe('作用数据的检查（纯函数，不起服务）', () => {
     assert.deepEqual([a.from, b.from, b.since, b.tags], ['step', 'carried', 1, ['素材']]);
     assert.equal(c, undefined);
     assert.deepEqual([d.from, d.tags], ['default', defaultRoleOf(deck, code).tags]);
+  });
+
+  test('handRoles：手牌只标手坑和终场算进打断数的卡；默认作用里没有打断的打断卡标「打断」和怎么打断', () => {
+    const { lockBird, albaz, mercourier, mirrorjade } = C;
+    assert.deepEqual(handRoles(BRANDED, [albaz, lockBird, lockBird]).map((r) => [r.code, r.tags, r.from]), [[lockBird, ['手坑'], 'default']]);
+    assert.deepEqual(handRoles(BRANDED, [mercourier], [mercourier]).map((r) => r.tags), [['手坑', '打断']]);
+    const [m] = handRoles(BRANDED, [mirrorjade], [mirrorjade]);
+    assert.deepEqual([m.tags, m.from], [['打断'], 'default']);
+    const deck = structuredClone(BRANDED);
+    deck.roleTags.defaults[albaz] = { tags: ['初动'], why: '测试用：默认作用里没有打断' };
+    deck.cards[albaz] = { ...deck.cards[albaz], interruptHow: '测试用的打断方式' };
+    const [a] = handRoles(deck, [albaz], [albaz]);
+    assert.deepEqual([a.tags, a.from], [['打断'], 'breaker']);
+    assert.match(a.why, /测试用的打断方式/);
   });
 });

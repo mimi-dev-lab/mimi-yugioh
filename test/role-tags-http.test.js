@@ -140,4 +140,26 @@ describe('卡的作用标签：接口返回的数据', () => {
       }
     } finally { server.stop(); }
   });
+
+  test('手牌里此刻有作用的卡也带标签：起手和每一步的手坑；铁兽鸟 墨丘利耶终场留在手里算打断时标「手坑」「打断」；别的手牌不带', async () => {
+    const server = await start({ YUGIOH_ENGINE: ENGINE_DIR });
+    try {
+      for (const def of BRANDED.routes) {
+        const { body } = await get(server.url, `/route?id=${def.id}`);
+        const check = (hand, roles, where) => {
+          for (const r of roles) assert.ok(hand.some((c) => c.code === r.code), `${def.id} ${where}：${r.md} 不在手牌里`);
+          for (const c of hand) {
+            const r = roles.find((x) => x.code === c.code);
+            assert.equal(Boolean(r), BRANDED.roleTags.defaults[c.code].tags.includes('手坑') || (where === '终场' && body.end.breakers.some((b) => b.code === c.code)), `${def.id} ${where}：${c.md}`);
+          }
+        };
+        check(body.start.hand, body.startHandRoles, '起手');
+        body.steps.forEach((s, i) => check(s.board.hand, s.handRoles, i === body.steps.length - 1 ? '终场' : `第 ${s.n} 步`));
+      }
+      const { body } = await get(server.url, '/route?id=branded-fusion-aluber');
+      const m = body.steps.at(-1).handRoles.find((r) => r.md === '铁兽鸟 墨丘利耶');
+      assert.deepEqual(m.tags, ['手坑', '打断']);
+      assert.ok(body.end.breakers.some((b) => b.code === m.code));
+    } finally { server.stop(); }
+  });
 });

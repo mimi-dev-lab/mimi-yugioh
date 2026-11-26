@@ -12,7 +12,8 @@
    DOMRect (or {left, top, right, bottom}) in the page's viewport coordinates and flips / clamps the popup inside the window, so another source (a frame) can use it too.
    作用标签 (role tags, from the service: GET /deck's roleTerms and each card's roleTags / roleWhy, GET /route's steps[].roles): a coloured chip per tag; hovering a chip shows
    why, the card popup shows the card's default role and, inside a route, the role at the step on screen; the step panel and the end summary list every midfield card with its chips and
-   the reason line (visible on a phone too). 卡组一览 groups by each card's first default tag; the 术语表 tab explains every word.
+   the reason line (visible on a phone too). On the route animation every card on the field (and a hand card with a job this step: a hand trap, an interrupt kept in the hand)
+   carries its chips; hovering (phone: tapping) a chip there shows the reason in a small tip (the frame sends yg-role-hover / yg-role-tap / yg-role-leave). 卡组一览 groups by each card's first default tag; the 术语表 tab explains every word.
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -83,7 +84,7 @@ function DetailBody({ rest, card, onClose, stepRole, stepN }) {
           h("span", { className: "yg-chip" }, `${ZONE_NAME[card.zone]} ×${card.count}`)),
         onClose ? h("button", { className: "yg-btn small yg-close", onClick: onClose, "aria-label": "关上" }, "× 关上") : null)),
     h("div", { key: "facts", className: "yg-facts" },
-      stepRole ? h("div", { className: "yg-fact yg-rolefact", "data-role-scope": "step" }, h("span", { className: "yg-lab" }, `第 ${stepN} 步`), h("span", null, h(RoleChips, { tags: stepRole.tags, why: stepRole.why }), h("span", { className: "yg-why" }, stepRole.why), stepRole.from === "step" ? null : h("span", { className: "yg-lab" }, stepRole.from === "carried" ? `（自第 ${stepRole.since} 步起）` : "（默认）")))
+      stepRole ? h("div", { className: "yg-fact yg-rolefact", "data-role-scope": "step" }, h("span", { className: "yg-lab" }, `${stepN ? `第 ${stepN} 步` : "起手"}${stepRole.hand ? " · 手牌" : ""}`), h("span", null, h(RoleChips, { tags: stepRole.tags, why: stepRole.why }), h("span", { className: "yg-why" }, stepRole.why), stepRole.from === "step" || stepRole.hand ? null : h("span", { className: "yg-lab" }, stepRole.from === "carried" ? `（自第 ${stepRole.since} 步起）` : "（默认）")))
         : null,
       card.roleWhy ? h("div", { className: "yg-fact yg-rolefact", "data-role-scope": "default" }, h("span", { className: "yg-lab" }, "默认作用"), h("span", null, h("span", { className: "yg-why" }, card.roleWhy))) : null,
       fact("干什么", card.does),
@@ -184,16 +185,19 @@ function GlossaryView({ deck }) {
 }
 
 // 中场的卡: every card on the field with its chips and the reason line (a step's roles from GET /route)
-function MidfieldRoles({ rest, roles, n }) {
+// hand: the hand cards with a job this step (GET /route steps[].handRoles), listed after the field with 在手牌里
+function MidfieldRoles({ rest, roles, hand = [], n }) {
   const popup = useCardPopup();
-  useEffect(() => { popup.setStepRoles({ n, roles }); return () => popup.setStepRoles(null); }, [roles, n]);
-  if (!roles.length) return h("p", { className: "yg-none" }, "中场还没有卡");
-  return h("div", { className: "yg-mid", "aria-label": "中场的卡和它们此刻的作用" }, roles.map((r) => h("div", { key: r.code, className: "yg-mrow", "data-card-code": String(r.code) },
+  useEffect(() => { popup.setStepRoles({ n, roles: [...roles, ...hand.map((r) => ({ ...r, hand: true }))] }); return () => popup.setStepRoles(null); }, [roles, hand, n]);
+  const row = (r, inHand) => h("div", { key: `${inHand ? "h" : "f"}${r.code}`, className: "yg-mrow", "data-card-code": String(r.code) },
     h(Thumb, { rest, card: r, w: 44, h: 64 }),
     h("div", { className: "yg-mtext" },
       h("div", { className: "yg-row wrap" }, h("b", null, r.md), h(RoleChips, { tags: r.tags, why: r.why })),
       h("p", { className: "yg-why" }, r.why),
-      r.from === "step" ? null : h("p", { className: "yg-lab" }, r.from === "carried" ? `自第 ${r.since} 步起` : "默认作用")))));
+      inHand ? h("p", { className: "yg-lab" }, "在手牌里") : r.from === "step" ? null : h("p", { className: "yg-lab" }, r.from === "carried" ? `自第 ${r.since} 步起` : "默认作用")));
+  return h("div", { className: "yg-mid", "aria-label": "中场的卡和它们此刻的作用" },
+    roles.length ? roles.map((r) => row(r, false)) : h("p", { className: "yg-none" }, "中场还没有卡"),
+    hand.map((r) => row(r, true)));
 }
 
 // ---- 展开路线: the list, then the player ----
@@ -263,15 +267,17 @@ function EngineNote({ title, lines }) {
   return h("details", { className: "yg-engine" }, h("summary", null, title), lines.map((l, i) => h("p", { key: i }, l)));
 }
 
-function OpeningPanel({ rest, board }) {
+function OpeningPanel({ rest, board, handRoles }) {
   const popup = useCardPopup();
-  useEffect(() => { popup.setStepRoles(null); }, []);
+  useEffect(() => { popup.setStepRoles({ n: 0, roles: handRoles.map((r) => ({ ...r, hand: true })) }); return () => popup.setStepRoles(null); }, [handRoles]);
   const hand = [...board.hand].sort((a, b) => a.sequence - b.sequence);
+  const roleOf = (code) => handRoles.find((r) => r.code === code);
   return h("section", { className: "yg-panel", "aria-label": "起手" },
     h(PanelHead, { big: "起手", tag: "先攻", color: COLOR.white }),
     h("p", { className: "yg-ptext" }, `手牌 ${hand.length} 张，从卡组抽出。往后每一步都和上一步比。`),
     h("div", { className: "yg-phd" }, "起手手牌"),
-    h("div", { className: "yg-hand" }, hand.map((c, i) => h("div", { key: `${c.code}-${i}`, className: "yg-hc" }, h(Thumb, { rest, card: c, w: 70, h: 101 }), h("span", null, c.md)))),
+    h("div", { className: "yg-hand" }, hand.map((c, i) => h("div", { key: `${c.code}-${i}`, className: "yg-hc" }, h(Thumb, { rest, card: c, w: 70, h: 101 }), h("span", { className: "yg-hcn" }, c.md),
+      roleOf(c.code) ? h("span", { className: "yg-roles" }, h(RoleChips, { tags: roleOf(c.code).tags, why: roleOf(c.code).why, small: true })) : null))),
     h(Piles, { board }));
 }
 
@@ -287,7 +293,7 @@ function StepPanel({ rest, step, total }) {
       h(TradeCol, { rest, rows: cost, side: "cost" }), h("span", { className: "yg-arrow", "aria-hidden": "true" }, "→"), h(TradeCol, { rest, rows: gain, side: "gain" })),
     step.activated.length ? h("p", { className: "yg-act" }, `发动了 ${step.activated.map((c) => c.md).join("、")}`) : null,
     h("div", { className: "yg-phd" }, "中场的卡和它们此刻的作用"),
-    h(MidfieldRoles, { rest, roles: step.roles, n: step.n }),
+    h(MidfieldRoles, { rest, roles: step.roles, hand: step.handRoles, n: step.n }),
     h(Piles, { board: step.board }),
     h(EngineNote, { title: "引擎里的操作", lines: step.actions }));
 }
@@ -302,7 +308,7 @@ function EndPanel({ rest, end, step }) {
       h("div", { className: "yg-trow-text" }, h("b", null, `${b.md}${b.copies > 1 ? ` ×${b.copies}` : ""}`), h("span", null, `打断 ${b.interrupts}：${b.interruptHow}`)))))
       : h("p", { className: "yg-none" }, "终场没有打断"),
     h("div", { className: "yg-phd" }, "终场里每张卡的作用"),
-    h(MidfieldRoles, { rest, roles: step.roles, n: step.n }),
+    h(MidfieldRoles, { rest, roles: step.roles, hand: step.handRoles, n: step.n }),
     h("p", { className: "yg-pile" }, h("u", { style: { color: COLOR.green } }, `剩余手牌 ${end.hand.length} 张`), end.hand.length ? end.hand.map((c) => c.md).join("、") : "—"),
     h(Piles, { board: end }),
     h(EngineNote, { title: `第 ${step.n} 步：${step.text}`, lines: [...(step.activated.length ? [`发动了 ${step.activated.map((c) => c.md).join("、")}`] : []), ...step.actions] }));
@@ -327,6 +333,7 @@ function Player({ rest, id, onBack }) {
   const [anim, setAnim] = useState(null);
   const [error, setError] = useState("");
   const [animError, setAnimError] = useState("");
+  const [roleTip, setRoleTip] = useState(null); // a chip on the board hovered (phone: tapped): { tags, why, rect } in the page's viewport
   const [view, setView] = useState({ index: 0, mode: "idle", ready: false }); // mode: idle | step (one step playing) | auto (连播)
   const S = useRef({ index: 0, mode: "idle", ready: false, t: 0, mid: false }); // the same state for the message handlers (mid: paused part-way through a step)
   const frameRef = useRef(null);
@@ -398,10 +405,17 @@ function Player({ rest, id, onBack }) {
       } else if (d.type === "yg-ended") commit({ mode: "idle", index: c.segAt(d.t), mid: false });
       else if (d.type === "yg-error") setAnimError(`动画出错：${d.detail}`);
       else if (d.type === "yg-key") { if (d.key === "ArrowLeft") c.prev(); if (d.key === "ArrowRight") c.next(); }
-      else if (d.type === "yg-card-hover" || d.type === "yg-card-tap" || d.type === "yg-card-leave") {
+      else if (d.type === "yg-role-hover" || d.type === "yg-role-tap" || d.type === "yg-role-leave") {
+        if (d.type === "yg-role-leave") { if (!isPhone()) setRoleTip(null); return; }
+        if (d.type === "yg-role-hover" === isPhone()) return; // hover on a desktop, a tap on a phone
+        const f = frame.getBoundingClientRect();
+        popup.hide();
+        setRoleTip({ tags: d.tags, why: d.why, rect: { left: f.left + d.rect.x, top: f.top + d.rect.y, right: f.left + d.rect.x + d.rect.w, bottom: f.top + d.rect.y + d.rect.h } });
+      } else if (d.type === "yg-card-hover" || d.type === "yg-card-tap" || d.type === "yg-card-leave") {
         if (d.type === "yg-card-leave") { if (!isPhone()) popup.hide(); return; }
         if (d.type === "yg-card-hover" === isPhone()) return; // hover on a desktop, a tap on a phone
         const f = frame.getBoundingClientRect();
+        setRoleTip(null);
         popup.show(d.code, { left: f.left + d.rect.x, top: f.top + d.rect.y, right: f.left + d.rect.x + d.rect.w, bottom: f.top + d.rect.y + d.rect.h });
       }
     };
@@ -420,6 +434,15 @@ function Player({ rest, id, onBack }) {
     ro.observe(bar);
     return () => ro.disconnect();
   }, [route]);
+
+  useEffect(() => { setRoleTip(null); }, [view.index, view.mode]);
+  useEffect(() => {
+    if (!roleTip) return undefined;
+    const close = (e) => { if (e.type !== "keydown" || e.key === "Escape") setRoleTip(null); };
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", close);
+    return () => { window.removeEventListener("scroll", close, true); window.removeEventListener("keydown", close); };
+  }, [roleTip]);
 
   if (error) return h("div", { className: "yg-error", role: "alert" }, error);
   if (!route) return h("p", { className: "yg-lab" }, "读取路线…");
@@ -449,9 +472,24 @@ function Player({ rest, id, onBack }) {
         h("span", { className: "yg-lab yg-pos" }, opening ? `起手 · 共 ${total} 步` : `第 ${index} / ${total} 步${last ? " · 终场" : ""}`))),
     h("div", { className: "yg-play" },
       h(Stage, { anim, frameRef, error: animError }),
-      opening ? h(OpeningPanel, { rest, board: route.start })
+      opening ? h(OpeningPanel, { rest, board: route.start, handRoles: route.startHandRoles })
         : last && !playing ? h(EndPanel, { rest, end: route.end, step })
-          : h(StepPanel, { rest, step, total })));
+          : h(StepPanel, { rest, step, total })),
+    roleTip ? h(RoleTip, { ...roleTip, onClose: () => setRoleTip(null) }) : null);
+}
+
+// the tip for a chip on the board: the words and the reason, under the chip (above it if there is no room), clamped inside the window; a tap closes it
+function RoleTip({ tags, why, rect, onClose }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  useLayoutEffect(() => {
+    const box = ref.current.getBoundingClientRect();
+    const left = Math.max(EDGE, Math.min(rect.left, window.innerWidth - EDGE - box.width));
+    const below = rect.bottom + 6;
+    setPos({ left, top: below + box.height > window.innerHeight - EDGE ? Math.max(EDGE, rect.top - 6 - box.height) : below });
+  }, [rect, why]);
+  return h("div", { ref, className: "yg-roletip", role: "tooltip", "aria-label": "这张卡此刻的作用", onClick: onClose, style: pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" } },
+    h("span", { className: "yg-row wrap" }, h(RoleChips, { tags, why })), h("span", { className: "yg-why" }, why));
 }
 
 // `loaded` is the shared GET /routes result: { data, error } (data null until it arrives)
@@ -610,7 +648,9 @@ const CSS = `
 .yg-mrow { display: flex; gap: 10px; align-items: flex-start; padding: 4px 0 4px 10px; border-left: 3px solid #2a2a2a; min-width: 0; }
 .yg-mtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .yg-mtext b { font-size: 13px; font-weight: 700; color: #ececec; }
-.yg-glossary { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+.yg-glossary { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 12px; max-width: 1280px; align-items: start; }
+.yg-glossary > .yg-sum { grid-column: 1 / -1; }
+.yg-roletip { position: fixed; z-index: 60; max-width: min(340px, calc(100vw - 16px)); display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: #111; border: 1px solid #3a3a3a; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.6); font-size: 13px; line-height: 1.5; cursor: default; }
 .yg-term { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid #2a2a2a; border-radius: 8px; }
 .yg-term-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .yg-term .yg-role { font-size: 14px; padding: 2px 12px; }
@@ -672,7 +712,8 @@ const CSS = `
 .yg-act { font-size: 12px; color: #bdbdbd; }
 .yg-hand { display: flex; flex-wrap: wrap; gap: 8px; }
 .yg-hc { width: 70px; display: flex; flex-direction: column; gap: 6px; }
-.yg-hc > span:last-child { font-size: 12px; line-height: 1.2; color: #cfcfd4; }
+.yg-hc .yg-roles { justify-content: flex-start; }
+.yg-hcn { font-size: 12px; line-height: 1.2; color: #cfcfd4; }
 .yg-piles { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .yg-pile { font-size: 12px; line-height: 1.5; color: #bdbdbd; }
 .yg-pile u { text-decoration: none; font-weight: 800; margin-right: 8px; letter-spacing: 1px; }

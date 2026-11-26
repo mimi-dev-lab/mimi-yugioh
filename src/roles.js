@@ -59,3 +59,17 @@ export function resolveRoles(deck, routeId, midfields) {
     return { code, tags: d.tags, why: d.why, from: 'default' };
   }));
 }
+
+// 手牌里此刻有作用的卡（作用数据只写中场，手牌不另写数据）：对手回合从手牌用的卡才标，别的手牌不标。
+// - 终场时算进打断数的手牌（breakerCodes，铁兽鸟 墨丘利耶这类能从手牌发动的打断）：默认作用里有「打断」就用默认作用，没有就标「打断」+ 怎么打断；
+// - 默认作用里有「手坑」的卡：用默认作用。
+// 返回 [{ code, tags, why, from: 'default' | 'breaker' }]，每个密码一条
+export function handRoles(deck, codes, breakerCodes = []) {
+  return [...new Set(codes)].flatMap((code) => {
+    const d = defaultRoleOf(deck, code);
+    if (breakerCodes.includes(code)) {
+      return [d.tags.includes('打断') ? { code, tags: d.tags, why: d.why, from: 'default' } : { code, tags: ['打断'], why: `终场时在手牌里也算一个打断：${deck.cards[code].interruptHow}`, from: 'breaker' }];
+    }
+    return d.tags.includes('手坑') ? [{ code, tags: d.tags, why: d.why, from: 'default' }] : [];
+  });
+}
