@@ -126,4 +126,18 @@ describe('卡的作用标签：接口返回的数据', () => {
       assert.deepEqual([quem5.from, quem5.since], ['step', 5]);
     } finally { server.stop(); }
   });
+
+  test('终场标「打断」的中场卡正好是终场汇总里算进打断数的中场卡（打断数的算法改了，标签要跟着改）', async () => {
+    const server = await start({ YUGIOH_ENGINE: ENGINE_DIR });
+    try {
+      for (const def of BRANDED.routes) {
+        const { body } = await get(server.url, `/route?id=${def.id}`);
+        const last = body.steps.at(-1);
+        const onField = new Set(midfield(last).map((c) => c.md));
+        const counted = body.end.breakers.map((b) => b.md).filter((md) => onField.has(md)).sort();
+        const tagged = last.roles.filter((r) => r.tags.includes('打断')).map((r) => r.md).sort();
+        assert.deepEqual(tagged, counted, def.id);
+      }
+    } finally { server.stop(); }
+  });
 });
