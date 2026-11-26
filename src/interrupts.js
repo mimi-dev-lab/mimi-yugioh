@@ -21,6 +21,11 @@
 // 不模拟发动之后场面怎么变（例如烙印断罪让融合怪兽回额外卡组之后，别的卡的前提还在不在）：每张卡都对着终场判断。
 // 融合召唤用到的素材（赫之圣女 卡尔塔西亚）只查有没有，不从手牌里扣掉。
 
+// 效果描述号（引擎报的发动记录和提示里的 description，字串）：卡片脚本里 aux.Stringid(密码, n) 是 密码 * 2^20 + n；烙印融合这类用系统字串的，引擎直接报 n（如 1170）。
+// 编码（descriptionOf）和解码（effectIndexOf）只在这里：打断数的「自己回合锁住」和资源账本认效果都走它
+export const descriptionOf = (code, n) => String(code * 2 ** 20 + n);
+export const effectIndexOf = (description) => Number(description) % 2 ** 20;
+
 const asSpec = (spec) => (spec !== null && typeof spec === 'object' && !Array.isArray(spec) ? { of: spec.of, n: spec.n ?? 1 } : { of: spec, n: 1 });
 const asList = (of) => (Array.isArray(of) ? of : [of]);
 
@@ -42,7 +47,7 @@ export function meets(deck, need, zones, self) {
 
 // 这张卡这一格的 ownTurnLock 效果（引擎报的效果描述号 = aux.Stringid(密码, n) = 密码 << 20 | n，见 utility.lua；密码超过 2^11 位移会溢出 32 位，所以用乘法），在我方回合里发动过、之后没离开这一格
 const lockedByOwnTurn = (card, c, boardZone, used) => card.ownTurnLock !== undefined
-  && used.some((u) => u.code === c.code && u.zone === boardZone && u.sequence === c.sequence && u.description === String(c.code * 2 ** 20 + card.ownTurnLock));
+  && used.some((u) => u.code === c.code && u.zone === boardZone && u.sequence === c.sequence && u.description === descriptionOf(c.code, card.ownTurnLock));
 
 // 终场的打断：total 是总数，breakers 是每张提供打断的卡 { code, copies（算进去的张数）, interrupts }，按场上的先后（怪兽区、魔陷区，再手牌）。卡组外的卡（token）不提供打断
 export function countInterrupts(deck, board) {

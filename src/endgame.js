@@ -16,10 +16,10 @@ export const WITHOUT_ROUTES = 3; // 「都没有」时最多列几条改走的�
 const sorted = (codes) => [...codes].sort((a, b) => a - b);
 const sameSet = (a, b) => a.length === b.length && sorted(a).every((c, i) => c === sorted(b)[i]);
 
-// 返回问题列表（空 = 没问题）。deck.endgames = 目标终场的列表（数据写法见 src/decks/branded-endgames.js）
+// 返回问题列表（空 = 没问题）。deck.endgames = { hands（目标终场的 seen 是从几手里数的）, list（目标终场的列表）}（数据写法见 src/decks/branded-endgames.js）
 export function checkEndgames(deck) {
   const problems = [];
-  const list = deck.endgames ?? [];
+  const { list } = deck.endgames;
   if (list.length < 2 || list.length > 3) problems.push(`目标终场 ${list.length} 个，要 2–3 个`);
   const ids = new Set();
   const names = new Set();
@@ -77,9 +77,12 @@ function compensate(deck, routesById, seqs, target, i) {
       const here = other[k] ?? null; // null = 这条路线到头了（终场）
       if (here !== null && here !== X && (S === null ? k === other.length - 1 : other[k + 1] === S)) {
         if (!swaps.has(here)) swaps.set(here, []);
-        swaps.get(here).push({ id, name: route.name, step: from(here), needs: route.needs });
+        if (!swaps.get(here).some((r) => r.id === id)) swaps.get(here).push({ id, name: route.name, step: from(here), needs: route.needs });
       }
-      if (!(P === null && S === null) && here === S) skips.push({ id, name: route.name, step: S === null ? route.steps.length : from(S), needs: route.needs });
+      if (!(P === null && S === null) && here === S) {
+        const step = S === null ? route.steps.length : from(S);
+        if (!skips.some((r) => r.id === id && r.step === step)) skips.push({ id, name: route.name, step, needs: route.needs });
+      }
     }
   }
   const out = {
@@ -95,11 +98,11 @@ function compensate(deck, routesById, seqs, target, i) {
   return out;
 }
 
-// 页面要的数据：{ hands（模拟手数）, endgames: [...] }；routes 是 replayRoute 的结果
-export function buildEndgames(deck, routes, { hands }) {
+// 页面要的数据：{ hands（模拟手数，取自 deck.endgames.hands）, endgames: [...] }；routes 是 replayRoute 的结果
+export function buildEndgames(deck, routes) {
   const routesById = new Map(routes.map((r) => [r.id, r]));
   const seqs = new Map(routes.map((r) => [r.id, r.blocks.map((b) => b.id)]));
-  const endgames = deck.endgames.map((e) => {
+  const endgames = deck.endgames.list.map((e) => {
     const route = routesById.get(e.route);
     const keys = sorted(e.keyCards);
     return {
@@ -111,5 +114,5 @@ export function buildEndgames(deck, routes, { hands }) {
       alsoRoutes: routes.filter((r) => r.id !== route.id && sameSet(r.end.breakers.map((x) => x.code), keys)).map((r) => ({ id: r.id, name: r.name })),
     };
   });
-  return { hands, endgames };
+  return { hands: deck.endgames.hands, endgames };
 }

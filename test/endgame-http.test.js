@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { BRANDED } from '../src/decks/branded.js';
-import { SIM_HANDS } from '../src/decks/branded-endgames.js';
 import { endHas, rankEndgames } from '../src/endgame.js';
 import { parseJsonl } from '../src/opening-report.js';
 import { ENGINE_DIR, start } from './helpers.js';
@@ -22,8 +21,8 @@ describe('终场倒推：GET /endgames', () => {
   test('每个目标终场的路线、积木、关键卡都对得上引擎重放的路线：积木按路线的分段、关键卡是那条路线终场里提供打断的卡、打断数一致', async () => {
     const { server, body, routes } = await load();
     try {
-      assert.equal(body.hands, SIM_HANDS);
-      assert.equal(body.endgames.length, BRANDED.endgames.length);
+      assert.equal(body.hands, BRANDED.endgames.hands);
+      assert.equal(body.endgames.length, BRANDED.endgames.list.length);
       for (const e of body.endgames) {
         const r = routes[e.route.id];
         assert.ok(r, `${e.name} 的路线 ${e.route.id}`);
@@ -59,12 +58,12 @@ describe('终场倒推：GET /endgames', () => {
   test('挑得对：数据里的三个就是按「打断数、500 手里的手数」排出来的前 3，手数是从 JSONL 重算的', async () => {
     const { server, routes } = await load();
     try {
-      assert.equal(rows.length, SIM_HANDS);
+      assert.equal(rows.length, BRANDED.endgames.hands);
       const ranked = rankEndgames(Object.values(routes), rows).slice(0, 3);
-      assert.deepEqual(BRANDED.endgames.map((e) => [e.keyCards.slice().sort((a, b) => a - b), e.seen]), ranked.map((c) => [c.keys, c.seen]));
+      assert.deepEqual(BRANDED.endgames.list.map((e) => [e.keyCards.slice().sort((a, b) => a - b), e.seen]), ranked.map((c) => [c.keys, c.seen]));
       for (const [i, c] of ranked.entries()) {
-        assert.ok(c.routes.includes(BRANDED.endgames[i].route), `${BRANDED.endgames[i].id} 的路线是走到它的路线之一`);
-        assert.equal(rows.filter((row) => endHas(row, BRANDED.endgames[i].keyCards)).length, BRANDED.endgames[i].seen);
+        assert.ok(c.routes.includes(BRANDED.endgames.list[i].route), `${BRANDED.endgames.list[i].id} 的路线是走到它的路线之一`);
+        assert.equal(rows.filter((row) => endHas(row, BRANDED.endgames.list[i].keyCards)).length, BRANDED.endgames.list[i].seen);
       }
     } finally { server.stop(); }
   });

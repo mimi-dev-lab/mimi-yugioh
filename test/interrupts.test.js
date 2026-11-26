@@ -16,7 +16,7 @@ const board = ({ hand = [], monsters = [], spellTraps = [], grave = [], extra = 
   return { hand: cards(hand), monsters: cards(monsters), spellTraps: cards(spellTraps), grave: cards(grave), banished: [], extra: cards(extra), used };
 };
 // 效果描述号：脚本里 aux.Stringid(密码, n) = 密码 << 20 | n（utility.lua），引擎报的就是它
-const descOf = (code, n) => String(code * 2 ** 20 + n);
+const descOf = (code, n) => String(code * 2 ** 20 + n); // 独立写一遍，不走 descriptionOf
 const MIRRORJADE_BANISH = '46290745425920'; // 冰剑龙的除外效果 aux.Stringid(44146295, 0)，探引擎时它在连锁窗口里报的描述号
 const total = (b) => countInterrupts(BRANDED, b).total;
 

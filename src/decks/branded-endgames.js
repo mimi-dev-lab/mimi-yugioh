@@ -10,9 +10,9 @@
 // 这条规则由 src/endgame.js 的 rankEndgames 算，测试用它核对下面三项就是前 3、先后一样。缺一块积木时的补法不写在这里：由 src/endgame.js 从路线和积木的数据里推。
 import { C } from './branded-routes.js';
 
-export const SIM_HANDS = 500; // seen 是从多少手里数的（docs/opening-analysis.jsonl 的行数，测试查）
+const SIM_HANDS = 500; // seen 是从多少手里数的（docs/opening-analysis.jsonl 的行数，测试查）
 
-export const ENDGAMES = [
+const LIST = [
   {
     id: 'trap-trio', name: '落胤与圣女＋烙印断罪＋卡尔塔西亚',
     route: 'nadir-servant', blocks: ['albaz-jump', 'end-phase-recycle', 'set-and-close'],
@@ -29,3 +29,5 @@ export const ENDGAMES = [
     keyCards: [C.mercourier, C.mirrorjade, C.cartesia], seen: 14,
   },
 ];
+
+export const ENDGAMES = { hands: SIM_HANDS, list: LIST };

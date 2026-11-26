@@ -6,7 +6,8 @@ import { playRoute } from '../src/route.js';
 import { ENGINE_DIR, openTestEngine, start } from './helpers.js';
 
 const get = async (url, path) => { const res = await fetch(`${url}${path}`); return { status: res.status, body: await res.json() }; };
-const names = (ledger) => ledger.effects.map((e) => `${e.md}${e.label}`);
+const names = (list) => list.map((e) => `${e.md}${e.label}`);
+const used = (ledger) => [...ledger.effects.before, ...ledger.effects.now];
 
 describe('资源账本：GET /route 每步的 ledger', () => {
   test('白之落胤路线：账本和引擎重放的状态一致（额外卡组张数、每步用掉的效果、召唤权）', async () => {
@@ -31,19 +32,18 @@ describe('资源账本：GET /route 每步的 ledger', () => {
       assert.ok(activations > 10);
       // 对着路线写的步骤：已知的几步
       const at = (n) => body.steps[n - 1].ledger;
-      assert.deepEqual(names(at(1)), ['白之落胤①']);
-      assert.deepEqual(names(at(2)), ['白之落胤①', '白之落胤②']);
-      assert.deepEqual(at(2).effects.filter((e) => e.fresh).map((e) => e.label), ['②'], '只有这一步新用的标 fresh');
+      assert.deepEqual([names(at(1).effects.before), names(at(1).effects.now)], [[], ['白之落胤①']]);
+      assert.deepEqual([names(at(2).effects.before), names(at(2).effects.now)], [['白之落胤①'], ['白之落胤②']], '之前用过的和这一步新用的分两组');
       assert.equal(at(1).extra.remaining, 14, '白之落胤①送走一只额外卡组的怪兽');
       assert.equal(at(3).extra.remaining, 13, '同调召唤黑衣龙之艾克利西亚');
       assert.equal(at(14).extra.remaining, 12);
-      assert.ok(names(at(7)).includes('白之圣女 艾克利西亚③') && names(at(7)).includes('赫之圣女 卡尔塔西亚③'), '结束阶段回手的是各自的③');
-      assert.ok(!names(at(6)).includes('白之圣女 艾克利西亚③'));
+      assert.ok(names(used(at(7))).includes('白之圣女 艾克利西亚③') && names(used(at(7))).includes('赫之圣女 卡尔塔西亚③'), '结束阶段回手的是各自的③');
+      assert.ok(!names(used(at(6))).includes('白之圣女 艾克利西亚③'));
       const ice = (n) => at(n).extra.key.find((k) => k.md === '冰剑龙 镜翠幻种');
       assert.equal(ice(13).inExtra, 1);
       assert.equal(ice(14).inExtra, 0);
       assert.deepEqual(ice(14).elsewhere, { monsters: 1 }, '冰剑龙融合召唤后在怪兽区');
-      assert.equal(at(17).effects.length, 12);
+      assert.equal(used(at(17)).length, 12);
       assert.equal(at(17).normalSummon.used, false, '这条路线没有通常召唤');
     } finally { server.stop(); }
   });

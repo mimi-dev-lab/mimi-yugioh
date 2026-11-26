@@ -4,7 +4,7 @@ import { blockVariants, blocksSeenIn, coverHand, LOOSE, opInBlocks, opsOf, route
 import { expand } from './deck.js';
 import { keyCardsIn } from './opening-sim.js';
 import { cardOf } from './deck.js';
-import { leavesOf, scoreTree } from './tree.js';
+import { leavesOf, questionsOf, scoreTree } from './tree.js';
 import { MAX_BRANCH, MAX_COMBOS, MAX_DISCREPANCY } from './search.js';
 
 export const MIN_LIFT_HANDS = 10; // 「每张卡在手时」只列至少在这么多手里出现过的卡（手数太少，平均不稳）
@@ -155,7 +155,7 @@ export function analyze(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) {
 
   return {
     total, distribution, brickRate: total ? bricks.length / total : 0, avgInterrupts: mean(rows.map((r) => r.interrupts)), avgHandLeft: mean(rows.map((r) => r.handLeft)),
-    groups, candidates: { better, uncovered }, lift, blocks: blockStats, tree: deck.tree ? { ...scoreTree(deck.tree, rows), leaves: leavesOf(deck.tree).length, questions: new Set(JSON.stringify(deck.tree).match(/"card":\d+/g) ?? []).size } : null,
+    groups, candidates: { better, uncovered }, lift, blocks: blockStats, tree: deck.tree ? { ...scoreTree(deck.tree, rows), leaves: leavesOf(deck.tree).length, questions: questionsOf(deck.tree).length } : null,
     bricks: { n: bricks.length, withoutKey: bricks.filter((r) => keyOf(r).length === 0).length, noStarter: bricks.filter(noStarter).length, avgHandTraps: mean(bricks.map(handTraps)), overRepresented },
     avgHandTraps: mean(rows.map(handTraps)), noStarterAll: rows.filter(noStarter).length,
     masterSeed: uniqueValue(rows, 'masterSeed'), maxNodes: uniqueValue(rows, 'maxNodes'), cappedCount: rows.filter((r) => r.capped).length, replayBad: rows.filter((r) => r.searchReplayOk === false).length,

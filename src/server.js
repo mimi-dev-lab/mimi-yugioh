@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { buildRouteAnim } from './anim-page.js';
 import { deckOverview } from './deck.js';
 import { BRANDED } from './decks/branded.js';
-import { SIM_HANDS } from './decks/branded-endgames.js';
 import { openEngine } from './duel-session.js';
 import { buildEndgames } from './endgame.js';
 import { openEngineFiles } from './engine-files.js';
@@ -39,7 +38,7 @@ const ROUTES = (async () => {
       for (const def of BRANDED.routes) {
         try { routes.push(await replayRoute(engine, BRANDED, def, { features: FEATURES })); } catch (e) { throw new Error(`路线「${def.name}」重放不通：${e.message}`); }
       }
-      return { routes, lookup: lookupView(BRANDED, routes), subway: FEATURES.subway ? buildSubway(BRANDED, routes) : null, endgames: FEATURES.endgame ? buildEndgames(BRANDED, routes, { hands: SIM_HANDS }) : null, tree: FEATURES.tree ? treeView(BRANDED, routes) : null };
+      return { routes, lookup: lookupView(BRANDED, routes), subway: FEATURES.subway ? buildSubway(BRANDED, routes) : null, endgames: FEATURES.endgame ? buildEndgames(BRANDED, routes) : null, tree: FEATURES.tree ? treeView(BRANDED, routes) : null };
     } finally { files.close(); }
   } catch (e) {
     const reason = e.code === 'ENGINE_MISSING' ? `引擎数据不在 ${ENGINE}（${e.message}）` : e.message;

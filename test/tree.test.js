@@ -5,7 +5,7 @@ import { BRANDED } from '../src/decks/branded.js';
 import { TREE } from '../src/decks/branded-tree.js';
 import { checkDeck } from '../src/deck.js';
 import { parseJsonl } from '../src/opening-report.js';
-import { bestRoutes, buildTree, checkTree, leavesOf, scoreTree, treeFileText, treeView, walkTree } from '../src/tree.js';
+import { bestRoutes, buildTree, checkTree, leavesOf, questionsOf, scoreTree, treeFileText, treeView, walkTree } from '../src/tree.js';
 
 const rows = parseJsonl(readFileSync(new URL('../docs/opening-analysis.jsonl', import.meta.url), 'utf8'));
 const clone = () => structuredClone(BRANDED);
@@ -40,6 +40,15 @@ describe('决策树数据（#52）', () => {
     assert.match(t((d) => { d.tree.card = 14558127; }), /不在起手速查里/);
     assert.match(t((d) => { d.treeText.questions[14558127] = '？'; }), /不在树里/);
     assert.match(t((d) => { d.treeText.questions[d.tree.card] = ' '; }), /措辞是空的/);
+  });
+});
+
+describe('questionsOf：树里问了几张不同的卡', () => {
+  test('同一张卡在不同分支里重复问只算一次，叶子不算', () => {
+    const tree = { card: 1, yes: { card: 2, yes: { route: 'a' }, no: { route: 'b' } }, no: { card: 2, yes: { route: 'c' }, no: { card: 3, yes: { route: 'd' }, no: { route: 'e' } } } };
+    assert.deepEqual(questionsOf(tree), [1, 2, 3]);
+    assert.deepEqual(questionsOf({ route: 'a' }), []);
+    assert.equal(questionsOf(TREE).length, new Set(JSON.stringify(TREE).match(/"card":\d+/g)).size);
   });
 });
 

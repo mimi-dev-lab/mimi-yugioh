@@ -20,7 +20,7 @@
    above the step numbers, and the step panel (and the end panel) shows the current block: its name, which steps it spans and 要什么 → 给什么; the 起手 panel lists the route's blocks.
    With 先猜再看 on, a block's name stays hidden until its first step has been played. The colours come from the service (each block has one), they are not copied here.
    资源账本 (a 试用 block, from GET /route's steps[].ledger, which the service works out from the engine's state; absent when the service has the ledger switched off, and then the page shows nothing of it): the step panel lists
-   whether this turn's 通常召唤 is used (and in which step), the 「每回合一次」effects used up to and including this step (card name + which effect; the ones this step used are marked 新), and how many cards are left in the 额外卡组
+   whether this turn's 通常召唤 is used (and in which step), the 「每回合一次」effects in two groups (card name + which effect): the ones used before this step and the ones this step newly used, and how many cards are left in the 额外卡组
    with the key ones (the extra-deck monsters that give interrupts) and where they are. With 先猜再看 on it is not shown until the step is revealed (it is part of the step panel).
    展开地图 (a tab made of blocks, MAP_BLOCKS; each block has its own feature switch from GET /routes' features, a block that is off is not shown): the first block is 汇流地铁图 (a 试用 block, GET /subway):
    start stations (the key card) -> block stations (hubs, where several routes meet) -> one end station per route (its interrupts); the service lays them out (layer / row), this draws buttons and SVG edges.
@@ -48,6 +48,16 @@ function loadImage(rest, code) {
     imageCache.set(code, rest(`/card-image?code=${code}`).then((r) => `data:${r.type};base64,${r.base64}`).catch(() => null));
   }
   return imageCache.get(code);
+}
+// One GET of a path of this plugin's backend: { data, error } (data stays null until it arrives; a failed request gives error and no data)
+function useRest(rest, path) {
+  const [state, setState] = useState({ data: null, error: "" });
+  useEffect(() => {
+    let live = true;
+    rest(path).then((data) => { if (live) setState({ data, error: "" }); }).catch((e) => { if (live) setState({ data: null, error: message(e) }); });
+    return () => { live = false; };
+  }, [rest, path]);
+  return state;
 }
 function CardArt({ rest, code, md, className = "" }) {
   const [src, setSrc] = useState(undefined);
@@ -329,8 +339,15 @@ function BlockList({ blocks }) {
       h(BlockFlow, { block: b }))));
 }
 
-// ---- 资源账本: steps[].ledger { normalSummon: { used, step }, effects: [{ md, label, gist, shared?, step, fresh }], extra: { remaining, start, key: [{ md, total, inExtra, elsewhere }] } } ----
+// ---- 资源账本: steps[].ledger { normalSummon: { used, step }, effects: { before: [...], now: [...] } (each { md, label, gist, shared?, step }; before = used on earlier steps, now = first used on this step), extra: { remaining, start, key: [{ md, total, inExtra, elsewhere }] } } ----
 const ZONE_LABEL = { hand: "手牌", monsters: "怪兽区", spellTraps: "魔陷区", grave: "墓地", banished: "除外" };
+function EffectGroup({ kind, title, list, none }) {
+  return h("div", { className: "yg-lg-group", "data-ledger": kind },
+    h("span", { className: "yg-lg-sub" }, `${title} · ${list.length} 个`),
+    list.length ? h("ul", { className: "yg-lg-list" }, list.map((e) => h("li", { key: `${e.code}-${e.label}`, title: e.shared ?? e.gist },
+      h("span", { className: "yg-lg-name" }, `${e.md} ${e.label}`), h("span", { className: "yg-lg-gist" }, e.shared ? `${e.gist}（${e.shared}）` : e.gist))))
+      : h("span", { className: "yg-none" }, none));
+}
 function LedgerCard({ ledger }) {
   if (!ledger) return null;
   const { normalSummon, effects, extra } = ledger;
@@ -339,10 +356,9 @@ function LedgerCard({ ledger }) {
     h("div", { className: "yg-phd" }, "资源账本"),
     h("p", { className: "yg-lg-row", "data-ledger": "summon" }, h("b", null, "通常召唤"),
       h("span", { className: normalSummon.used ? "yg-lg-used" : "yg-lg-free" }, normalSummon.used ? `已用（第 ${normalSummon.step} 步）` : "还没用")),
-    h("div", { className: "yg-lg-row yg-lg-col", "data-ledger": "effects" }, h("b", null, `每回合一次的效果 · 已用 ${effects.length} 个`),
-      effects.length ? h("ul", { className: "yg-lg-list" }, effects.map((e) => h("li", { key: `${e.code}-${e.label}-${e.step}`, className: e.fresh ? "new" : "", title: e.shared ?? e.gist },
-        h("span", { className: "yg-lg-name" }, `${e.md} ${e.label}`), h("span", { className: "yg-lg-gist" }, e.shared ? `${e.gist}（${e.shared}）` : e.gist), e.fresh ? h("em", null, "新") : null)))
-        : h("span", { className: "yg-none" }, "还没有")),
+    h("div", { className: "yg-lg-row yg-lg-col", "data-ledger": "effects" }, h("b", null, "每回合一次的效果"),
+      h(EffectGroup, { kind: "before", title: "这一步之前已用", list: effects.before, none: "还没有" }),
+      h(EffectGroup, { kind: "now", title: "这一步新用", list: effects.now, none: "这一步没有新用的" })),
     h("div", { className: "yg-lg-row yg-lg-col", "data-ledger": "extra" }, h("b", null, `额外卡组 · 剩 ${extra.remaining} / ${extra.start} 张`),
       h("ul", { className: "yg-lg-list" }, extra.key.map((k) => h("li", { key: k.code, className: k.inExtra ? "" : "gone" }, h("span", { className: "yg-lg-name" }, k.md), h("span", { className: "yg-lg-gist" }, where(k)))))));
 }
@@ -690,15 +706,9 @@ const KIND_NAME = { start: "起手", hub: "枢纽", stop: "中途", end: "终场
 
 // 汇流地铁图: the service gives stations (start card -> blocks -> end per route), edges and a layer / row for each; this only draws them
 function SubwayBlock({ rest, onOpen }) {
-  const [graph, setGraph] = useState(null);
-  const [error, setError] = useState("");
+  const { data: graph, error } = useRest(rest, "/subway");
   const [picked, setPicked] = useState(null); // a station with several routes through it: the panel below lists where it can jump
   const [focus, setFocus] = useState(null); // a route id: its stations and edges stay lit, the rest dim
-  useEffect(() => {
-    let live = true;
-    rest("/subway").then((g) => { if (live) setGraph(g); }).catch((e) => { if (live) setError(message(e)); });
-    return () => { live = false; };
-  }, [rest]);
   if (error) return h("div", { className: "yg-error", role: "alert" }, error);
   if (!graph) return h("p", { className: "yg-lab" }, "读取地图…");
   const at = new Map(graph.stations.map((s) => [s.id, s]));
@@ -765,15 +775,9 @@ function MissingHelp({ block, onOpen }) {
 }
 
 function EndgameBlock({ rest, onOpen }) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
+  const { data, error } = useRest(rest, "/endgames");
   const [open, setOpen] = useState(() => new Set()); // "终场id:积木id" of the blocks whose 「缺了怎么补」 is showing
   const { bind } = useCardPopup();
-  useEffect(() => {
-    let live = true;
-    rest("/endgames").then((d) => { if (live) setData(d); }).catch((e) => { if (live) setError(message(e)); });
-    return () => { live = false; };
-  }, [rest]);
   if (error) return h("div", { className: "yg-error", role: "alert" }, error);
   if (!data) return h("p", { className: "yg-lab" }, "读取终场…");
   const toggle = (key) => setOpen((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
@@ -816,16 +820,10 @@ function EndgameBlock({ rest, onOpen }) {
 
 // ---- 决策树 (a 试用 block, GET /tree): { root, leaves }; a question node { id, card, question, yes, no }, a leaf { id, route }; leaves is the flat list with the answers that lead to each ----
 function TreeBlock({ rest, onOpen }) {
-  const [tree, setTree] = useState(null);
-  const [error, setError] = useState("");
+  const { data: tree, error } = useRest(rest, "/tree");
   const [mode, setMode] = useState("ask"); // ask = one question at a time, all = every leaf with its answers
   const [answers, setAnswers] = useState([]); // true / false for each question answered so far
   const { bind } = useCardPopup();
-  useEffect(() => {
-    let live = true;
-    rest("/tree").then((t) => { if (live) setTree(t); }).catch((e) => { if (live) setError(message(e)); });
-    return () => { live = false; };
-  }, [rest]);
   if (error) return h("div", { className: "yg-error", role: "alert" }, error);
   if (!tree) return h("p", { className: "yg-lab" }, "读取决策树…");
   const trail = []; // the questions on the way to the current node
@@ -834,7 +832,7 @@ function TreeBlock({ rest, onOpen }) {
   const leaf = node.route ? node : null;
   const answer = (has) => setAnswers([...answers, has]);
   return h("div", { className: "yg-tree" },
-    h("p", { className: "yg-lab yg-sum" }, "不用记 9 条路线的区别：按手里的牌回答是 / 否，只问真正分岔的地方。只看起手 5 张里有没有这几张卡；到了路线再看它要凑齐哪些起手卡。"),
+    h("p", { className: "yg-lab yg-sum" }, `不用记 ${new Set(tree.leaves.map((l) => l.route.id)).size} 条路线的区别：按手里的牌回答是 / 否，只问真正分岔的地方。只看起手 5 张里有没有这几张卡；到了路线再看它要凑齐哪些起手卡。`),
     h("div", { className: "yg-row wrap", role: "group", "aria-label": "看法" },
       h("button", { className: `yg-chip yg-tree-mode${mode === "ask" ? " on" : ""}`, "aria-pressed": String(mode === "ask"), "data-tree-mode": "ask", onClick: () => setMode("ask") }, "一问一答"),
       h("button", { className: `yg-chip yg-tree-mode${mode === "all" ? " on" : ""}`, "aria-pressed": String(mode === "all"), "data-tree-mode": "all", onClick: () => setMode("all") }, "整棵树")),
@@ -1050,8 +1048,9 @@ const CSS = `
 .yg-lg-used { color: #ffb020; font-weight: 700; } .yg-lg-free { color: #7dd87d; font-weight: 700; }
 .yg-lg-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .yg-lg-list li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 8px; font-size: 12px; line-height: 1.5; color: #bdbdbd; min-width: 0; }
-.yg-lg-list li.new { color: #fff; } .yg-lg-list li.gone .yg-lg-gist { color: #ffb020; }
-.yg-lg-name { font-weight: 700; color: #e2e2e6; overflow-wrap: anywhere; } .yg-lg-list em { font-style: normal; font-size: 11px; font-weight: 800; color: #000; background: #c8ff3d; border-radius: 8px; padding: 0 6px; }
+.yg-lg-group { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .yg-lg-sub { font-size: 12px; font-weight: 700; color: #9a9aa2; }
+.yg-lg-group[data-ledger="now"] .yg-lg-list li { color: #fff; } .yg-lg-group[data-ledger="now"] .yg-lg-sub { color: #c8ff3d; } .yg-lg-list li.gone .yg-lg-gist { color: #ffb020; }
+.yg-lg-name { font-weight: 700; color: #e2e2e6; overflow-wrap: anywhere; }
 .yg-hand { display: flex; flex-wrap: wrap; gap: 8px; }
 .yg-hc { width: 70px; display: flex; flex-direction: column; gap: 6px; }
 .yg-hc .yg-roles { justify-content: flex-start; }

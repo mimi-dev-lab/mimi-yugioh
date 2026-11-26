@@ -40,7 +40,7 @@ export function buildSubway(deck, routes) {
     link(prev, endId, route.id);
   }
   for (const s of stations.values()) {
-    if (s.kind === 'hub' && s.stops.length < 2) s.kind = 'stop';
+    if (s.kind === 'hub' && new Set(s.stops.map((x) => x.route)).size < 2) s.kind = 'stop'; // 枢纽看经过的不同路线数，不是 stops 条数
     for (const stop of s.stops) stop.routeName = byRoute.get(stop.route).name;
   }
 

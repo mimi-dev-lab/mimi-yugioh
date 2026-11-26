@@ -30,6 +30,12 @@ export function treeCards(deck) {
   return [...new Set(list)];
 }
 
+// 树里问了哪几张不同的卡（密码，按先出现的先后）
+export function questionsOf(tree) {
+  if (tree.route !== undefined) return [];
+  return [...new Set([tree.card, ...questionsOf(tree.yes), ...questionsOf(tree.no)])];
+}
+
 export function buildTree(deck, rows) {
   const ids = deck.routes.map((r) => r.id);
   const cards = treeCards(deck);
@@ -113,7 +119,6 @@ export function checkTree(deck) {
     visit(node.yes, [...above, node.card], `${at}→是`);
     visit(node.no, [...above, node.card], `${at}→否`);
   };
-  if (!deck.tree) return ['卡组数据没有决策树'];
   visit(deck.tree, [], '树根');
   if (!problems.length) {
     const leaves = new Set(leavesOf(deck.tree).map((l) => l.route));
