@@ -715,7 +715,7 @@ const CSS = `
 .yg-stepbar { display: flex; flex-wrap: wrap; gap: 6px; }
 .yg-stepno { min-width: 34px; height: 34px; border-radius: 5px; border: 1px solid #3a3a3a; background: none; padding: 0 6px; }
 .yg-stepno.on { background: #c8ff3d; border-color: #c8ff3d; color: #000; font-weight: 600; }
-.yg-nav { display: flex; align-items: center; gap: 12px; }
+.yg-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; } .yg-nav .yg-btn { white-space: nowrap; }
 .yg-btn:disabled { opacity: .35; cursor: default; }
 .yg-player { container-type: inline-size; }
 .yg-play { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
