@@ -10,6 +10,9 @@
    Card popup: any card (卡组一览, route boards, 起手速查) pops up its big art, both names, role and the three things when hovered (desktop) or tapped
    (phone: a bottom sheet with 关上; Esc closes). One entry point: useCardPopup() gives { show(code, rect), hide, bind(code) }; show() takes a card code and a
    DOMRect (or {left, top, right, bottom}) in the page's viewport coordinates and flips / clamps the popup inside the window, so another source (a frame) can use it too.
+   作用标签 (role tags, from the service: GET /deck's roleTerms and each card's roleTags / roleWhy, GET /route's steps[].roles): a coloured chip per tag; hovering a chip shows
+   why, the card popup shows the card's default role and, inside a route, the role at the step on screen; the step panel and the end summary list every midfield card with its chips and
+   the reason line (visible on a phone too). 卡组一览 groups by each card's first default tag; the 术语表 tab explains every word.
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -18,7 +21,7 @@
 import { ROUTES_AREA, SIDEBAR_NAV_AREA, SandboxedFrame } from "@hermes/plugin-sdk";
 import { createElement as h, createContext, useContext, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 
-const TABS = ["卡组一览", "展开路线", "起手速查"];
+const TABS = ["卡组一览", "展开路线", "起手速查", "术语表"];
 const ZONE_NAME = { main: "主卡组", extra: "额外卡组" };
 
 const message = (e) => String(e?.message ?? e).replace(/^\d+:\s*/, "");
@@ -42,6 +45,12 @@ function CardArt({ rest, code, md, className = "" }) {
   return h("div", { className: `yg-art yg-noart ${className}`, "aria-label": md }, src === undefined ? "" : md);
 }
 
+// ---- 作用标签: one coloured chip per tag; the colour comes from the service's 术语表; hovering shows why ----
+function RoleChips({ tags, why, small }) {
+  const { termColor } = useCardPopup();
+  return tags.map((tag) => h("span", { key: tag, className: `yg-role${small ? " small" : ""}`, style: { background: termColor[tag] ?? "#bdbdbd" }, title: why ? `${tag}：${why}` : tag, "data-role": tag }, tag));
+}
+
 // ---- one card in the deck list: art, ×count, interrupt chip, Master Duel name, Japanese name ----
 function Tile({ rest, card, selected, onClick }) {
   const { bind } = useCardPopup();
@@ -55,12 +64,13 @@ function Tile({ rest, card, selected, onClick }) {
       card.zone === "extra" ? h("span", { className: "yg-tag" }, "额外") : null),
     h("span", { className: "yg-name" }, card.md),
     h("span", { className: "yg-jp" }, card.jp),
+    h("span", { className: "yg-roles" }, h(RoleChips, { tags: card.roleTags ?? [], why: card.roleWhy, small: true })),
     card.interrupts > 0 ? h("span", { className: "yg-chip on" }, `打断 ${card.interrupts}`) : null);
 }
 
 // ---- the card clicked: big art, both names, role, count, the three things, the opponent's turn ----
 // the click panel and the popup share this body; onClose null = no 关上 button (the hover popup)
-function DetailBody({ rest, card, onClose }) {
+function DetailBody({ rest, card, onClose, stepRole, stepN }) {
   const fact = (label, text) => h("div", { className: "yg-fact" }, h("span", { className: "yg-lab" }, label), h("span", null, text));
   return [
     h("div", { key: "head", className: "yg-detail-head" },
@@ -69,10 +79,13 @@ function DetailBody({ rest, card, onClose }) {
         h("div", { className: "yg-title" }, card.md),
         h("div", { className: "yg-lab" }, card.jp),
         h("div", { className: "yg-row wrap" },
-          h("span", { className: "yg-chip on" }, card.role),
+          h(RoleChips, { tags: card.roleTags ?? [], why: card.roleWhy }),
           h("span", { className: "yg-chip" }, `${ZONE_NAME[card.zone]} ×${card.count}`)),
         onClose ? h("button", { className: "yg-btn small yg-close", onClick: onClose, "aria-label": "关上" }, "× 关上") : null)),
     h("div", { key: "facts", className: "yg-facts" },
+      stepRole ? h("div", { className: "yg-fact yg-rolefact", "data-role-scope": "step" }, h("span", { className: "yg-lab" }, `第 ${stepN} 步`), h("span", null, h(RoleChips, { tags: stepRole.tags, why: stepRole.why }), h("span", { className: "yg-why" }, stepRole.why), stepRole.from === "step" ? null : h("span", { className: "yg-lab" }, stepRole.from === "carried" ? `（自第 ${stepRole.since} 步起）` : "（默认）")))
+        : null,
+      card.roleWhy ? h("div", { className: "yg-fact yg-rolefact", "data-role-scope": "default" }, h("span", { className: "yg-lab" }, "默认作用"), h("span", null, h("span", { className: "yg-why" }, card.roleWhy))) : null,
       fact("干什么", card.does),
       fact("条件代价", card.cost),
       fact("限制", card.limit),
@@ -97,7 +110,7 @@ function placePopup(rect, w, hgt, vw, vh) {
   const top = Math.max(EDGE, Math.min(rect.top, vh - EDGE - hgt));
   return { left, top };
 }
-function CardPopup({ rest, card, rect, onClose }) {
+function CardPopup({ rest, card, rect, onClose, stepRole, stepN }) {
   const ref = useRef(null);
   const phone = isPhone();
   const [pos, setPos] = useState(null);
@@ -108,10 +121,11 @@ function CardPopup({ rest, card, rect, onClose }) {
   }, [phone, rect, card]);
   const style = phone ? undefined : pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" };
   return h("aside", { ref, className: `yg-pop${phone ? " phone" : ""}`, style, "aria-label": "卡的详情", "data-code": String(card.code) },
-    h(DetailBody, { rest, card, onClose: phone ? onClose : null }));
+    h(DetailBody, { rest, card, onClose: phone ? onClose : null, stepRole, stepN }));
 }
-function CardPopupProvider({ rest, cards, children }) {
+function CardPopupProvider({ rest, cards, terms, children }) {
   const [pop, setPop] = useState(null); // { code, rect } or null
+  const [stepRoles, setStepRoles] = useState(null); // the route player's current step: { n, roles: GET /route steps[].roles } or null
   const hide = useCallback(() => setPop(null), []);
   const show = useCallback((code, rect) => setPop({ code, rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } }), []);
   useEffect(() => {
@@ -128,9 +142,10 @@ function CardPopupProvider({ rest, cards, children }) {
     onMouseLeave: () => { if (!isPhone()) hide(); },
     onClick: (e) => { if (isPhone()) show(code, e.currentTarget.getBoundingClientRect()); },
   }), [show, hide]);
-  const api = useMemo(() => ({ show, hide, bind }), [show, hide, bind]);
+  const termColor = useMemo(() => Object.fromEntries(terms.map((t) => [t.name, t.color])), [terms]);
+  const api = useMemo(() => ({ show, hide, bind, termColor, terms, setStepRoles }), [show, hide, bind, termColor, terms]);
   const card = pop ? cards.find((c) => c.code === pop.code) : null;
-  return h(CardPopupContext.Provider, { value: api }, children, card ? h(CardPopup, { rest, card, rect: pop.rect, onClose: hide }) : null);
+  return h(CardPopupContext.Provider, { value: api }, children, card ? h(CardPopup, { rest, card, rect: pop.rect, onClose: hide, stepRole: stepRoles?.roles.find((r) => r.code === card.code), stepN: stepRoles?.n }) : null);
 }
 const useCardPopup = () => useContext(CardPopupContext);
 
@@ -148,13 +163,37 @@ function DeckView({ rest, deck }) {
     h("div", { className: "yg-groups" },
       h("p", { className: "yg-lab yg-sum" }, `${deck.name} · 主卡组 ${total("main")} 张 · 额外卡组 ${total("extra")} 张 · 卡表来自 `,
         h("a", { href: deck.source.url, target: "_blank", rel: "noopener noreferrer" }, `${deck.source.name}（${deck.source.date} 版）`)),
-      deck.roles.map((role) => {
-        const cards = deck.cards.filter((c) => c.role === role.name);
+      deck.roleTerms.map((role) => {
+        const cards = deck.cards.filter((c) => c.roleTags[0] === role.name);
+        if (!cards.length) return null;
         return h("section", { key: role.name, className: "yg-group", "aria-label": role.name },
-          h("div", { className: "yg-line" }, h("h2", null, role.name), h("span", { className: "yg-lab" }, `${cards.reduce((n, c) => n + c.count, 0)} 张 · ${role.note}`)),
+          h("div", { className: "yg-line" }, h("h2", { style: { color: role.color } }, role.name), h("span", { className: "yg-lab" }, `${cards.reduce((n, c) => n + c.count, 0)} 张 · ${role.note}`)),
           h("div", { className: "yg-tiles" }, cards.map((c) => h(Tile, { key: c.code, rest, card: c, selected: c.code === code, onClick: () => setCode(c.code === code ? null : c.code) }))));
       })),
     h(Detail, { rest, card, onClose: () => setCode(null) }));
+}
+
+// ---- 术语表: every role word, what it means, its colour ----
+function GlossaryView({ deck }) {
+  const used = (name) => deck.cards.filter((c) => c.roleTags.includes(name)).map((c) => c.md);
+  return h("div", { className: "yg-glossary" },
+    h("p", { className: "yg-lab yg-sum" }, "路线每一步中场的卡都带 1–2 个作用词，悬停词或打开卡片弹窗能看到「此刻为什么是这个作用」。同一张卡在不同路线、不同步骤作用会变。"),
+    deck.roleTerms.map((t) => h("section", { key: t.name, className: "yg-term", "aria-label": t.name },
+      h("div", { className: "yg-term-head" }, h("span", { className: "yg-role", style: { background: t.color } }, t.name), h("span", { className: "yg-lab" }, used(t.name).length ? `默认带这个作用的卡 ${used(t.name).length} 种` : "没有默认带它的卡，只在路线某一步出现")),
+      h("p", { className: "yg-term-note" }, t.note))));
+}
+
+// 中场的卡: every card on the field with its chips and the reason line (a step's roles from GET /route)
+function MidfieldRoles({ rest, roles, n }) {
+  const popup = useCardPopup();
+  useEffect(() => { popup.setStepRoles({ n, roles }); return () => popup.setStepRoles(null); }, [roles, n]);
+  if (!roles.length) return h("p", { className: "yg-none" }, "中场还没有卡");
+  return h("div", { className: "yg-mid", "aria-label": "中场的卡和它们此刻的作用" }, roles.map((r) => h("div", { key: r.code, className: "yg-mrow", "data-card-code": String(r.code) },
+    h(Thumb, { rest, card: r, w: 44, h: 64 }),
+    h("div", { className: "yg-mtext" },
+      h("div", { className: "yg-row wrap" }, h("b", null, r.md), h(RoleChips, { tags: r.tags, why: r.why })),
+      h("p", { className: "yg-why" }, r.why),
+      r.from === "step" ? null : h("p", { className: "yg-lab" }, r.from === "carried" ? `沿用第 ${r.since} 步写的` : "默认作用")))));
 }
 
 // ---- 展开路线: the list, then the player ----
@@ -225,6 +264,8 @@ function EngineNote({ title, lines }) {
 }
 
 function OpeningPanel({ rest, board }) {
+  const popup = useCardPopup();
+  useEffect(() => { popup.setStepRoles(null); }, []);
   const hand = [...board.hand].sort((a, b) => a.sequence - b.sequence);
   return h("section", { className: "yg-panel", "aria-label": "起手" },
     h(PanelHead, { big: "起手", tag: "先攻", color: COLOR.white }),
@@ -245,6 +286,8 @@ function StepPanel({ rest, step, total }) {
       h("div", { className: "yg-phd" }, "花了什么"), h("span", null), h("div", { className: "yg-phd" }, "换来什么"),
       h(TradeCol, { rest, rows: cost, side: "cost" }), h("span", { className: "yg-arrow", "aria-hidden": "true" }, "→"), h(TradeCol, { rest, rows: gain, side: "gain" })),
     step.activated.length ? h("p", { className: "yg-act" }, `发动了 ${step.activated.map((c) => c.md).join("、")}`) : null,
+    h("div", { className: "yg-phd" }, "中场的卡和它们此刻的作用"),
+    h(MidfieldRoles, { rest, roles: step.roles, n: step.n }),
     h(Piles, { board: step.board }),
     h(EngineNote, { title: "引擎里的操作", lines: step.actions }));
 }
@@ -258,6 +301,8 @@ function EndPanel({ rest, end, step }) {
       h(Thumb, { rest, card: b, w: 52, h: 75 }),
       h("div", { className: "yg-trow-text" }, h("b", null, `${b.md}${b.copies > 1 ? ` ×${b.copies}` : ""}`), h("span", null, `打断 ${b.interrupts}：${b.interruptHow}`)))))
       : h("p", { className: "yg-none" }, "终场没有打断"),
+    h("div", { className: "yg-phd" }, "终场里每张卡的作用"),
+    h(MidfieldRoles, { rest, roles: step.roles, n: step.n }),
     h("p", { className: "yg-pile" }, h("u", { style: { color: COLOR.green } }, `剩余手牌 ${end.hand.length} 张`), end.hand.length ? end.hand.map((c) => c.md).join("、") : "—"),
     h(Piles, { board: end }),
     h(EngineNote, { title: `第 ${step.n} 步：${step.text}`, lines: [...(step.activated.length ? [`发动了 ${step.activated.map((c) => c.md).join("、")}`] : []), ...step.actions] }));
@@ -462,7 +507,7 @@ function LookupView({ rest, loaded, onOpen }) {
           h("p", { className: "yg-lab" }, f.how)))) : null)));
 }
 
-function YugiohApp({ rest, setDeckCards }) {
+function YugiohApp({ rest, setDeckInfo }) {
   const [tab, setTab] = useState(TABS[0]);
   const [deck, setDeck] = useState(null);
   const [error, setError] = useState("");
@@ -474,7 +519,7 @@ function YugiohApp({ rest, setDeckCards }) {
   }, [rest]);
   useEffect(() => {
     (async () => {
-      try { const d = await rest("/deck"); setDeck(d); setDeckCards(d.cards); } catch (e) { setError(message(e)); }
+      try { const d = await rest("/deck"); setDeck(d); setDeckInfo({ cards: d.cards, terms: d.roleTerms }); } catch (e) { setError(message(e)); }
       setReady(true);
     })();
   }, [rest]);
@@ -482,6 +527,7 @@ function YugiohApp({ rest, setDeckCards }) {
   let main = null;
   if (tab === "展开路线") main = h(RoutesView, { rest, loaded: routes, id: routeId, setId: setRouteId });
   else if (tab === "起手速查") main = h(LookupView, { rest, loaded: routes, onOpen: (id) => { setRouteId(id); setTab("展开路线"); } });
+  else if (tab === "术语表") main = deck ? h(GlossaryView, { deck }) : null;
   else if (deck) main = h(DeckView, { rest, deck });
   return h("div", { className: "yg", "data-ready": ready ? "true" : "false" },
     h("header", { className: "yg-head" }, h("h1", null, "游戏王 · 烙印教程"),
@@ -490,8 +536,8 @@ function YugiohApp({ rest, setDeckCards }) {
     main);
 }
 function YugiohRoot({ rest }) {
-  const [deckCards, setDeckCards] = useState([]);
-  return h(CardPopupProvider, { rest, cards: deckCards }, h(YugiohApp, { rest, setDeckCards }));
+  const [info, setDeckInfo] = useState({ cards: [], terms: [] });
+  return h(CardPopupProvider, { rest, cards: info.cards, terms: info.terms }, h(YugiohApp, { rest, setDeckInfo }));
 }
 
 const CSS = `
@@ -555,6 +601,20 @@ const CSS = `
   grid-template-columns: 1fr; grid-template-rows: none; }
 .yg-pop.phone .yg-big { grid-row: auto; justify-self: center; height: auto; width: min(64vw, 300px); }
 .yg-pop.phone .yg-col, .yg-pop.phone .yg-facts { grid-column: 1; }
+.yg-role { display: inline-block; font-size: 11px; font-weight: 700; line-height: 1.5; padding: 1px 8px; border-radius: 9px; color: #000; white-space: nowrap; letter-spacing: .04em; }
+.yg-role.small { font-size: 10px; padding: 0 6px; }
+.yg-roles { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
+.yg-why { font-size: 13px; line-height: 1.55; color: #e2e2e6; }
+.yg-rolefact > span:last-child { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.yg-mid { display: flex; flex-direction: column; gap: 10px; }
+.yg-mrow { display: flex; gap: 10px; align-items: flex-start; padding: 4px 0 4px 10px; border-left: 3px solid #2a2a2a; min-width: 0; }
+.yg-mtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.yg-mtext b { font-size: 13px; font-weight: 700; color: #ececec; }
+.yg-glossary { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+.yg-term { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid #2a2a2a; border-radius: 8px; }
+.yg-term-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.yg-term .yg-role { font-size: 14px; padding: 2px 12px; }
+.yg-term-note { font-size: 14px; line-height: 1.55; }
 .yg-routes { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
 .yg-route { display: flex; gap: 14px; align-items: flex-start; text-align: left; padding: 12px; border: 1px solid #2a2a2a; border-radius: 8px; background: #000; }
 .yg-route:hover { border-color: #c8ff3d; }
