@@ -43,7 +43,8 @@ const pathOf = (o) => {
 const stepOf = (o) => (o.step === 'last' ? Infinity : o.step === undefined || o.step === null || o.step === '起手' ? 0 : Number(o.step));
 // 做过这些动作的页面不再给下一张接着用：它们改了页面状态（弹窗、动画跳步、连播、本地存储里的开关、滚动、并排图换了页面），不是「从头点到这」的样子
 const DIRTY = ['clickStep', 'playAll', 'guess', 'nextMid', 'stageAt', 'hover', 'tap', 'hoverAnim', 'tapAnim', 'hoverRole', 'tapRole', 'close', 'compare', 'clipStage'];
-const dirtying = (o) => DIRTY.some((k) => o[k] !== undefined && o[k] !== null && o[k] !== false);
+// 手机宽选卡开的是弹窗（桌面宽是页面里的说明区）：弹窗开着的页面也不接着用
+const dirtying = (o) => DIRTY.some((k) => o[k] !== undefined && o[k] !== null && o[k] !== false) || (o.mobile && !!o.select);
 function canContinue(page, o) {
   if (!page || page.dirty || page.viewKey !== viewKey(o)) return false;
   const next = pathOf(o);

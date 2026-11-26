@@ -26,7 +26,17 @@ owner=${YUGIOH_CI_LOCK_OWNER:-$(ci_pid)}
 [ -n "$owner" ] || { echo "ci: skip ci-lock（不是从 ./ci 跑的，不上锁）"; exit 0; }
 dir=${YUGIOH_CI_LOCK_DIR:-$(git -C "$root" rev-parse --absolute-git-dir 2>/dev/null)/ci-lock}
 [ "$dir" != /ci-lock ] || { echo "ci: skip ci-lock（不在 git 检出里）"; exit 0; }
+[ -d "$(dirname "$dir")" ] || { echo "ci-lock: 放锁的目录 $(dirname "$dir") 不存在" >&2; exit 1; }
 me="$owner $(started "$owner")"
+# 清掉放了的锁：几份同时发现锁放了时，只让拿到 $dir.clean 的那份去删，删之前再看一眼主人没换（别人可能已经接手了）
+take_over() {
+  mkdir "$dir.clean" 2>/dev/null || {
+    [ -n "$(find "$dir.clean" -maxdepth 0 -mmin -1 2>/dev/null)" ] || rm -rf "$dir.clean"
+    return
+  }
+  [ "$(cat "$dir/owner" 2>/dev/null)" = "$1" ] && rm -rf "$dir"
+  rmdir "$dir.clean"
+}
 deadline=$(($(date +%s) + 3600))
 said=
 while ! mkdir "$dir" 2>/dev/null; do
@@ -45,6 +55,6 @@ while ! mkdir "$dir" 2>/dev/null; do
       continue
     fi
   fi
-  rm -rf "$dir"
+  take_over "$held"
 done
 echo "$me" >"$dir/owner"

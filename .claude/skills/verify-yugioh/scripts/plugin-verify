@@ -331,7 +331,7 @@ def shot_opts(a) -> dict:
     return {"name": a.name, "design": a.design, "mobile": a.mobile, "tab": a.tab, "select": a.select, "route": a.route, "jump": a.jump, "step": a.step, "keys": a.keys, "hover": a.hover, "tap": a.tap, "within": a.within, "close": a.close, "compare": a.compare, "compareLabel": a.compare_label, "compareWith": a.compare_with, "hoverAnim": a.hover_anim, "tapAnim": a.tap_anim, "clickStep": a.click_step, "playAll": a.play_all, "stageAt": a.stage_at, "nextMid": a.next_mid, "netFile": a.net_file, "hoverRole": a.hover_role, "tapRole": a.tap_role, "clipStage": a.clip_stage, "requireRoles": a.require_roles, "requireBlocks": a.require_blocks, "guess": a.guess}
 
 
-def published(run: dict) -> dict:
+def shot_target(run: dict) -> dict:
     if not run["evidence"]:
         sys.exit("no evidence folder in run.json")
     return {"id": run["id"], "base": run["base"], "evidence": run["evidence"], "cookies": [kv.split("=", 1) for kv in cookie(run).split("; ")]}
@@ -349,7 +349,7 @@ def plugin_shot(pub: dict, shots: list, timeout: int) -> subprocess.CompletedPro
 def cmd_shot(a) -> int:
     run = load(a.run)
     evidence = run["evidence"]
-    r = plugin_shot(published(run), [shot_opts(a)], 300)
+    r = plugin_shot(shot_target(run), [shot_opts(a)], 300)
     sys.stderr.write(r.stdout + r.stderr)
     if r.returncode != 0:
         return r.returncode
@@ -372,8 +372,8 @@ def lanes_of(text: str, parser: argparse.ArgumentParser) -> list:
             continue
         try:
             lane.append(shot_opts(parser.parse_args(words)))
-        except SystemExit:
-            sys.exit(f"batch: line {no} is not a shot: {raw}")
+        except ValueError as e:
+            sys.exit(f"batch: line {no} is not a shot ({e}): {raw}")
     if lane:
         lanes.append(lane)
     names = [s["name"] for lane in lanes for s in lane]
@@ -388,7 +388,10 @@ def cmd_batch(a) -> int:
     lanes = lanes_of(Path(a.file).read_text(), SHOT_PARSER)
     if not lanes:
         sys.exit(f"batch: no shots in {a.file}")
-    pub = published(run)
+    pub = shot_target(run)
+    for s in (s for lane in lanes for s in lane):  # an earlier run's evidence of the same name must not pass for this one's
+        for ext in (".json", ".txt", ".png", ".failed.txt"):
+            (Path(run["evidence"]) / f"{s['name']}{ext}").unlink(missing_ok=True)
     t = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, a.jobs)) as pool:
         results = list(pool.map(lambda lane: plugin_shot(pub, lane, 900), lanes))
@@ -398,8 +401,9 @@ def cmd_batch(a) -> int:
         bad += r.returncode != 0
         for s in lane:
             f = Path(run["evidence"]) / f"{s['name']}.json"
-            if f.is_file() and json.loads(f.read_text())["foreign"]:
-                print(f"batch: {s['name']} made requests to another origin: {json.loads(f.read_text())['foreign']}", file=sys.stderr)
+            foreign = json.loads(f.read_text())["foreign"] if f.is_file() else []
+            if foreign:
+                print(f"batch: {s['name']} made requests to another origin: {foreign}", file=sys.stderr)
                 bad += 1
     print(f"batch: {sum(map(len, lanes))} shots in {len(lanes)} lanes, {time.time() - t:.0f} s, {'all ok' if not bad else 'FAILED'}", file=sys.stderr)
     return 1 if bad else 0
@@ -438,8 +442,7 @@ def main() -> int:
 
 class _ShotParser(argparse.ArgumentParser):
     def error(self, message):
-        print(f"batch: {message}", file=sys.stderr)
-        raise SystemExit(2)
+        raise ValueError(message)
 
 
 def add_shot_args(s: argparse.ArgumentParser) -> None:
