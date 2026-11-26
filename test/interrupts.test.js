@@ -10,10 +10,14 @@ const ID = {
   dorogon: 54757758, ecclesiaDark: 78397661, albaz: 68468459, blackAlbion: 25451383, ash: 14558127, droll: 94145021,
 };
 // 编的终场：只写用到的区域，每张卡一个新对象（同一张卡的两张是两个对象）
-const board = ({ hand = [], monsters = [], spellTraps = [], grave = [], extra = [] } = {}) => {
+// used 是我方回合里发动过、发动后没离开那一格的效果（终场的 used，见 DESIGN「卡组数据」）
+const board = ({ hand = [], monsters = [], spellTraps = [], grave = [], extra = [], used = [] } = {}) => {
   const cards = (codes) => codes.map((code, sequence) => ({ code, sequence }));
-  return { hand: cards(hand), monsters: cards(monsters), spellTraps: cards(spellTraps), grave: cards(grave), banished: [], extra: cards(extra) };
+  return { hand: cards(hand), monsters: cards(monsters), spellTraps: cards(spellTraps), grave: cards(grave), banished: [], extra: cards(extra), used };
 };
+// 效果描述号：脚本里 aux.Stringid(密码, n) = 密码 << 20 | n（utility.lua），引擎报的就是它
+const descOf = (code, n) => String(code * 2 ** 20 + n);
+const MIRRORJADE_BANISH = '46290745425920'; // 冰剑龙的除外效果 aux.Stringid(44146295, 0)，探引擎时它在连锁窗口里报的描述号
 const total = (b) => countInterrupts(BRANDED, b).total;
 
 describe('终场打断数按卡片条件算', () => {
@@ -56,6 +60,22 @@ describe('终场打断数按卡片条件算', () => {
     assert.equal(total(board({ monsters: [ID.mirrorjade] })), 0);
     assert.equal(total(board({ monsters: [ID.mirrorjade], extra: [ID.granguignol, ID.garura] })), 0);
     assert.equal(total(board({ monsters: [ID.mirrorjade], extra: [ID.albion] })), 1);
+  });
+
+  test('冰剑龙 镜翠幻种：自己回合用过除外效果，对手回合不能再用，不计打断；没用过的计 1', () => {
+    const extra = [ID.albion];
+    assert.equal(total(board({ monsters: [ID.mirrorjade], extra })), 1);
+    assert.equal(total(board({ monsters: [ID.mirrorjade], extra, used: [{ code: ID.mirrorjade, description: MIRRORJADE_BANISH, zone: 'monsters', sequence: 0 }] })), 0);
+    // 用过的是别的效果（描述号不同），照算
+    assert.equal(total(board({ monsters: [ID.mirrorjade], extra, used: [{ code: ID.mirrorjade, description: descOf(ID.mirrorjade, 1), zone: 'monsters', sequence: 0 }] })), 1);
+    // 用过除外效果的那只在别的格子（之后离场了，现在这只是另一只），照算
+    assert.equal(total(board({ monsters: [ID.albion, ID.mirrorjade], extra, used: [{ code: ID.mirrorjade, description: MIRRORJADE_BANISH, zone: 'monsters', sequence: 0 }] })), 1);
+  });
+
+  test('只有冰剑龙的限制跨到对手回合：别的打断卡自己回合用过（每回合一次在回合结束时重置），对手回合照算', () => {
+    const cartesiaFusion = descOf(ID.cartesia, 1);
+    assert.equal(total(board({ monsters: [ID.cartesia], hand: [ID.mercurier], extra: [ID.granguignol], used: [{ code: ID.cartesia, description: cartesiaFusion, zone: 'monsters', sequence: 0 }] })), 1);
+    assert.equal(total(board({ monsters: [ID.rindbrumm], used: [{ code: ID.rindbrumm, description: descOf(ID.rindbrumm, 0), zone: 'monsters', sequence: 0 }] })), 1);
   });
 
   test('落胤与圣女：额外卡组要有记述阿尔白斯之落胤的怪兽可送；同名卡每回合只能发动 1 张', () => {
@@ -109,5 +129,7 @@ describe('卡组数据里的打断字段', () => {
     assert.match(bad((c) => { c[ID.mercurier].from = ['grave']; }), /from 只能是/);
     assert.match(bad((c) => { c[ID.ash].perTurn = 1; }), /打断数是 0，不该写打断条件/);
     assert.match(bad((c) => { c[ID.fallen].pay = { extra: { of: 'mentionsAlbaz', n: 0 } }; }), /张数 0/);
+    assert.match(bad((c) => { c[ID.mirrorjade].ownTurnLock = 16; }), /ownTurnLock/);
+    assert.match(bad((c) => { c[ID.ash].ownTurnLock = 0; }), /打断数是 0，不该写打断条件/);
   });
 });
