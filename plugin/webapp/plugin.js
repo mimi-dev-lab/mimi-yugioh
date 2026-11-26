@@ -25,6 +25,8 @@
    展开地图 (a tab made of blocks, MAP_BLOCKS; each block has its own feature switch from GET /routes' features, a block that is off is not shown): the first block is 汇流地铁图 (a 试用 block, GET /subway):
    start stations (the key card) -> block stations (hubs, where several routes meet) -> one end station per route (its interrupts); the service lays them out (layer / row), this draws buttons and SVG edges.
    A click on a station opens the route player at that station's step (several routes through it: pick one below the map first). On a phone the map is wider than the screen and scrolls sideways inside its frame.
+   终场倒推 (a 试用 block, GET /endgames): 2-3 target end boards (the service picked them by interrupts and by how often the 500 simulated hands end with those cards); each lists the start card, the end cards that give the interrupts and the blocks to put together,
+   and under each block 缺了怎么补 (opens a list the service derived from the other routes: a block that can take its place, routes that do without it, or routes that avoid it; each one jumps to a route step).
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -668,6 +670,7 @@ function LookupView({ rest, loaded, onOpen }) {
 // feature: the name in GET /routes' features; a block whose feature is off is not shown (and a map with no block left hides the tab)
 const MAP_BLOCKS = [
   { id: "subway", title: "汇流地铁图", feature: "subway", View: SubwayBlock },
+  { id: "endgame", title: "终场倒推", feature: "endgame", View: EndgameBlock },
 ];
 const mapBlocks = (features) => MAP_BLOCKS.filter((b) => features?.[b.feature] !== false);
 
@@ -735,6 +738,78 @@ function SubwayBlock({ rest, onOpen }) {
       h("p", { className: "yg-lab" }, "跳到哪条路线的哪一步"),
       h("div", { className: "yg-jumps" }, picked.stops.map((p) => h("button", { key: p.route, className: "yg-jump", "data-route-id": p.route, "data-step": String(p.step), onClick: () => onOpen(p.route, p.step), "aria-label": `打开路线 ${p.routeName} 第 ${p.step} 步` },
         h("span", { className: "yg-title" }, p.routeName), h("span", { className: "yg-chip" }, `第 ${p.step} 步`))))) : null);
+}
+
+// ---- 终场倒推 (a 试用 block, GET /endgames): { hands, endgames: [{ id, name, interrupts, seen, route, start, keyCards, blocks (each with missing: swaps / skips / without), alsoRoutes }] }; the service works out what makes up for a missing block ----
+function Pointer({ route, step, onOpen, note }) {
+  return h("button", { className: "yg-jump yg-eg-jump", "data-route-id": route.id, "data-step": String(step), onClick: () => onOpen(route.id, step), "aria-label": `打开路线 ${route.name} 第 ${step} 步` },
+    h("span", { className: "yg-title" }, route.name),
+    h("span", { className: "yg-row wrap" }, h("span", { className: "yg-chip" }, `第 ${step} 步`), note ?? null));
+}
+
+function MissingHelp({ block, onOpen }) {
+  const m = block.missing;
+  return h("div", { className: "yg-eg-help", "data-missing-of": block.id },
+    m.swaps.map((w) => h("div", { key: w.block.id, className: "yg-eg-opt", "data-kind": "swap" },
+      h("p", null, h("span", { className: "yg-chip on" }, "换一块"), " ", h("b", { style: { color: w.block.color } }, w.block.name), h("span", { className: "yg-lab" }, " 放在同一个位置（前后的积木一样）")),
+      h(BlockFlow, { block: w.block }),
+      h("div", { className: "yg-jumps" }, w.routes.map((r) => h(Pointer, { key: r.id, route: r, step: r.step, onOpen, note: h("span", { className: "yg-chip" }, `起手 ${r.needs.md}`) }))))),
+    m.skips.map((k) => h("div", { key: "skip", className: "yg-eg-opt", "data-kind": "skip" },
+      h("p", null, h("span", { className: "yg-chip on" }, "跳过它"), h("span", { className: "yg-lab" }, k.next ? ` 这些路线不用这块，前一块做完直接接「${k.next.name}」` : " 这些路线在前一块做完就收尾，改用它们的终场")),
+      h("div", { className: "yg-jumps" }, k.routes.map((r) => h(Pointer, { key: r.id, route: r, step: r.step, onOpen, note: h("span", { className: "yg-chip" }, `起手 ${r.needs.md}`) }))))),
+    m.without.length ? h("div", { className: "yg-eg-opt", "data-kind": "without" },
+      h("p", null, h("span", { className: "yg-chip on" }, "改走别的路线"), h("span", { className: "yg-lab" }, " 数据里没有能替它的积木，下面这些路线不用它（终场打断数高的在前）")),
+      h("div", { className: "yg-jumps" }, m.without.map((r) => h(Pointer, { key: r.id, route: r, step: 1, onOpen, note: h("span", { className: "yg-chip" }, `终场打断 ${r.interrupts} · 起手 ${r.needs.md}`) })))) : null);
+}
+
+function EndgameBlock({ rest, onOpen }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [open, setOpen] = useState(() => new Set()); // "终场id:积木id" of the blocks whose 「缺了怎么补」 is showing
+  const { bind } = useCardPopup();
+  useEffect(() => {
+    let live = true;
+    rest("/endgames").then((d) => { if (live) setData(d); }).catch((e) => { if (live) setError(message(e)); });
+    return () => { live = false; };
+  }, [rest]);
+  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+  if (!data) return h("p", { className: "yg-lab" }, "读取终场…");
+  const toggle = (key) => setOpen((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  return h("div", { className: "yg-eg-wrap" },
+    h("p", { className: "yg-lab yg-sum" }, `从目标终场倒着看：打断最多、又常出现的几个终场（挑法：各路线的终场按提供打断的卡合并，先比打断数，再比 ${data.hands} 手随机起手里最好终场含这几张卡的手数）。每个终场列出要的起手卡、终场要留在场上的卡、要拼的积木；缺哪一块，点「缺了怎么补」，看别的路线里有什么能顶上。`),
+    data.endgames.map((e) => h("section", { key: e.id, className: "yg-eg", "data-endgame": e.id, "aria-label": e.name },
+      h("div", { className: "yg-eg-head" },
+        h("h3", { className: "yg-title" }, e.name),
+        h("span", { className: "yg-row wrap" },
+          h("span", { className: "yg-chip on" }, `终场打断 ${e.interrupts}`),
+          h("span", { className: "yg-chip" }, `${data.hands} 手模拟里 ${e.seen} 手的终场有这几张`),
+          h("span", { className: "yg-chip" }, `路线 ${e.route.name.split("｜").slice(1).join("｜") || e.route.name}`))),
+      h("div", { className: "yg-eg-sec" },
+        h("div", { className: "yg-phd" }, "关键卡"),
+        h("div", { className: "yg-eg-cards" },
+          h("div", { className: "yg-eg-card", "data-card-code": String(e.start.code) },
+            h("span", { className: "yg-eg-art", ...bind(e.start.code, e.start.md) }, h(CardArt, { rest, code: e.start.code, md: e.start.md })),
+            h("span", { className: "yg-col" }, h("span", { className: "yg-chip on" }, "起手"), h("b", null, e.start.md), h("span", { className: "yg-lab" }, "这条路线要它在起手的 5 张里"))),
+          e.keyCards.map((c) => h("div", { key: c.code, className: "yg-eg-card", "data-card-code": String(c.code) },
+            h("span", { className: "yg-eg-art", ...bind(c.code, c.md) }, h(CardArt, { rest, code: c.code, md: c.md })),
+            h("span", { className: "yg-col" }, h("span", { className: "yg-chip" }, "终场打断"), h("b", null, c.md), h("span", { className: "yg-lab" }, c.interruptHow)))))),
+      h("div", { className: "yg-eg-sec" },
+        h("div", { className: "yg-phd" }, `要拼的 ${e.blocks.length} 块积木（按先后）`),
+        h("ol", { className: "yg-eg-blocks" }, e.blocks.map((b) => {
+          const key = `${e.id}:${b.id}`;
+          const on = open.has(key);
+          return h("li", { key: b.id, className: "yg-eg-blk", "data-block": b.id, style: { "--blk": b.color } },
+            h("div", { className: "yg-blk-head" },
+              h("b", { className: "yg-blk-name" }, b.name),
+              h("span", { className: "yg-lab" }, `${rangeText(b)} · ${b.usedBy} 条路线用`)),
+            h(BlockFlow, { block: b }),
+            h("div", { className: "yg-row wrap" },
+              h("button", { className: `yg-btn small${on ? " on" : ""}`, "aria-expanded": String(on), "data-missing": key, onClick: () => toggle(key) }, on ? "收起" : "缺了怎么补"),
+              h("button", { className: "yg-btn small", onClick: () => onOpen(e.route.id, b.from), "aria-label": `在路线 ${e.route.name} 里看「${b.name}」` }, "看这一块的步骤")),
+            on ? h(MissingHelp, { block: b, onOpen }) : null);
+        }))),
+      e.alsoRoutes.length ? h("p", { className: "yg-lab" }, `走到同一组打断的还有：${e.alsoRoutes.map((r) => r.name).join("、")}`) : null,
+      h("div", { className: "yg-row" }, h("button", { className: "yg-btn small", onClick: () => onOpen(e.route.id, 0) }, `打开路线：${e.route.name}`)))));
 }
 
 function YugiohApp({ rest, setDeckInfo }) {
@@ -967,6 +1042,22 @@ const CSS = `
 .yg-st-kind { font-size: 10px; color: #bdbdbd; line-height: 1.2; }
 .yg-st-name { font-size: 12px; font-weight: 600; line-height: 1.25; color: #ececec; }
 .yg-st-int { font-size: 11px; font-weight: 700; color: #facc15; }
+.yg-eg-wrap { display: flex; flex-direction: column; gap: 14px; max-width: 900px; min-width: 0; }
+.yg-eg { display: flex; flex-direction: column; gap: 14px; padding: 14px; border: 1px solid #2a2a2a; border-radius: 8px; min-width: 0; }
+.yg-eg-head { display: flex; flex-direction: column; gap: 8px; }
+.yg-eg-head h3 { margin: 0; font-size: 16px; line-height: 1.4; }
+.yg-eg-sec { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.yg-eg-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 10px; }
+.yg-eg-card { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.yg-eg-card .yg-col { gap: 4px; align-items: flex-start; }
+.yg-eg-card .yg-lab { line-height: 1.5; }
+.yg-eg-art { width: 46px; flex: none; aspect-ratio: 59 / 86; }
+.yg-eg-blocks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.yg-eg-blk { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 8px 12px; border-left: 4px solid var(--blk); min-width: 0; }
+.yg-eg-help { display: flex; flex-direction: column; gap: 12px; padding: 10px 12px; border: 1px dashed #3a3a3a; border-radius: 6px; min-width: 0; }
+.yg-eg-opt { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.yg-eg-opt > p { line-height: 1.7; }
+.yg-eg-jump { padding: 8px 10px; }
 .yg-picked { border: 1px solid #c8ff3d; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
 @media (max-width: 760px) {
   .yg { padding: 12px; }

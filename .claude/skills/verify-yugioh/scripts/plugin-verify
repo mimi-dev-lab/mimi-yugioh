@@ -6,7 +6,7 @@
                                          serves only its Webapp with this checkout's plugin/ (YUGIOH_URL = that instance);
                                          prints run.json, then runs doctor. A failed `up` stops what it started.
   plugin-verify doctor                   is this run worth driving? (read-only; exit 0 = yes)
-  plugin-verify shot NAME [--design | --mobile] [--tab 卡组一览|展开路线|起手速查|展开地图|术语表] [--station 站id [--stop 路线id]] [--select 卡名] [--route ID或名字 | --jump ID] [--step N|起手|last] [--keys] [--hover 卡名 | --tap 卡名 | --hover-anim 卡名 | --tap-anim 卡名] [--within CSS] [--close] [--click-step N|起手] [--play-all] [--stage-at K:FRAC] [--hover-role 卡名 | --tap-role 卡名] [--clip-stage] [--require-roles] [--require-blocks] [--guess ACTIONS] [--net-file FILE] [--compare PNG [--compare-label TEXT] [--compare-with NAME]…]
+  plugin-verify shot NAME [--design | --mobile] [--tab 卡组一览|展开路线|起手速查|展开地图|术语表] [--station 站id [--stop 路线id]] [--expand 终场id:积木id] [--select 卡名] [--route ID或名字 | --jump ID] [--step N|起手|last] [--keys] [--hover 卡名 | --tap 卡名 | --hover-anim 卡名 | --tap-anim 卡名] [--within CSS] [--close] [--click-step N|起手] [--play-all] [--stage-at K:FRAC] [--hover-role 卡名 | --tap-role 卡名] [--clip-stage] [--require-roles] [--require-blocks] [--guess ACTIONS] [--net-file FILE] [--compare PNG [--compare-label TEXT] [--compare-with NAME]…]
                                          open the web workspace (headless Chromium, plugin-shot.mjs), click 游戏王 in the sidebar like a user (the tab is 卡组一览),
                                          wait until it has drawn; then optionally switch tab and click a card in 卡组一览 by its name (the effect panel shows it);
                                          --route (opens 展开路线) clicks that route in the list (by id or name), --jump ID (with --tab 起手速查) clicks the lookup button for that route id and lands on its player, --step walks the player there by clicking
@@ -328,7 +328,7 @@ def cmd_doctor(a) -> int:
 
 
 def shot_opts(a) -> dict:
-    return {"name": a.name, "design": a.design, "mobile": a.mobile, "tab": a.tab, "select": a.select, "route": a.route, "jump": a.jump, "station": a.station, "stop": a.stop, "step": a.step, "keys": a.keys, "hover": a.hover, "tap": a.tap, "within": a.within, "close": a.close, "compare": a.compare, "compareLabel": a.compare_label, "compareWith": a.compare_with, "hoverAnim": a.hover_anim, "tapAnim": a.tap_anim, "clickStep": a.click_step, "playAll": a.play_all, "stageAt": a.stage_at, "nextMid": a.next_mid, "netFile": a.net_file, "hoverRole": a.hover_role, "tapRole": a.tap_role, "clipStage": a.clip_stage, "requireRoles": a.require_roles, "requireBlocks": a.require_blocks, "guess": a.guess}
+    return {"name": a.name, "design": a.design, "mobile": a.mobile, "tab": a.tab, "select": a.select, "route": a.route, "jump": a.jump, "station": a.station, "stop": a.stop, "expand": a.expand, "step": a.step, "keys": a.keys, "hover": a.hover, "tap": a.tap, "within": a.within, "close": a.close, "compare": a.compare, "compareLabel": a.compare_label, "compareWith": a.compare_with, "hoverAnim": a.hover_anim, "tapAnim": a.tap_anim, "clickStep": a.click_step, "playAll": a.play_all, "stageAt": a.stage_at, "nextMid": a.next_mid, "netFile": a.net_file, "hoverRole": a.hover_role, "tapRole": a.tap_role, "clipStage": a.clip_stage, "requireRoles": a.require_roles, "requireBlocks": a.require_blocks, "guess": a.guess}
 
 
 def shot_target(run: dict) -> dict:
@@ -456,6 +456,7 @@ def add_shot_args(s: argparse.ArgumentParser) -> None:
     s.add_argument("--jump", metavar="ID", help="with --tab 起手速查: click the lookup button that points at this route id; it jumps to that route's player (step 0)")
     s.add_argument("--station", metavar="站id", help="with --tab 展开地图: click this station of the subway map (e.g. block:albaz-jump, start:68468459, end:white-albaz); it jumps to that route's player at the station's step")
     s.add_argument("--stop", metavar="路线id", help="with --station: a station several routes pass through lists them below the map; click this route's button")
+    s.add_argument("--expand", metavar="终场id:积木id", help="with --tab 展开地图: open 终场倒推's 缺了怎么补 under this block (e.g. sword-mirrorjade:sword-lock; comma-separate several)")
     s.add_argument("--step", metavar="N|起手|last", help="with --route or --jump: walk the player to step N (0 or 起手 = the opening hand, or the last step) by clicking 下一步")
     s.add_argument("--keys", action="store_true", help="with --step: press the right arrow key instead of clicking 下一步")
     s.add_argument("--hover", metavar="卡名", help="desktop: move the mouse onto this card (data-card-md) and wait for the card popup")

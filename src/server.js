@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { buildRouteAnim } from './anim-page.js';
 import { deckOverview } from './deck.js';
 import { BRANDED } from './decks/branded.js';
+import { SIM_HANDS } from './decks/branded-endgames.js';
 import { openEngine } from './duel-session.js';
+import { buildEndgames } from './endgame.js';
 import { openEngineFiles } from './engine-files.js';
 import { featuresFrom } from './features.js';
 import { lookupView } from './lookup.js';
@@ -36,7 +38,7 @@ const ROUTES = (async () => {
       for (const def of BRANDED.routes) {
         try { routes.push(await replayRoute(engine, BRANDED, def, { features: FEATURES })); } catch (e) { throw new Error(`路线「${def.name}」重放不通：${e.message}`); }
       }
-      return { routes, lookup: lookupView(BRANDED, routes), subway: FEATURES.subway ? buildSubway(BRANDED, routes) : null };
+      return { routes, lookup: lookupView(BRANDED, routes), subway: FEATURES.subway ? buildSubway(BRANDED, routes) : null, endgames: FEATURES.endgame ? buildEndgames(BRANDED, routes, { hands: SIM_HANDS }) : null };
     } finally { files.close(); }
   } catch (e) {
     const reason = e.code === 'ENGINE_MISSING' ? `引擎数据不在 ${ENGINE}（${e.message}）` : e.message;
@@ -79,6 +81,12 @@ async function route(req, pathname, query) {
       const { subway, error } = await ROUTES;
       if (error) return [503, { error }];
       return subway ? [200, subway] : [404, { error: '地铁图这个功能关着（YUGIOH_FEATURES_OFF 里有 subway）' }];
+    }
+    // 终场倒推（试用功能 endgame，关了是 404）：{ hands, endgames: [{ id, name, interrupts, seen, route, start, keyCards, blocks（每块带 missing：缺它时的补法）, alsoRoutes }] }，见 src/endgame.js
+    case 'GET /endgames': {
+      const { endgames, error } = await ROUTES;
+      if (error) return [503, { error }];
+      return endgames ? [200, endgames] : [404, { error: '终场倒推这个功能关着（YUGIOH_FEATURES_OFF 里有 endgame）' }];
     }
     // 路线动画：{ src（data:text/html 地址，插件页放进 SandboxedFrame）, starts / ends（位置 0 = 起手、1..N = 第几步的开始帧、结束帧，秒）, duration, stage }
     case 'GET /route-anim': {

@@ -42,7 +42,7 @@ const pathOf = (o) => {
 };
 const stepOf = (o) => (o.step === 'last' ? Infinity : o.step === undefined || o.step === null || o.step === '起手' ? 0 : Number(o.step));
 // 做过这些动作的页面不再给下一张接着用：它们改了页面状态（弹窗、动画跳步、连播、本地存储里的开关、滚动、并排图换了页面），不是「从头点到这」的样子
-const DIRTY = ['clickStep', 'playAll', 'guess', 'nextMid', 'stageAt', 'hover', 'tap', 'hoverAnim', 'tapAnim', 'hoverRole', 'tapRole', 'close', 'compare', 'clipStage'];
+const DIRTY = ['clickStep', 'playAll', 'guess', 'nextMid', 'stageAt', 'hover', 'tap', 'hoverAnim', 'tapAnim', 'hoverRole', 'tapRole', 'close', 'compare', 'clipStage', 'expand'];
 // 手机宽选卡开的是弹窗（桌面宽是页面里的说明区）：弹窗开着的页面也不接着用
 const dirtying = (o) => DIRTY.some((k) => o[k] !== undefined && o[k] !== null && o[k] !== false) || (o.mobile && !!o.select);
 function canContinue(page, o) {
@@ -177,6 +177,14 @@ async function main() {
       await until((t) => [...document.querySelectorAll('.yg-tab.on')].some((b) => b.innerText === t), opts.tab, 10000, `「${opts.tab}」页签打开`);
     }
     if (opts.tab === '展开地图') await until(() => document.querySelectorAll('.yg-subway .yg-station').length > 0, null, 30000, '地铁图出来').catch(fail);
+    if (opts.tab === '展开地图') await until(() => document.querySelectorAll('.yg-eg').length > 0, null, 8000, '终场倒推出来').catch(() => {}); // 终场倒推关了就没有这块，等不到不算错（要点它的 --expand 自己会报错）
+    // 终场倒推：点开「缺了怎么补」（--expand 终场id:积木id，逗号分隔几个）
+    for (const key of opts.expand ? String(opts.expand).split(',') : []) {
+      if (opts.tab !== '展开地图') throw new Error('--expand 要和 --tab 展开地图 一起用');
+      const hit = await evaluate((k) => { const b = [...document.querySelectorAll('button[data-missing]')].find((x) => x.dataset.missing === k); if (!b) return false; b.click(); return true; }, key);
+      if (!hit) await fail(new Error(`终场倒推里没有「${key}」的「缺了怎么补」按钮`));
+      await until((k) => { const li = [...document.querySelectorAll('.yg-eg-blk')].find((x) => x.querySelector(`button[data-missing="${k}"]`)); return !!li?.querySelector('.yg-eg-help .yg-eg-opt'); }, key, 10000, `「${key}」的补法出来`).catch(fail);
+    }
     // 卡组一览里点一张卡（按卡名：aria-label），等说明区出这张卡
     if (opts.select && !did.has(`select:${opts.select}`)) {
       const clicked = await evaluate((n) => { const b = [...document.querySelectorAll('.yg-deck button.yg-tile')].find((x) => x.getAttribute('aria-label') === n); if (!b) return false; b.click(); return true; }, opts.select);
@@ -446,6 +454,14 @@ async function main() {
       const ends = stations.filter((st) => st.dataset.kind === 'end').length;
       return { stations: stations.length, ends, edges: g.querySelectorAll('.yg-edge').length, graphWidth: gr.width, boxWidth: box.clientWidth, outside, scrolls: box.scrollWidth > box.clientWidth + 1 };
     });
+    // 终场倒推：几个目标、每个的积木数和关键卡数、点开的补法数（每个补法至少一个跳转）、有没有东西画出了卡片框
+    const endgame = await evaluate(() => {
+      const secs = [...document.querySelectorAll('.yg-eg')];
+      if (!secs.length) return null;
+      const outside = secs.flatMap((sec) => { const r = sec.getBoundingClientRect(); return [...sec.querySelectorAll('*')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.right > r.right + 1 || b.left < r.left - 1); }).slice(0, 3).map((e) => `${sec.dataset.endgame}:${e.className}`); });
+      return { sections: secs.length, interrupts: secs.map((x) => x.querySelector('.yg-chip.on').innerText), blocks: secs.map((x) => x.querySelectorAll('.yg-eg-blk').length), keyCards: secs.map((x) => x.querySelectorAll('.yg-eg-card').length),
+        expanded: [...document.querySelectorAll('.yg-eg-help')].map((x) => ({ of: x.dataset.missingOf, options: [...x.querySelectorAll('.yg-eg-opt')].map((o) => ({ kind: o.dataset.kind, jumps: o.querySelectorAll('.yg-eg-jump').length })) })), outside };
+    });
     const overflowX = await evaluate(() => { const x = document.querySelector('.yg'); return x.scrollWidth > x.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1; });
     const height = await evaluate(() => document.querySelector('.yg').scrollHeight);
     await sleep(600);
@@ -484,7 +500,7 @@ async function main() {
     const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
     const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
     if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
-    await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, map, mapJump, blocks, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
+    await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, map, endgame, mapJump, blocks, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
     page.step = await evaluate(() => Number(document.querySelector('.yg-player')?.dataset.step ?? 0));
     // 并排对照：设计稿 PNG 在左（标签 --compare-label，默认「样子稿」），这张和 --compare-with 列的同一证据目录里先截的几张在右，上下排；在一个 data: 页面里拼好再截一张
     if (opts.compare) {

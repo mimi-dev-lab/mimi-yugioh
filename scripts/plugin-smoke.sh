@@ -105,6 +105,8 @@ map-jump --tab 展开地图 --station block:opening-bridge --stop white-albaz
 
 map-phone --mobile --tab 展开地图
 map-jump-phone --mobile --tab 展开地图 --station end:white-saint
+map-endgame --tab 展开地图 --expand sword-mirrorjade:sword-lock,trap-trio:set-and-close
+map-endgame-phone --mobile --tab 展开地图 --expand sword-mirrorjade:sword-lock,trap-trio:set-and-close
 SHOTS
 "$V" batch "$YV_EVIDENCE/shots.txt" --jobs "${YUGIOH_SMOKE_JOBS:-6}" || { echo "有截图没截成（没画出来、断言没过或有不同源的请求），见上面的输出"; exit 1; }
 seen deck
@@ -284,5 +286,16 @@ for name in map map-jump map-phone map-jump-phone; do
   grep -q '"jsErrors": \[\]' "$ev/$name.json" || { echo "$name 里有没接住的 JS 异常，见 $ev/$name.json"; exit 1; }
 done
 node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!j.mapJump || j.mapJump.route !== "white-albaz" || j.mapJump.step !== 8) { console.error(JSON.stringify(j.mapJump)); process.exit(1); }' "$ev/map-jump.json" || { echo "map-jump：枢纽站跳到的不是白之落胤第 8 步，见 $ev/map-jump.json"; exit 1; }
+# 展开地图的终场倒推：3 个目标终场，每个有起手卡、终场打断的卡、积木；点开「缺了怎么补」出换一块 / 跳过 / 改走别的路线，每个补法都有能跳的路线；不显示百分比、估值、还差；手机宽不出横向滚动条、没有东西画出卡片框
+seen map-endgame
+has map-endgame "终场倒推" "关键卡" "起手" "终场打断" "要拼的" "块积木" "缺了怎么补" "三英压场" "换一块" "跳过它" "改走别的路线" "收网" "500 手模拟里"
+lacks map-endgame "%" "还差" "估值"
+seen map-endgame-phone
+has map-endgame-phone "终场倒推" "缺了怎么补" "换一块"
+for name in map-endgame map-endgame-phone; do
+  node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const e = j.endgame; if (!e || e.sections !== 3 || e.blocks.some((n) => n < 3) || e.keyCards.some((n) => n < 3) || e.outside.length || e.expanded.length !== 2 || e.expanded.some((x) => !x.options.length || x.options.some((o) => !o.jumps))) { console.error(JSON.stringify(e)); process.exit(1); }' "$ev/$name.json" || { echo "$name 的终场倒推不对（目标数、积木数、关键卡数、补法和它们的跳转，或有东西画出卡片框），见 $ev/$name.json"; exit 1; }
+  grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
+  grep -q '"jsErrors": \[\]' "$ev/$name.json" || { echo "$name 里有没接住的 JS 异常，见 $ev/$name.json"; exit 1; }
+done
 status=0
-echo "游戏王插件在网页工作区里画出来了：卡组一览按作用分组（简中名、日文名、张数、打断数），点卡出效果说明和对手回合怎么打断，桌面宽和手机宽都能用；展开路线列表和逐步播放（起手、第 1 步、中间一步、终场汇总，桌面宽和手机宽），路线动画（下一步播完停住、点步号跳、连播到终场、中间帧、动画里悬停和点卡、动画框里没有非本地请求）；起手速查按关键卡列出路线和缺卡改走哪条，点一条跳到它的播放页；展开地图的汇流地铁图（桌面宽、手机宽，点站跳到路线的那一步）；没有旧功能的字样"
+echo "游戏王插件在网页工作区里画出来了：卡组一览按作用分组（简中名、日文名、张数、打断数），点卡出效果说明和对手回合怎么打断，桌面宽和手机宽都能用；展开路线列表和逐步播放（起手、第 1 步、中间一步、终场汇总，桌面宽和手机宽），路线动画（下一步播完停住、点步号跳、连播到终场、中间帧、动画里悬停和点卡、动画框里没有非本地请求）；起手速查按关键卡列出路线和缺卡改走哪条，点一条跳到它的播放页；展开地图的汇流地铁图（桌面宽、手机宽，点站跳到路线的那一步）和终场倒推（3 个目标终场、点开缺了怎么补）；没有旧功能的字样"
