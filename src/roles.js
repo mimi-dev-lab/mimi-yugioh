@@ -17,12 +17,14 @@ export function checkRoleTags(deck) {
     for (const tag of e.tags ?? []) if (!names.has(tag)) problems.push(`${where} 的作用 ${tag} 不在术语表里`);
     if (typeof e.why !== 'string' || e.why.trim().length < 10) problems.push(`${where} 缺原因（至少 10 个字）`);
   };
+  const whys = new Set(); // 默认作用和每一步的覆盖放在一起查：原因都不许一字不差
   for (const code of Object.keys(deck.cards)) {
-    if (!defaults[code]) problems.push(`${deck.cards[code].jp}（${code}）缺默认作用`);
-    else entry(`${deck.cards[code].jp}（${code}）的默认作用`, defaults[code]);
+    if (!defaults[code]) { problems.push(`${deck.cards[code].jp}（${code}）缺默认作用`); continue; }
+    entry(`${deck.cards[code].jp}（${code}）的默认作用`, defaults[code]);
+    if (whys.has(defaults[code].why)) problems.push(`${deck.cards[code].jp}（${code}）的默认原因和别处一字不差，要写它自己的`);
+    whys.add(defaults[code].why);
   }
   for (const code of Object.keys(defaults)) if (!deck.cards[code]) problems.push(`默认作用里的 ${code} 不在卡表里`);
-  const whys = new Set();
   for (const [id, steps] of Object.entries(routes)) {
     const route = deck.routes.find((r) => r.id === id);
     if (!route) { problems.push(`作用数据里的路线 ${id} 不存在`); continue; }
@@ -43,7 +45,7 @@ export function checkRoleTags(deck) {
 export const defaultRoleOf = (deck, code) => deck.roleTags.defaults[code];
 
 // 路线每一步中场每张卡此刻的作用。midfields[i] = 第 i+1 步走完后中场（怪兽区和魔陷区）的密码列表。
-// 返回同样长的数组，每步是 [{ code, tags, why, from, since? }]：from 是 step（这一步写了）、carried（沿用之前写的，since 是写在第几步）、default（默认）。
+// 返回同样长的数组，每步是 [{ code, tags, why, from, since? }]：from 是 step（这一步写了）、carried（页面标「自第 since 步起」：沿用之前写的，since 是写在第几步）、default（默认）。
 // 沿用的规矩：往前找这张卡连续在场的最近一次写的；中途离过场就不沿用
 export function resolveRoles(deck, routeId, midfields) {
   const overrides = deck.roleTags.routes[routeId] ?? {};

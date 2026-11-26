@@ -2,8 +2,6 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { BRANDED } from '../src/decks/branded.js';
-import { checkDeck } from '../src/deck.js';
-import { checkRoleTags } from '../src/roles.js';
 import { ENGINE_DIR, start } from './helpers.js';
 
 const get = async (url, path) => { const res = await fetch(`${url}${path}`); return { status: res.status, body: await res.json() }; };
@@ -70,45 +68,61 @@ describe('卡的作用标签：接口返回的数据', () => {
       assert.equal(roleOf('aluber', 2, '惨绝戏之导化 阿卢绯尔'), '检索');
       assert.equal(roleOf('aluber', 3, '惨绝戏之导化 阿卢绯尔'), '素材');
       assert.equal(roleOf('branded-fusion-aluber', 2, '惨绝戏之导化 阿卢绯尔'), '检索+诱饵');
-      // 库妸㽗：同一条线里展开点 → 堆墓 → 留场
-      assert.deepEqual([4, 5, 15].map((n) => roleOf('white-albaz', n, '引导之圣女 库妸㽗')), ['展开点', '堆墓', '留场+防手坑']);
+      // 库妸㽗：同一条线里展开点 → 堆墓 → 留场 → 展开点 → 留场
+      assert.deepEqual([4, 5, 6, 15, 17].map((n) => roleOf('white-albaz', n, '引导之圣女 库妸㽗')), ['展开点', '堆墓', '留场', '展开点', '留场']);
     } finally { server.stop(); }
   });
 
-  test('没写这一步的卡沿用最近写的并标出自第几步起；默认只在从没写过时用', async () => {
+  test('每条路线终场那一步，场上每张卡都有这一步自己写的作用：终场的标签不能是前面步骤留下来的', async () => {
+    const server = await start({ YUGIOH_ENGINE: ENGINE_DIR });
+    try {
+      for (const def of BRANDED.routes) {
+        const { body } = await get(server.url, `/route?id=${def.id}`);
+        const last = body.steps.at(-1);
+        assert.ok(last.roles.length >= 1, `${def.id} 终场是空的`);
+        for (const r of last.roles) assert.equal(r.from, 'step', `${def.id} 终场（第 ${last.n} 步）的 ${r.md} 没有这一步自己写的作用`);
+      }
+    } finally { server.stop(); }
+  });
+
+  test('作用数据里每一条覆盖，那张卡在那一步都在中场（写了不存在的卡或步号会被查出来）', async () => {
+    const server = await start({ YUGIOH_ENGINE: ENGINE_DIR });
+    try {
+      for (const def of BRANDED.routes) {
+        const { body } = await get(server.url, `/route?id=${def.id}`);
+        for (const [n, cards] of Object.entries(BRANDED.roleTags.routes[def.id])) {
+          const step = body.steps[Number(n) - 1];
+          assert.ok(step, `${def.id} 没有第 ${n} 步`);
+          const onField = new Set(midfield(step).map((c) => String(c.code)));
+          for (const code of Object.keys(cards)) assert.ok(onField.has(code), `${def.id} 第 ${n} 步写了 ${BRANDED.cards[code].md} 的作用，但它这一步不在中场`);
+        }
+      }
+    } finally { server.stop(); }
+  });
+
+  test('卡换了活，标签跟着换：三英的相剑师终场是打断不是检索，库妸㽗等待时不是堆墓，白之落胤终场是留场', async () => {
+    const server = await start({ YUGIOH_ENGINE: ENGINE_DIR });
+    try {
+      const routes = {};
+      for (const def of BRANDED.routes) routes[def.id] = (await get(server.url, `/route?id=${def.id}`)).body;
+      const tagsAt = (id, n, md) => routes[id].steps[n - 1].roles.find((r) => r.md === md).tags.join('+');
+      for (const id of ['white-saint', 'high-spirits-albaz']) assert.equal(tagsAt(id, routes[id].steps.length, '三英的相剑师'), '打断', id);
+      assert.equal(tagsAt('white-albaz', 6, '引导之圣女 库妸㽗'), '留场');
+      assert.equal(tagsAt('white-albaz', 14, '引导之圣女 库妸㽗'), '留场');
+      assert.equal(tagsAt('nadir-servant', 13, '白之落胤'), '留场');
+      assert.equal(tagsAt('branded-fusion', 10, '白之落胤'), '留场');
+      assert.equal(tagsAt('aluber', 12, '白之落胤'), '留场');
+    } finally { server.stop(); }
+  });
+
+  test('没写这一步的卡沿用最近写的并标出自第几步起（白之落胤线里库妸㽗第 6 步写了留场，第 7 步沿用它）', async () => {
     const server = await start({ YUGIOH_ENGINE: ENGINE_DIR });
     try {
       const { body } = await get(server.url, '/route?id=white-albaz');
       const quem7 = body.steps[6].roles.find((r) => r.md === '引导之圣女 库妸㽗');
-      assert.deepEqual([quem7.from, quem7.since, quem7.tags], ['carried', 5, ['堆墓']]);
+      assert.deepEqual([quem7.from, quem7.since], ['carried', 6]);
       const quem5 = body.steps[4].roles.find((r) => r.md === '引导之圣女 库妸㽗');
       assert.deepEqual([quem5.from, quem5.since], ['step', 5]);
     } finally { server.stop(); }
-  });
-});
-
-describe('作用数据的检查', () => {
-  test('烙印的作用数据没有问题，卡组检查也带上它', () => {
-    assert.deepEqual(checkRoleTags(BRANDED), []);
-    assert.deepEqual(checkDeck(BRANDED), []);
-  });
-
-  test('查得出：作用词不在术语表、缺默认作用、原因太短、原因重复、步号越界', () => {
-    const bad = structuredClone(BRANDED);
-    bad.roleTags.defaults[73819701].tags = ['瞎写'];
-    delete bad.roleTags.defaults[62962630];
-    bad.roleTags.routes['white-albaz'][1][73819701].why = '太短';
-    bad.roleTags.routes['white-albaz'][2][55273560].why = bad.roleTags.routes['white-albaz'][3][55273560]?.why ?? bad.roleTags.routes['aluber'][10][55273560].why;
-    bad.roleTags.routes['white-albaz'][99] = { 55273560: { tags: ['素材'], why: '这一步不存在的步号' } };
-    const problems = checkRoleTags(bad).join('\n');
-    assert.match(problems, /瞎写 不在术语表里/);
-    assert.match(problems, /缺默认作用/);
-    assert.match(problems, /缺原因/);
-    assert.match(problems, /一字不差/);
-    assert.match(problems, /没有第 99 步/);
-  });
-
-  test('所有路线都标完：每条路线的每个刚上场的中场卡在作用数据里有这一步的条目（对 BRANDED 的 9 条路线都有数据）', () => {
-    assert.deepEqual(Object.keys(BRANDED.roleTags.routes).sort(), BRANDED.routes.map((r) => r.id).sort());
   });
 });

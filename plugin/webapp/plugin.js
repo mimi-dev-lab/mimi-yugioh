@@ -5,7 +5,7 @@
    GET /routes (the 展开路线 list, plus `lookup`, the 起手速查 data: key card -> routes, and which route to take without a card) and
    GET /route?id= (one route's steps: the engine's board after each step, what changed, the end summary),
    GET /card-image?code= (JSON with base64; drawn as a data: address).
-   Tabs: 卡组一览 (the deck grouped by role; click a card for its effect), 展开路线 (the route list, then a player: previous / next / jump / arrow keys,
+   Tabs: 卡组一览 (the deck grouped by the first role tag; click a card for its effect), 展开路线 (the route list, then a player: previous / next / jump / arrow keys,
    a step bar starting with 起手 (the opening hand, step 0, no diff), the last step is the end summary), 起手速查 (per key card: the route(s) to take with its end interrupts, and "缺 X → route" lines; a click jumps to that route's player, step 0).
    Card popup: any card (卡组一览, route boards, 起手速查) pops up its big art, both names, role and the three things when hovered (desktop) or tapped
    (phone: a bottom sheet with 关上; Esc closes). One entry point: useCardPopup() gives { show(code, rect), hide, bind(code) }; show() takes a card code and a
@@ -64,7 +64,7 @@ function Tile({ rest, card, selected, onClick }) {
       card.zone === "extra" ? h("span", { className: "yg-tag" }, "额外") : null),
     h("span", { className: "yg-name" }, card.md),
     h("span", { className: "yg-jp" }, card.jp),
-    h("span", { className: "yg-roles" }, h(RoleChips, { tags: card.roleTags ?? [], why: card.roleWhy, small: true })),
+    h("span", { className: "yg-roles" }, h(RoleChips, { tags: card.roleTags, why: card.roleWhy, small: true })),
     card.interrupts > 0 ? h("span", { className: "yg-chip on" }, `打断 ${card.interrupts}`) : null);
 }
 
@@ -79,7 +79,7 @@ function DetailBody({ rest, card, onClose, stepRole, stepN }) {
         h("div", { className: "yg-title" }, card.md),
         h("div", { className: "yg-lab" }, card.jp),
         h("div", { className: "yg-row wrap" },
-          h(RoleChips, { tags: card.roleTags ?? [], why: card.roleWhy }),
+          h(RoleChips, { tags: card.roleTags, why: card.roleWhy }),
           h("span", { className: "yg-chip" }, `${ZONE_NAME[card.zone]} ×${card.count}`)),
         onClose ? h("button", { className: "yg-btn small yg-close", onClick: onClose, "aria-label": "关上" }, "× 关上") : null)),
     h("div", { key: "facts", className: "yg-facts" },
@@ -149,7 +149,7 @@ function CardPopupProvider({ rest, cards, terms, children }) {
 }
 const useCardPopup = () => useContext(CardPopupContext);
 
-// ---- 卡组一览: the deck grouped by role, the clicked card's effect beside (below on a phone) ----
+// ---- 卡组一览: the deck grouped by the first role tag, the clicked card's effect beside (below on a phone) ----
 function DeckView({ rest, deck }) {
   const [code, setCode] = useState(null);
   useEffect(() => {
@@ -175,11 +175,11 @@ function DeckView({ rest, deck }) {
 
 // ---- 术语表: every role word, what it means, its colour ----
 function GlossaryView({ deck }) {
-  const used = (name) => deck.cards.filter((c) => c.roleTags.includes(name)).map((c) => c.md);
+  const used = (name) => deck.cards.filter((c) => c.roleTags.includes(name)).length;
   return h("div", { className: "yg-glossary" },
     h("p", { className: "yg-lab yg-sum" }, "路线每一步中场的卡都带 1–2 个作用词，悬停词或打开卡片弹窗能看到「此刻为什么是这个作用」。同一张卡在不同路线、不同步骤作用会变。"),
     deck.roleTerms.map((t) => h("section", { key: t.name, className: "yg-term", "aria-label": t.name },
-      h("div", { className: "yg-term-head" }, h("span", { className: "yg-role", style: { background: t.color } }, t.name), h("span", { className: "yg-lab" }, used(t.name).length ? `默认带这个作用的卡 ${used(t.name).length} 种` : "没有默认带它的卡，只在路线某一步出现")),
+      h("div", { className: "yg-term-head" }, h("span", { className: "yg-role", style: { background: t.color } }, t.name), h("span", { className: "yg-lab" }, used(t.name) ? `默认带这个作用的卡 ${used(t.name)} 种` : "没有默认带它的卡，只在路线某一步出现")),
       h("p", { className: "yg-term-note" }, t.note))));
 }
 
@@ -193,7 +193,7 @@ function MidfieldRoles({ rest, roles, n }) {
     h("div", { className: "yg-mtext" },
       h("div", { className: "yg-row wrap" }, h("b", null, r.md), h(RoleChips, { tags: r.tags, why: r.why })),
       h("p", { className: "yg-why" }, r.why),
-      r.from === "step" ? null : h("p", { className: "yg-lab" }, r.from === "carried" ? `沿用第 ${r.since} 步写的` : "默认作用")))));
+      r.from === "step" ? null : h("p", { className: "yg-lab" }, r.from === "carried" ? `自第 ${r.since} 步起` : "默认作用")))));
 }
 
 // ---- 展开路线: the list, then the player ----

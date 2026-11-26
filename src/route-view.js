@@ -82,11 +82,9 @@ export async function replayRoute(engine, deck, route) {
       board: viewStepBoard(deck, after, diff), diff, moves: movesOf(deck, played.stepEvents[i]),
     };
   });
-  if (deck.roleTags) {
-    // 每步中场（怪兽区、魔陷区）每张卡此刻的作用：这一步写了的、沿用之前写的，或默认
-    const roles = resolveRoles(deck, route.id, steps.map((s) => [...s.board.monsters, ...s.board.spellTraps].map((c) => c.code)));
-    steps.forEach((s, i) => { s.roles = roles[i].map((r) => ({ ...cardOf(deck, r.code), ...r })); });
-  }
+  // 每步中场（怪兽区、魔陷区）每张卡此刻的作用：这一步写了的、沿用之前写的，或默认
+  const roles = resolveRoles(deck, route.id, steps.map((s) => [...s.board.monsters, ...s.board.spellTraps].map((c) => c.code)));
+  steps.forEach((s, i) => { s.roles = roles[i].map((r) => ({ ...cardOf(deck, r.code), ...r })); });
   const end = endSummary(deck, played.endBoard);
   return {
     id: route.id, name: route.name, needs: cardOf(deck, route.needs), source: route.source, verified: route.verified,
