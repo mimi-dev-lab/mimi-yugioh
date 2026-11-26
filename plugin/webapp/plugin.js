@@ -19,6 +19,9 @@
    积木 (blocks, from GET /route's blocks and steps[].block, the id of the block each step belongs to, which the service works out): the route is a few named, reusable pieces; the step bar is split into one coloured segment per block with its name
    above the step numbers, and the step panel (and the end panel) shows the current block: its name, which steps it spans and 要什么 → 给什么; the 起手 panel lists the route's blocks.
    With 先猜再看 on, a block's name stays hidden until its first step has been played. The colours come from the service (each block has one), they are not copied here.
+   资源账本 (a 试用 block, from GET /route's steps[].ledger, which the service works out from the engine's state; absent when the service has the ledger switched off, and then the page shows nothing of it): the step panel lists
+   whether this turn's 通常召唤 is used (and in which step), the 「每回合一次」effects used up to and including this step (card name + which effect; the ones this step used are marked 新), and how many cards are left in the 额外卡组
+   with the key ones (the extra-deck monsters that give interrupts) and where they are. With 先猜再看 on it is not shown until the step is revealed (it is part of the step panel).
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -320,6 +323,24 @@ function BlockList({ blocks }) {
       h(BlockFlow, { block: b }))));
 }
 
+// ---- 资源账本: steps[].ledger { normalSummon: { used, step }, effects: [{ md, label, gist, shared?, step, fresh }], extra: { remaining, start, key: [{ md, total, inExtra, elsewhere }] } } ----
+const ZONE_LABEL = { hand: "手牌", monsters: "怪兽区", spellTraps: "魔陷区", grave: "墓地", banished: "除外" };
+function LedgerCard({ ledger }) {
+  if (!ledger) return null;
+  const { normalSummon, effects, extra } = ledger;
+  const where = (k) => (k.inExtra ? `额外卡组 ${k.inExtra}/${k.total}` : Object.entries(k.elsewhere).map(([z, n]) => `${ZONE_LABEL[z] ?? z} ${n}`).join("、") || "不在");
+  return h("section", { className: "yg-ledger", "aria-label": "资源账本" },
+    h("div", { className: "yg-phd" }, "资源账本"),
+    h("p", { className: "yg-lg-row", "data-ledger": "summon" }, h("b", null, "通常召唤"),
+      h("span", { className: normalSummon.used ? "yg-lg-used" : "yg-lg-free" }, normalSummon.used ? `已用（第 ${normalSummon.step} 步）` : "还没用")),
+    h("div", { className: "yg-lg-row yg-lg-col", "data-ledger": "effects" }, h("b", null, `每回合一次的效果 · 已用 ${effects.length} 个`),
+      effects.length ? h("ul", { className: "yg-lg-list" }, effects.map((e) => h("li", { key: `${e.code}-${e.label}-${e.step}`, className: e.fresh ? "new" : "", title: e.shared ?? e.gist },
+        h("span", { className: "yg-lg-name" }, `${e.md} ${e.label}`), h("span", { className: "yg-lg-gist" }, e.shared ? `${e.gist}（${e.shared}）` : e.gist), e.fresh ? h("em", null, "新") : null)))
+        : h("span", { className: "yg-none" }, "还没有")),
+    h("div", { className: "yg-lg-row yg-lg-col", "data-ledger": "extra" }, h("b", null, `额外卡组 · 剩 ${extra.remaining} / ${extra.start} 张`),
+      h("ul", { className: "yg-lg-list" }, extra.key.map((k) => h("li", { key: k.code, className: k.inExtra ? "" : "gone" }, h("span", { className: "yg-lg-name" }, k.md), h("span", { className: "yg-lg-gist" }, where(k)))))));
+}
+
 function StepPanel({ rest, step, total, blocks }) {
   const [tag, color] = stepTag(step);
   const { cost, gain } = tradeRows(step.moves);
@@ -332,6 +353,7 @@ function StepPanel({ rest, step, total, blocks }) {
       h("div", { className: "yg-phd" }, "花了什么"), h("span", null), h("div", { className: "yg-phd" }, "换来什么"),
       h(TradeCol, { rest, rows: cost, side: "cost" }), h("span", { className: "yg-arrow", "aria-hidden": "true" }, "→"), h(TradeCol, { rest, rows: gain, side: "gain" })),
     step.activated.length ? h("p", { className: "yg-act" }, `发动了 ${step.activated.map((c) => c.md).join("、")}`) : null,
+    h(LedgerCard, { ledger: step.ledger }),
     h("div", { className: "yg-phd" }, "中场的卡和它们此刻的作用"),
     h(MidfieldRoles, { rest, roles: step.roles, hand: step.handRoles, n: step.n }),
     h(Piles, { board: step.board }),
@@ -348,6 +370,7 @@ function EndPanel({ rest, end, step, blocks }) {
       h(Thumb, { rest, card: b, w: 52, h: 75 }),
       h("div", { className: "yg-trow-text" }, h("b", null, `${b.md}${b.copies > 1 ? ` ×${b.copies}` : ""}`), h("span", null, `打断 ${b.interrupts}：${b.interruptHow}`)))))
       : h("p", { className: "yg-none" }, "终场没有打断"),
+    h(LedgerCard, { ledger: step.ledger }),
     h("div", { className: "yg-phd" }, "终场里每张卡的作用"),
     h(MidfieldRoles, { rest, roles: step.roles, hand: step.handRoles, n: step.n }),
     h("p", { className: "yg-pile" }, h("u", { style: { color: COLOR.green } }, `剩余手牌 ${end.hand.length} 张`), end.hand.length ? end.hand.map((c) => c.md).join("、") : "—"),
@@ -816,6 +839,14 @@ const CSS = `
 .yg-brow .yg-trow-text span { font-size: 12.5px; line-height: 1.5; font-weight: 400; letter-spacing: 0; color: #c7c7cd; }
 .yg-none { color: #4a4a52; font-size: 20px; padding-left: 12px; }
 .yg-act { font-size: 12px; color: #bdbdbd; }
+.yg-ledger { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 8px 12px; border-left: 4px solid #6b6b72; min-width: 0; }
+.yg-lg-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; color: #e2e2e6; min-width: 0; }
+.yg-lg-col { flex-direction: column; align-items: stretch; gap: 4px; }
+.yg-lg-used { color: #ffb020; font-weight: 700; } .yg-lg-free { color: #7dd87d; font-weight: 700; }
+.yg-lg-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.yg-lg-list li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 8px; font-size: 12px; line-height: 1.5; color: #bdbdbd; min-width: 0; }
+.yg-lg-list li.new { color: #fff; } .yg-lg-list li.gone .yg-lg-gist { color: #ffb020; }
+.yg-lg-name { font-weight: 700; color: #e2e2e6; overflow-wrap: anywhere; } .yg-lg-list em { font-style: normal; font-size: 11px; font-weight: 800; color: #000; background: #c8ff3d; border-radius: 8px; padding: 0 6px; }
 .yg-hand { display: flex; flex-wrap: wrap; gap: 8px; }
 .yg-hc { width: 70px; display: flex; flex-direction: column; gap: 6px; }
 .yg-hc .yg-roles { justify-content: flex-start; }

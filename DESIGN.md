@@ -14,12 +14,15 @@ src/route-view.js    路线的展示数据：把 playRoute 重放出的每一步
 src/interrupts.js    终场打断数：按卡组数据里每张卡的打断条件（from / perTurn / needs / pay / ownTurnLock / tags）和终场的 used（自己回合发动过的效果）算一个终场能打断几次、靠哪几张卡；路线终场汇总、起手速查、搜索、随机起手模拟都只调它；纯函数
 src/roles.js         作用标签：检查卡组数据里的 roleTags（词在术语表里、每张卡有默认作用、原因在一条路线内不重复），并算路线每一步中场每张卡此刻的作用（这一步写的 / 沿用 / 默认）、手牌里哪些卡此刻有作用（手坑、终场算进打断数的手牌）；纯函数
 src/blocks.js        积木：检查卡组数据里的 blocks（名字、颜色唯一，每条路线每一步恰好归一块）、给路线配上积木分段（`routeBlocks`）、取每块积木的操作序列写法（`blockVariants`，来自路线数据里它对应的那几步）、算一手的展开能不能只用积木拼出来（`coverHand`，严格和放宽两个口径）、哪些路线用到某块积木（`routesUsing`）、某个操作有没有出现在积木写法里（`opInBlocks`）、一手里哪些积木的写法整段出现了（`blocksSeenIn`）；操作「一样」的标准只有 `blocks.js` 里一个键函数；纯函数
+src/ledger.js        资源账本：检查卡组数据里的 ledger（`ONCE_PER_TURN`），并算路线每一步走完后的账本（通常召唤用了没、到这步为止用掉的「每回合一次」效果、额外卡组剩几张和关键卡在哪）；全部来自引擎重放的状态；纯函数
+src/features.js      试用功能的开关（ledger、subway、endgame、tree）：名字、默认全开、`featuresFrom(关掉的名字)`；读环境变量只在 server.js
 src/lookup.js        起手速查：检查卡组数据里的 lookup（目标路线存在、起手里的卡对得上路线数据）、把它展开成 GET /routes 的 lookup（卡名、目标路线的名字和打断数）；纯函数
 src/decks/branded.js         烙印卡组数据：卡表、卡名、作用、三件事、打断数和怎么打断
 src/decks/branded-routes.js  烙印的展开路线（引擎可重放的步骤序列）：Game8 两条，另有从 B站专栏路线图、T³ 文库 Mas 的展开一览补的几条，和本仓随机起手模拟（docs/opening-analysis.md）里搜出的几条，每条带出处
 src/decks/branded-levels.js  烙印每只怪兽的等级 / 阶级 / 连接数（单独一处，测试对照引擎卡库）
 src/decks/branded-roles.js   烙印的作用标签：术语表（词、解释、颜色）、每张卡的默认作用和原因、每条路线每一步中场卡的覆盖；不改卡表行
 src/decks/branded-blocks.js  烙印的积木：10 块（名字、颜色、要什么、给什么）和 9 条路线每一步归哪块（`SEGMENTS`：路线 id → `{ block, from, to }`）；不改卡表行和路线步骤
+src/decks/branded-ledger.js  烙印的账本数据：哪张卡的哪个效果（引擎报的效果描述号的低位 n，必要时加发动时的区）是卡片上的第几个「每回合一次」效果；不改卡表行
 src/decks/branded-lookup.js  烙印的起手速查数据：关键卡 → 路线，缺卡改走哪条（只指向 branded-routes.js 里的路线 id）
 src/search.js        最好场面搜索（离线分析用，#37）：在决斗会话里做有限偏离的深度优先搜索（存档回滚、置换表），按场面值评估终场；上限按节点数；纯逻辑，见「随机起手模拟」
 src/opening-sim.js   随机起手模拟：发牌（mulberry32）、总种子派生每手种子、一手的模拟（搜索 + 已知路线取更好的）、记录重放和对照；纯逻辑，引擎、「现在」由调用方注入
@@ -54,6 +57,8 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 ```
 
 ## 环境变量
+
+试用功能的开关（`src/features.js`：`ledger`、`subway`、`endgame`、`tree`，对应 #45 的试用块）：`YUGIOH_FEATURES_OFF=ledger,tree` 关掉哪几个，不认识的名字启动就报错；默认全开。关掉的功能接口里不带它的数据（例如没有 `steps[].ledger`），页面不显示那一块，别的功能不受牵连；`GET /routes` 的 `features` 说每个开关现在开没开。
 
 | 环境变量 | 默认 | 用途 |
 |---|---|---|
@@ -145,6 +150,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 - `steps`：路线数据里每一项 `steps` 一条（条数 = `route.steps.length`），`{ n, text, actions, activated, board, diff, moves }`。`board` 是这一步走完后我方的完整场面：`hand`、`monsters`（含额外怪兽区，`sequence` 5、6）、`spellTraps`（含场地）、`grave`、`banished`、`deck`（主卡组每一张，顺序是引擎洗牌后的）、`extra`（额外卡组每一张），每张卡 `{ code, md, jp, level?/rank?/link?, sequence }`（`sequence` 是区内位置；怪兽才有等级 / 阶级 / 连接数），怪兽区和魔陷区的卡多一个 `position`：`attack`（表侧攻击）、`defense`（表侧守备，页面横放）、`facedown`（里侧），刚进来的卡多一个 `fresh: true`。`diff` 是和上一步（第 1 步对比起手 `start`）相比 7 个区各自的 `{ in, out }`：进来了哪些、离开了哪些，即「花了什么 → 换来什么」（按密码数张数，区内换位置不算）。`activated` 是这一步里引擎记到的我方发动效果的卡，`actions` 是这一步引擎动作的文字（去掉「发动」「选完」「放在第几格」这类机械确认）。最后一步的 `board` 是终场。
 - `roles`（每步一项，数组）：这一步走完后中场（`monsters` 加 `spellTraps`）每个密码一条，`{ code, md, jp, …, tags（1–2 个作用词）, why（此刻为什么是这个作用）, from, since? }`；`from` 是 `step`（这一步写了）、`carried`（沿用之前写的，`since` 是写在第几步）、`default`（默认，`why` 是卡的默认原因）。由 `resolveRoles`（`src/roles.js`）按卡组数据的 `roleTags` 算，不依赖引擎之外的东西；刚上场（`fresh`）的卡必须是 `step`（测试查）。
 - `handRoles`（每步一项）和 `startHandRoles`（起手）：手牌里此刻有作用的卡，每个密码一条 `{ code, md, jp, …, tags, why, from }`。作用数据只写中场，手牌不另写：默认作用里有「手坑」的卡用默认作用；终场那一步算进打断数的手牌（如铁兽鸟 墨丘利耶）也标，默认作用里有「打断」就用默认作用，没有就是「打断」+ 怎么打断（`from: 'breaker'`）；别的手牌不标。由 `handRoles`（`src/roles.js`）算。
+- `steps[].ledger`（试用功能 `ledger`，关了就没有这个字段）：这一步走完后的资源账本，由 `buildLedger`（`src/ledger.js`）从重放的状态算，不手写。`normalSummon: { used, step }`（引擎说这回合的召唤权用掉了没、第几步用掉的）；`effects: [{ code, md, jp, label（①②③）, gist, shared?, step（第几步第一次用）, fresh（这一步新用的）}]`：到这一步为止发动过的「每回合一次」效果，按卡名算、同一效果发动几次只列一条，不随卡离场作废（所以引擎记录用 `session.activations`，不是会随离场作废的 `used`）；`extra: { remaining, start, key: [{ ...卡, total, inExtra, elsewhere }] }`：额外卡组剩几张、起手几张，关键卡 = 额外卡组里打断数大于 0 的怪兽，`elsewhere` 是不在额外卡组时各区有几张。账本数据 `ONCE_PER_TURN`（`src/decks/branded-ledger.js`）只记「哪次发动是卡片上的哪个效果」；路线里发动了数据里没有的效果，测试报错。
 - `blocks`（路线一项）：这条路线由哪几段积木连成，`[{ id, name, color, needs, gives, from, to }]`，按步号排，从第 1 步接到最后一步；每步的 `block` 是它归的那块积木的 `id`。由 `routeBlocks`（`src/blocks.js`）按卡组数据的 `blocks` 配，不依赖引擎。
 - `moves`：这一步里引擎自己发出的卡片移动（会话的 MSG_MOVE，按发生顺序，只列我方的卡；**不是从 diff 推断的**）：`{ code, md, jp, level?/rank?/link?, from, to, fromSequence, sequence, position?, summon?, chain? }`。`fromSequence` 是出发处的区内位置（同密码的几张卡在场上时靠它认是哪一张离开），`sequence` 是引擎说的去处的区内位置（MSG_MOVE 的 `to.sequence`：怪兽区 0–4 主怪兽区、5–6 额外怪兽区，魔陷区同理，手牌、墓地等是进去之后的第几张），动画里所有落点的格子都取自它，不自己挑；`from` / `to` 是区名 `hand / monsters / spellTraps / grave / banished / deck / extra`（Xyz 素材是 `overlay`，快照里没有这个区，现有卡组没有 Xyz）；`position` 是去处在怪兽区 / 魔陷区时的表示形式；`summon` 是这只怪兽被召唤的方式（`normal`、`special`、`fusion`、`synchro`、`xyz`、`link`、`ritual`，取自引擎消息）；`chain` 是移动发生时正在连锁的第几环（发动魔法上场、支付之前不在连锁里）。每个区、每个密码的净进出等于 `diff` 的 `in` / `out`（`test/route-moves.test.js` 对每条路线每一步查）。注意引擎的移动语义：融合 / 同调的素材移动的 `reason` 带 MATERIAL，去处由效果决定（同调素材进墓地；白之落胤线第 14 步冰剑龙的融合素材，卢绯里昂回额外卡组、除外的白之落胤回主卡组）；除外的怪兽回场是一条 `banished → monsters` 的移动。
 - `end`（终场汇总）：`monsters`、`spellTraps`、`hand`、`grave`、`banished`，`interrupts` = 终场的打断数（`countInterrupts`：发动条件满足的各卡 `interrupts` 之和，墨丘利耶在手牌也算，自己回合用过除外效果的冰剑龙不算），`breakers` 列出每个打断靠哪张卡、算进去几张、怎么打断（`interruptHow`）；条件不满足的卡不列。不在路线里手写。
