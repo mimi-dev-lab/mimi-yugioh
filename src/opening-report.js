@@ -4,6 +4,7 @@ import { blockVariants, blocksSeenIn, coverHand, LOOSE, opInBlocks, opsOf, route
 import { expand } from './deck.js';
 import { keyCardsIn } from './opening-sim.js';
 import { cardOf } from './deck.js';
+import { leavesOf, questionsOf, scoreTree } from './tree.js';
 import { MAX_BRANCH, MAX_COMBOS, MAX_DISCREPANCY } from './search.js';
 
 export const MIN_LIFT_HANDS = 10; // 「每张卡在手时」只列至少在这么多手里出现过的卡（手数太少，平均不稳）
@@ -154,7 +155,7 @@ export function analyze(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) {
 
   return {
     total, distribution, brickRate: total ? bricks.length / total : 0, avgInterrupts: mean(rows.map((r) => r.interrupts)), avgHandLeft: mean(rows.map((r) => r.handLeft)),
-    groups, candidates: { better, uncovered }, lift, blocks: blockStats,
+    groups, candidates: { better, uncovered }, lift, blocks: blockStats, tree: deck.tree ? { ...scoreTree(deck.tree, rows), leaves: leavesOf(deck.tree).length, questions: questionsOf(deck.tree).length } : null,
     bricks: { n: bricks.length, withoutKey: bricks.filter((r) => keyOf(r).length === 0).length, noStarter: bricks.filter(noStarter).length, avgHandTraps: mean(bricks.map(handTraps)), overRepresented },
     avgHandTraps: mean(rows.map(handTraps)), noStarterAll: rows.filter(noStarter).length,
     masterSeed: uniqueValue(rows, 'masterSeed'), maxNodes: uniqueValue(rows, 'maxNodes'), cappedCount: rows.filter((r) => r.capped).length, replayBad: rows.filter((r) => r.searchReplayOk === false).length,
@@ -322,6 +323,31 @@ export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS, priorVe
       line();
       table(['卡', '没拼出的手里有它', '拼得出的手里有它'], u.cards.map((c) => [c.md, `${pct(c.nUncovered, u.n)}（${c.nUncovered} 手）`, `${pct(c.nCovered, b.covered.n)}（${c.nCovered} 手）`]));
     }
+  }
+
+  if (s.tree) {
+    const t = s.tree;
+    const routeName = (id) => deck.routes.find((r) => r.id === id)?.name ?? id;
+    line('## 决策树导向');
+    line();
+    line(`规格 #45、票 #52。决策树（\`src/decks/branded-tree.js\`，由 \`scripts/decision-tree.js\` 生成）共 ${t.questions} 种问题、${t.leaves} 个叶子，每个叶子指向一条路线。这一节回答：按树走，走到的路线是不是这手的最好路线。`);
+    line();
+    line('口径（\`src/tree.js\` 文件头也写了）：');
+    line();
+    line('- 「能走通的路线」：这手的 `routeValues` 里值不是 null 的路线（把路线的操作原样喂给这手的牌，引擎都接得住）。「最好路线」：能走通的路线里场面值最高的，并列的都算。');
+    line('- 一手按树从根问到叶子（问题只看这手起手 5 张里有没有某张卡），走到的叶子路线在最好路线里就算导向正确。');
+    line('- 一条路线都走不通的手没有最好路线，不算导向正确，也不从分母里拿掉（分母永远是全部手数）。');
+    line('- 更严的数：树指的路线走出的场面值等于这手的最好场面值（搜索和路线里更高的那个，即 `value`），路线比搜索差的手不算。');
+    line('- 树是用这同一批手生成的（贪心，生成规则见 `src/tree.js`），所以下面是在样本内的数，不是对新手的预测。');
+    line();
+    line(`- **正确导向 ${t.correct} / ${t.total} 手**（${pct(t.correct, t.total)}）。`);
+    line(`- 其中有路线能走通的 ${t.withRoute} 手里正确 ${t.correct} 手（${pct(t.correct, t.withRoute)}）；没有路线能走通的 ${t.noRoute} 手（${pct(t.noRoute, t.total)}）树无从对错，全部不算。`);
+    line(`- 更严的口径（路线走出的场面值等于最好场面值）：${t.strict} / ${t.total} 手（${pct(t.strict, t.total)}）。`);
+    line(`- 对照：不问任何问题、永远指同一条路线，最好的一条是「${routeName(t.single.route)}」，${t.single.correct} / ${t.total} 手。`);
+    line();
+    line('每个叶子（路线）被走到几手、其中正确几手：');
+    line();
+    table(['路线', '走到的手数', '其中正确'], deck.routes.map((r) => [r.name, t.perRoute[r.id]?.reached ?? 0, t.perRoute[r.id]?.correct ?? 0]));
   }
 
   line('## 搜索上限和超上限的手');

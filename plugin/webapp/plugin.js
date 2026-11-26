@@ -19,6 +19,15 @@
    积木 (blocks, from GET /route's blocks and steps[].block, the id of the block each step belongs to, which the service works out): the route is a few named, reusable pieces; the step bar is split into one coloured segment per block with its name
    above the step numbers, and the step panel (and the end panel) shows the current block: its name, which steps it spans and 要什么 → 给什么; the 起手 panel lists the route's blocks.
    With 先猜再看 on, a block's name stays hidden until its first step has been played. The colours come from the service (each block has one), they are not copied here.
+   资源账本 (a 试用 block, from GET /route's steps[].ledger, which the service works out from the engine's state; absent when the service has the ledger switched off, and then the page shows nothing of it): the step panel lists
+   whether this turn's 通常召唤 is used (and in which step), the 「每回合一次」effects in two groups (card name + which effect): the ones used before this step and the ones this step newly used, and how many cards are left in the 额外卡组
+   with the key ones (the extra-deck monsters that give interrupts) and where they are. With 先猜再看 on it is not shown until the step is revealed (it is part of the step panel).
+   展开地图 (a tab made of blocks, MAP_BLOCKS; each block has its own feature switch from GET /routes' features, a block that is off is not shown): the first block is 汇流地铁图 (a 试用 block, GET /subway):
+   start stations (the key card) -> block stations (hubs, where several routes meet) -> one end station per route (its interrupts); the service lays them out (layer / row), this draws buttons and SVG edges.
+   A click on a station opens the route player at that station's step (several routes through it: pick one below the map first). On a phone the map is wider than the screen and scrolls sideways inside its frame.
+   终场倒推 (a 试用 block, GET /endgames): 2-3 target end boards (the service picked them by interrupts and by how often the 500 simulated hands end with those cards); each lists the start card, the end cards that give the interrupts and the blocks to put together,
+   and under each block 缺了怎么补 (opens a list the service derived from the other routes: a block that can take its place, routes that do without it, or routes that avoid it; each one jumps to a route step).
+   决策树 (a 试用 block, GET /tree): answer 是 / 否 to "do you hold X?" one question at a time (the service gives the tree and the wording); the answers so far show as chips, 返回 undoes the last one, a leaf shows the route and opens its player; 整棵树 lists every leaf with the answers that lead to it (a list, not a drawing, so it fits a phone).
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -27,7 +36,7 @@
 import { ROUTES_AREA, SIDEBAR_NAV_AREA, SandboxedFrame } from "@hermes/plugin-sdk";
 import { createElement as h, createContext, useContext, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 
-const TABS = ["卡组一览", "展开路线", "起手速查", "术语表"];
+const TABS = ["卡组一览", "展开路线", "起手速查", "展开地图", "术语表"];
 const ZONE_NAME = { main: "主卡组", extra: "额外卡组" };
 
 const message = (e) => String(e?.message ?? e).replace(/^\d+:\s*/, "");
@@ -39,6 +48,16 @@ function loadImage(rest, code) {
     imageCache.set(code, rest(`/card-image?code=${code}`).then((r) => `data:${r.type};base64,${r.base64}`).catch(() => null));
   }
   return imageCache.get(code);
+}
+// One GET of a path of this plugin's backend: { data, error } (data stays null until it arrives; a failed request gives error and no data)
+function useRest(rest, path) {
+  const [state, setState] = useState({ data: null, error: "" });
+  useEffect(() => {
+    let live = true;
+    rest(path).then((data) => { if (live) setState({ data, error: "" }); }).catch((e) => { if (live) setState({ data: null, error: message(e) }); });
+    return () => { live = false; };
+  }, [rest, path]);
+  return state;
 }
 function CardArt({ rest, code, md, className = "" }) {
   const [src, setSrc] = useState(undefined);
@@ -320,6 +339,30 @@ function BlockList({ blocks }) {
       h(BlockFlow, { block: b }))));
 }
 
+// ---- 资源账本: steps[].ledger { normalSummon: { used, step }, effects: { before: [...], now: [...] } (each { md, label, gist, shared?, step }; before = used on earlier steps, now = first used on this step), extra: { remaining, start, key: [{ md, total, inExtra, elsewhere }] } } ----
+const ZONE_LABEL = { hand: "手牌", monsters: "怪兽区", spellTraps: "魔陷区", grave: "墓地", banished: "除外" };
+function EffectGroup({ kind, title, list, none }) {
+  return h("div", { className: "yg-lg-group", "data-ledger": kind },
+    h("span", { className: "yg-lg-sub" }, `${title} · ${list.length} 个`),
+    list.length ? h("ul", { className: "yg-lg-list" }, list.map((e) => h("li", { key: `${e.code}-${e.label}`, title: e.shared ?? e.gist },
+      h("span", { className: "yg-lg-name" }, `${e.md} ${e.label}`), h("span", { className: "yg-lg-gist" }, e.shared ? `${e.gist}（${e.shared}）` : e.gist))))
+      : h("span", { className: "yg-none" }, none));
+}
+function LedgerCard({ ledger }) {
+  if (!ledger) return null;
+  const { normalSummon, effects, extra } = ledger;
+  const where = (k) => (k.inExtra ? `额外卡组 ${k.inExtra}/${k.total}` : Object.entries(k.elsewhere).map(([z, n]) => `${ZONE_LABEL[z] ?? z} ${n}`).join("、") || "不在");
+  return h("section", { className: "yg-ledger", "aria-label": "资源账本" },
+    h("div", { className: "yg-phd" }, "资源账本"),
+    h("p", { className: "yg-lg-row", "data-ledger": "summon" }, h("b", null, "通常召唤"),
+      h("span", { className: normalSummon.used ? "yg-lg-used" : "yg-lg-free" }, normalSummon.used ? `已用（第 ${normalSummon.step} 步）` : "还没用")),
+    h("div", { className: "yg-lg-row yg-lg-col", "data-ledger": "effects" }, h("b", null, "每回合一次的效果"),
+      h(EffectGroup, { kind: "before", title: "这一步之前已用", list: effects.before, none: "还没有" }),
+      h(EffectGroup, { kind: "now", title: "这一步新用", list: effects.now, none: "这一步没有新用的" })),
+    h("div", { className: "yg-lg-row yg-lg-col", "data-ledger": "extra" }, h("b", null, `额外卡组 · 剩 ${extra.remaining} / ${extra.start} 张`),
+      h("ul", { className: "yg-lg-list" }, extra.key.map((k) => h("li", { key: k.code, className: k.inExtra ? "" : "gone" }, h("span", { className: "yg-lg-name" }, k.md), h("span", { className: "yg-lg-gist" }, where(k)))))));
+}
+
 function StepPanel({ rest, step, total, blocks }) {
   const [tag, color] = stepTag(step);
   const { cost, gain } = tradeRows(step.moves);
@@ -332,6 +375,7 @@ function StepPanel({ rest, step, total, blocks }) {
       h("div", { className: "yg-phd" }, "花了什么"), h("span", null), h("div", { className: "yg-phd" }, "换来什么"),
       h(TradeCol, { rest, rows: cost, side: "cost" }), h("span", { className: "yg-arrow", "aria-hidden": "true" }, "→"), h(TradeCol, { rest, rows: gain, side: "gain" })),
     step.activated.length ? h("p", { className: "yg-act" }, `发动了 ${step.activated.map((c) => c.md).join("、")}`) : null,
+    h(LedgerCard, { ledger: step.ledger }),
     h("div", { className: "yg-phd" }, "中场的卡和它们此刻的作用"),
     h(MidfieldRoles, { rest, roles: step.roles, hand: step.handRoles, n: step.n }),
     h(Piles, { board: step.board }),
@@ -348,6 +392,7 @@ function EndPanel({ rest, end, step, blocks }) {
       h(Thumb, { rest, card: b, w: 52, h: 75 }),
       h("div", { className: "yg-trow-text" }, h("b", null, `${b.md}${b.copies > 1 ? ` ×${b.copies}` : ""}`), h("span", null, `打断 ${b.interrupts}：${b.interruptHow}`)))))
       : h("p", { className: "yg-none" }, "终场没有打断"),
+    h(LedgerCard, { ledger: step.ledger }),
     h("div", { className: "yg-phd" }, "终场里每张卡的作用"),
     h(MidfieldRoles, { rest, roles: step.roles, hand: step.handRoles, n: step.n }),
     h("p", { className: "yg-pile" }, h("u", { style: { color: COLOR.green } }, `剩余手牌 ${end.hand.length} 张`), end.hand.length ? end.hand.map((c) => c.md).join("、") : "—"),
@@ -381,7 +426,7 @@ function GuessPanel({ n, onReveal }) {
       h("span", { className: "yg-lab" }, "按空格或点一下，看这一步")));
 }
 
-function Player({ rest, id, onBack }) {
+function Player({ rest, id, startStep = 0, onBack }) {
   const popup = useCardPopup();
   const [route, setRoute] = useState(null);
   const [anim, setAnim] = useState(null);
@@ -389,7 +434,7 @@ function Player({ rest, id, onBack }) {
   const [animError, setAnimError] = useState("");
   const [roleTip, setRoleTip] = useState(null); // a chip on the board hovered (phone: tapped): { tags, why, rect } in the page's viewport
   // mode: idle | step (one step playing) | auto (连播). 先猜再看: guess = the switch; pending = paused on the prompt for step index + 1; chain = 连播 is on (it stops at every step's prompt)
-  const fresh = () => ({ index: 0, mode: "idle", ready: false, t: 0, mid: false, guess: readGuess(), pending: false, chain: false });
+  const fresh = () => ({ index: startStep, mode: "idle", ready: false, t: 0, mid: false, guess: readGuess(), pending: false, chain: false });
   const shown = (v) => ({ index: v.index, mode: v.mode, ready: v.ready, guess: v.guess, pending: v.pending, chain: v.chain });
   const S = useRef(null); // the same state for the message handlers (mid: paused part-way through a step)
   if (!S.current) S.current = fresh(); // lazily: fresh() reads localStorage
@@ -586,8 +631,8 @@ function RoleTip({ tags, why, rect, onClose }) {
 }
 
 // `loaded` is the shared GET /routes result: { data, error } (data null until it arrives)
-function RoutesView({ rest, loaded, id, setId }) {
-  if (id) return h(Player, { rest, id, onBack: () => setId(null) });
+function RoutesView({ rest, loaded, id, step, setId }) {
+  if (id) return h(Player, { rest, id, startStep: step, onBack: () => setId(null) });
   if (loaded.error) return h("div", { className: "yg-error", role: "alert" }, loaded.error);
   const routes = loaded.data?.routes;
   if (!routes) return h("p", { className: "yg-lab" }, "读取路线…");
@@ -638,12 +683,190 @@ function LookupView({ rest, loaded, onOpen }) {
           h("p", { className: "yg-lab" }, f.how)))) : null)));
 }
 
+// ---- 展开地图: the tab is a list of blocks (MAP_BLOCKS); a later block (终场倒推, 决策树) is one more entry with its own feature switch ----
+// feature: the name in GET /routes' features; a block whose feature is off is not shown (and a map with no block left hides the tab)
+const MAP_BLOCKS = [
+  { id: "subway", title: "汇流地铁图", feature: "subway", View: SubwayBlock },
+  { id: "endgame", title: "终场倒推", feature: "endgame", View: EndgameBlock },
+  { id: "tree", title: "决策树", feature: "tree", View: TreeBlock },
+];
+const mapBlocks = (features) => MAP_BLOCKS.filter((b) => features?.[b.feature] !== false);
+
+function MapView({ rest, loaded, onOpen }) {
+  if (loaded.error) return h("div", { className: "yg-error", role: "alert" }, loaded.error);
+  if (!loaded.data) return h("p", { className: "yg-lab" }, "读取地图…");
+  return h("div", { className: "yg-map" },
+    mapBlocks(loaded.data.features).map((b) => h("section", { key: b.id, className: "yg-mapblock", "data-map-block": b.id, "aria-label": b.title },
+      h("h2", null, b.title),
+      h(b.View, { rest, onOpen }))));
+}
+
+const COL_W = 150, NODE_W = 128, ROW_H = 78, NODE_H = 66, PAD = 8;
+const KIND_NAME = { start: "起手", hub: "枢纽", stop: "中途", end: "终场" };
+
+// 汇流地铁图: the service gives stations (start card -> blocks -> end per route), edges and a layer / row for each; this only draws them
+function SubwayBlock({ rest, onOpen }) {
+  const { data: graph, error } = useRest(rest, "/subway");
+  const [picked, setPicked] = useState(null); // a station with several routes through it: the panel below lists where it can jump
+  const [focus, setFocus] = useState(null); // a route id: its stations and edges stay lit, the rest dim
+  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+  if (!graph) return h("p", { className: "yg-lab" }, "读取地图…");
+  const at = new Map(graph.stations.map((s) => [s.id, s]));
+  const pos = (s) => ({ x: PAD + s.layer * COL_W, y: PAD + s.row * ROW_H });
+  const width = PAD * 2 + (graph.layers - 1) * COL_W + NODE_W, height = PAD * 2 + (graph.rows - 1) * ROW_H + NODE_H;
+  const lit = (routes) => !focus || routes.includes(focus);
+  const click = (s) => {
+    if (s.stops.length === 1) onOpen(s.stops[0].route, s.stops[0].step);
+    else setPicked(picked?.id === s.id ? null : s);
+  };
+  return h("div", { className: "yg-subway-wrap" },
+    h("p", { className: "yg-lab yg-sum" }, "左边是起手卡，中间是几条路线都要经过的积木（汇流的枢纽，卡上写几条路线用它），右边是各路线的终场和打断数。线越粗，走这一段的路线越多。点一站跳到路线播放器里那一步；经过的路线不止一条时，先在图下面选哪条。图宽，窄屏左右滑动。"),
+    h("div", { className: "yg-row wrap yg-focus", role: "group", "aria-label": "只看一条路线" },
+      h("span", { className: "yg-lab" }, "只看"),
+      graph.routes.map((r) => h("button", { key: r.id, className: `yg-chip yg-focus-chip${focus === r.id ? " on" : ""}`, "aria-pressed": String(focus === r.id), onClick: () => setFocus(focus === r.id ? null : r.id) }, r.name))),
+    h("div", { className: "yg-subway-scroll" },
+      h("div", { className: "yg-subway", style: { width, height }, "data-layers": String(graph.layers) },
+        h("svg", { className: "yg-subway-edges", width, height, viewBox: `0 0 ${width} ${height}`, "aria-hidden": "true" },
+          graph.edges.map((e) => {
+            const a = pos(at.get(e.from)), b = pos(at.get(e.to));
+            const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2, mx = (x1 + x2) / 2;
+            return h("path", { key: `${e.from}>${e.to}`, className: `yg-edge${lit(e.routes) ? "" : " dim"}`, "data-edge": `${e.from}>${e.to}`, d: `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`, strokeWidth: Math.min(8, 1.5 + e.routes.length * 0.9) });
+          })),
+        graph.stations.map((s) => {
+          const { x, y } = pos(s);
+          const on = lit(s.stops.map((p) => p.route));
+          return h("button", { key: s.id, className: `yg-station ${s.kind}${on ? "" : " dim"}${picked?.id === s.id ? " sel" : ""}`, "data-station": s.id, "data-kind": s.kind, "data-stops": String(s.stops.length),
+            style: { left: x, top: y, width: NODE_W, height: NODE_H, "--blk": s.color ?? "#bdbdbd" }, onClick: () => click(s),
+            "aria-label": `${KIND_NAME[s.kind]}站：${s.label}${s.kind === "end" ? `，${s.interrupts} 个打断` : s.stops.length > 1 ? `，${s.stops.length} 条路线经过` : ""}` },
+            h("span", { className: "yg-st-kind" }, s.kind === "hub" ? `枢纽 · ${s.stops.length} 条路线` : s.kind === "end" ? `终场 · ${s.label.split("｜")[0]}` : KIND_NAME[s.kind]),
+            h("span", { className: "yg-st-name" }, s.kind === "end" ? s.label.split("｜").slice(1).join("｜") || s.label : s.label),
+            s.kind === "end" ? h("span", { className: "yg-st-int" }, `${s.interrupts} 个打断`) : null);
+        }))),
+    picked ? h("aside", { className: "yg-picked", "aria-label": "这一站的详情", "data-station": picked.id },
+      h("div", { className: "yg-title" }, picked.label),
+      picked.kind === "hub" || picked.kind === "stop" ? h("div", { className: "yg-blk-flow" },
+        h("div", null, h("span", { className: "yg-lab" }, "要什么"), h("p", null, picked.needs)), h("span", { className: "yg-arrow" }, "→"),
+        h("div", null, h("span", { className: "yg-lab" }, "给什么"), h("p", null, picked.gives))) : null,
+      h("p", { className: "yg-lab" }, "跳到哪条路线的哪一步"),
+      h("div", { className: "yg-jumps" }, picked.stops.map((p) => h("button", { key: p.route, className: "yg-jump", "data-route-id": p.route, "data-step": String(p.step), onClick: () => onOpen(p.route, p.step), "aria-label": `打开路线 ${p.routeName} 第 ${p.step} 步` },
+        h("span", { className: "yg-title" }, p.routeName), h("span", { className: "yg-chip" }, `第 ${p.step} 步`))))) : null);
+}
+
+// ---- 终场倒推 (a 试用 block, GET /endgames): { hands, endgames: [{ id, name, interrupts, seen, route, start, keyCards, blocks (each with missing: swaps / skips / without), alsoRoutes }] }; the service works out what makes up for a missing block ----
+function Pointer({ route, step, onOpen, note }) {
+  return h("button", { className: "yg-jump yg-eg-jump", "data-route-id": route.id, "data-step": String(step), onClick: () => onOpen(route.id, step), "aria-label": `打开路线 ${route.name} 第 ${step} 步` },
+    h("span", { className: "yg-title" }, route.name),
+    h("span", { className: "yg-row wrap" }, h("span", { className: "yg-chip" }, `第 ${step} 步`), note ?? null));
+}
+
+function MissingHelp({ block, onOpen }) {
+  const m = block.missing;
+  return h("div", { className: "yg-eg-help", "data-missing-of": block.id },
+    m.swaps.map((w) => h("div", { key: w.block.id, className: "yg-eg-opt", "data-kind": "swap" },
+      h("p", null, h("span", { className: "yg-chip on" }, "换一块"), " ", h("b", { style: { color: w.block.color } }, w.block.name), h("span", { className: "yg-lab" }, " 放在同一个位置（前后的积木一样）")),
+      h(BlockFlow, { block: w.block }),
+      h("div", { className: "yg-jumps" }, w.routes.map((r) => h(Pointer, { key: r.id, route: r, step: r.step, onOpen, note: h("span", { className: "yg-chip" }, `起手 ${r.needs.md}`) }))))),
+    m.skips.map((k) => h("div", { key: "skip", className: "yg-eg-opt", "data-kind": "skip" },
+      h("p", null, h("span", { className: "yg-chip on" }, "跳过它"), h("span", { className: "yg-lab" }, k.next ? ` 这些路线不用这块，前一块做完直接接「${k.next.name}」` : " 这些路线在前一块做完就收尾，改用它们的终场")),
+      h("div", { className: "yg-jumps" }, k.routes.map((r) => h(Pointer, { key: r.id, route: r, step: r.step, onOpen, note: h("span", { className: "yg-chip" }, `起手 ${r.needs.md}`) }))))),
+    m.without.length ? h("div", { className: "yg-eg-opt", "data-kind": "without" },
+      h("p", null, h("span", { className: "yg-chip on" }, "改走别的路线"), h("span", { className: "yg-lab" }, " 数据里没有能替它的积木，下面这些路线不用它（终场打断数高的在前）")),
+      h("div", { className: "yg-jumps" }, m.without.map((r) => h(Pointer, { key: r.id, route: r, step: 1, onOpen, note: h("span", { className: "yg-chip" }, `终场打断 ${r.interrupts} · 起手 ${r.needs.md}`) })))) : null);
+}
+
+function EndgameBlock({ rest, onOpen }) {
+  const { data, error } = useRest(rest, "/endgames");
+  const [open, setOpen] = useState(() => new Set()); // "终场id:积木id" of the blocks whose 「缺了怎么补」 is showing
+  const { bind } = useCardPopup();
+  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+  if (!data) return h("p", { className: "yg-lab" }, "读取终场…");
+  const toggle = (key) => setOpen((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  return h("div", { className: "yg-eg-wrap" },
+    h("p", { className: "yg-lab yg-sum" }, `从目标终场倒着看：打断最多、又常出现的几个终场（挑法：各路线的终场按提供打断的卡合并，先比打断数，再比 ${data.hands} 手随机起手里最好终场含这几张卡的手数）。每个终场列出要的起手卡、终场要留在场上的卡、要拼的积木；缺哪一块，点「缺了怎么补」，看别的路线里有什么能顶上。`),
+    data.endgames.map((e) => h("section", { key: e.id, className: "yg-eg", "data-endgame": e.id, "aria-label": e.name },
+      h("div", { className: "yg-eg-head" },
+        h("h3", { className: "yg-title" }, e.name),
+        h("span", { className: "yg-row wrap" },
+          h("span", { className: "yg-chip on" }, `终场打断 ${e.interrupts}`),
+          h("span", { className: "yg-chip" }, `${data.hands} 手模拟里 ${e.seen} 手的终场有这几张`),
+          h("span", { className: "yg-chip" }, `路线 ${e.route.name.split("｜").slice(1).join("｜") || e.route.name}`))),
+      h("div", { className: "yg-eg-sec" },
+        h("div", { className: "yg-phd" }, "关键卡"),
+        h("div", { className: "yg-eg-cards" },
+          h("div", { className: "yg-eg-card", "data-card-code": String(e.start.code) },
+            h("span", { className: "yg-eg-art", ...bind(e.start.code, e.start.md) }, h(CardArt, { rest, code: e.start.code, md: e.start.md })),
+            h("span", { className: "yg-col" }, h("span", { className: "yg-chip on" }, "起手"), h("b", null, e.start.md), h("span", { className: "yg-lab" }, "这条路线要它在起手的 5 张里"))),
+          e.keyCards.map((c) => h("div", { key: c.code, className: "yg-eg-card", "data-card-code": String(c.code) },
+            h("span", { className: "yg-eg-art", ...bind(c.code, c.md) }, h(CardArt, { rest, code: c.code, md: c.md })),
+            h("span", { className: "yg-col" }, h("span", { className: "yg-chip" }, "终场打断"), h("b", null, c.md), h("span", { className: "yg-lab" }, c.interruptHow)))))),
+      h("div", { className: "yg-eg-sec" },
+        h("div", { className: "yg-phd" }, `要拼的 ${e.blocks.length} 块积木（按先后）`),
+        h("ol", { className: "yg-eg-blocks" }, e.blocks.map((b) => {
+          const key = `${e.id}:${b.id}`;
+          const on = open.has(key);
+          return h("li", { key: b.id, className: "yg-eg-blk", "data-block": b.id, style: { "--blk": b.color } },
+            h("div", { className: "yg-blk-head" },
+              h("b", { className: "yg-blk-name" }, b.name),
+              h("span", { className: "yg-lab" }, `${rangeText(b)} · ${b.usedBy} 条路线用`)),
+            h(BlockFlow, { block: b }),
+            h("div", { className: "yg-row wrap" },
+              h("button", { className: `yg-btn small${on ? " on" : ""}`, "aria-expanded": String(on), "data-missing": key, onClick: () => toggle(key) }, on ? "收起" : "缺了怎么补"),
+              h("button", { className: "yg-btn small", onClick: () => onOpen(e.route.id, b.from), "aria-label": `在路线 ${e.route.name} 里看「${b.name}」` }, "看这一块的步骤")),
+            on ? h(MissingHelp, { block: b, onOpen }) : null);
+        }))),
+      e.alsoRoutes.length ? h("p", { className: "yg-lab" }, `走到同一组打断的还有：${e.alsoRoutes.map((r) => r.name).join("、")}`) : null,
+      h("div", { className: "yg-row" }, h("button", { className: "yg-btn small", onClick: () => onOpen(e.route.id, 0) }, `打开路线：${e.route.name}`)))));
+}
+
+// ---- 决策树 (a 试用 block, GET /tree): { root, leaves }; a question node { id, card, question, yes, no }, a leaf { id, route }; leaves is the flat list with the answers that lead to each ----
+function TreeBlock({ rest, onOpen }) {
+  const { data: tree, error } = useRest(rest, "/tree");
+  const [mode, setMode] = useState("ask"); // ask = one question at a time, all = every leaf with its answers
+  const [answers, setAnswers] = useState([]); // true / false for each question answered so far
+  const { bind } = useCardPopup();
+  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+  if (!tree) return h("p", { className: "yg-lab" }, "读取决策树…");
+  const trail = []; // the questions on the way to the current node
+  let node = tree.root;
+  for (const a of answers) { trail.push({ q: node, has: a }); node = a ? node.yes : node.no; }
+  const leaf = node.route ? node : null;
+  const answer = (has) => setAnswers([...answers, has]);
+  return h("div", { className: "yg-tree" },
+    h("p", { className: "yg-lab yg-sum" }, `不用记 ${new Set(tree.leaves.map((l) => l.route.id)).size} 条路线的区别：按手里的牌回答是 / 否，只问真正分岔的地方。只看起手 5 张里有没有这几张卡；到了路线再看它要凑齐哪些起手卡。`),
+    h("div", { className: "yg-row wrap", role: "group", "aria-label": "看法" },
+      h("button", { className: `yg-chip yg-tree-mode${mode === "ask" ? " on" : ""}`, "aria-pressed": String(mode === "ask"), "data-tree-mode": "ask", onClick: () => setMode("ask") }, "一问一答"),
+      h("button", { className: `yg-chip yg-tree-mode${mode === "all" ? " on" : ""}`, "aria-pressed": String(mode === "all"), "data-tree-mode": "all", onClick: () => setMode("all") }, "整棵树")),
+    mode === "all"
+      ? h("ol", { className: "yg-tree-all", "aria-label": "整棵树：每个叶子和走到它的回答" }, tree.leaves.map((l) => h("li", { key: l.id, className: "yg-tree-leaf", "data-leaf": l.id, "data-route-id": l.route.id },
+        h("div", { className: "yg-row wrap" }, l.path.map((p, i) => h("span", { key: i, className: `yg-chip yg-tree-ans${p.has ? " on" : ""}` }, `${p.has ? "有" : "没有"} ${p.card.md}`))),
+        h(JumpButton, { route: l.route, onOpen }))))
+      : h("div", { className: "yg-tree-ask" },
+        trail.length ? h("div", { className: "yg-row wrap yg-tree-trail", "aria-label": "已经回答的" }, trail.map((t, i) => h("span", { key: i, className: `yg-chip yg-tree-ans${t.has ? " on" : ""}` }, `${t.has ? "有" : "没有"} ${t.q.card.md}`))) : null,
+        leaf
+          ? h("section", { className: "yg-tree-result", "data-leaf": leaf.id, "aria-label": "走到的路线" },
+            h("div", { className: "yg-phd" }, "照这条路线展开"),
+            h(JumpButton, { route: leaf.route, onOpen, extra: h("span", { className: "yg-chip" }, `起手 ${leaf.route.needs.md}`) }),
+            h("p", { className: "yg-lab" }, "点路线进播放器，从起手开始一步步看。"))
+          : h("section", { className: "yg-tree-q", "data-node": node.id || "root", "aria-label": "现在这一问" },
+            h("div", { className: "yg-tree-qrow" },
+              h("span", { className: "yg-eg-art", ...bind(node.card.code, node.card.md) }, h(CardArt, { rest, code: node.card.code, md: node.card.md })),
+              h("p", { className: "yg-tree-qtext" }, node.question)),
+            h("div", { className: "yg-row" },
+              h("button", { className: "yg-btn yg-tree-yes", onClick: () => answer(true) }, "是"),
+              h("button", { className: "yg-btn yg-tree-no", onClick: () => answer(false) }, "否"))),
+        h("div", { className: "yg-row" },
+          h("button", { className: "yg-btn small yg-tree-back", disabled: !answers.length, onClick: () => setAnswers(answers.slice(0, -1)) }, "返回上一题"),
+          h("button", { className: "yg-btn small yg-tree-reset", disabled: !answers.length, onClick: () => setAnswers([]) }, "重新开始"))));
+}
+
 function YugiohApp({ rest, setDeckInfo }) {
   const [tab, setTab] = useState(TABS[0]);
   const [deck, setDeck] = useState(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
-  const [routeId, setRouteId] = useState(null); // the route open in 展开路线 (null = the list); 起手速查 sets it to jump there
+  const [routeId, setRouteId] = useState(null); // the route open in 展开路线 (null = the list); 起手速查 and 展开地图 set it to jump there
+  const [routeStep, setRouteStep] = useState(0); // the step the player opens on (0 = 起手; 展开地图 jumps to a station's step)
+  const openRoute = (id, step = 0) => { setRouteStep(step); setRouteId(id); setTab("展开路线"); };
   const [routes, setRoutes] = useState({ data: null, error: "" }); // one GET /routes shared by 展开路线 and 起手速查 (a 503 shows only in those two tabs)
   useEffect(() => {
     rest("/routes").then((data) => setRoutes({ data, error: "" })).catch((e) => setRoutes({ data: null, error: message(e) }));
@@ -655,14 +878,17 @@ function YugiohApp({ rest, setDeckInfo }) {
     })();
   }, [rest]);
 
+  // 展开地图 hides when every block in it is switched off (the service says which: GET /routes features)
+  const tabs = TABS.filter((t) => t !== "展开地图" || mapBlocks(routes.data?.features).length > 0);
   let main = null;
-  if (tab === "展开路线") main = h(RoutesView, { rest, loaded: routes, id: routeId, setId: setRouteId });
-  else if (tab === "起手速查") main = h(LookupView, { rest, loaded: routes, onOpen: (id) => { setRouteId(id); setTab("展开路线"); } });
+  if (tab === "展开路线") main = h(RoutesView, { rest, loaded: routes, id: routeId, step: routeStep, setId: (id) => { setRouteStep(0); setRouteId(id); } });
+  else if (tab === "起手速查") main = h(LookupView, { rest, loaded: routes, onOpen: (id) => openRoute(id) });
+  else if (tab === "展开地图") main = h(MapView, { rest, loaded: routes, onOpen: openRoute });
   else if (tab === "术语表") main = deck ? h(GlossaryView, { deck }) : null;
   else if (deck) main = h(DeckView, { rest, deck });
   return h("div", { className: "yg", "data-ready": ready ? "true" : "false" },
     h("header", { className: "yg-head" }, h("h1", null, "游戏王 · 烙印教程"),
-      h("nav", { className: "yg-tabs" }, TABS.map((t) => h("button", { key: t, className: `yg-tab${tab === t ? " on" : ""}`, onClick: () => setTab(t) }, t)))),
+      h("nav", { className: "yg-tabs" }, tabs.map((t) => h("button", { key: t, className: `yg-tab${tab === t ? " on" : ""}`, onClick: () => setTab(t) }, t)))),
     error ? h("div", { className: "yg-error", role: "alert" }, error) : null,
     main);
 }
@@ -816,6 +1042,15 @@ const CSS = `
 .yg-brow .yg-trow-text span { font-size: 12.5px; line-height: 1.5; font-weight: 400; letter-spacing: 0; color: #c7c7cd; }
 .yg-none { color: #4a4a52; font-size: 20px; padding-left: 12px; }
 .yg-act { font-size: 12px; color: #bdbdbd; }
+.yg-ledger { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 8px 12px; border-left: 4px solid #6b6b72; min-width: 0; }
+.yg-lg-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; color: #e2e2e6; min-width: 0; }
+.yg-lg-col { flex-direction: column; align-items: stretch; gap: 4px; }
+.yg-lg-used { color: #ffb020; font-weight: 700; } .yg-lg-free { color: #7dd87d; font-weight: 700; }
+.yg-lg-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.yg-lg-list li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 8px; font-size: 12px; line-height: 1.5; color: #bdbdbd; min-width: 0; }
+.yg-lg-group { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .yg-lg-sub { font-size: 12px; font-weight: 700; color: #9a9aa2; }
+.yg-lg-group[data-ledger="now"] .yg-lg-list li { color: #fff; } .yg-lg-group[data-ledger="now"] .yg-lg-sub { color: #c8ff3d; } .yg-lg-list li.gone .yg-lg-gist { color: #ffb020; }
+.yg-lg-name { font-weight: 700; color: #e2e2e6; overflow-wrap: anywhere; }
 .yg-hand { display: flex; flex-wrap: wrap; gap: 8px; }
 .yg-hc { width: 70px; display: flex; flex-direction: column; gap: 6px; }
 .yg-hc .yg-roles { justify-content: flex-start; }
@@ -834,8 +1069,57 @@ const CSS = `
 .yg-guess { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; text-align: left; padding: 28px 20px; border: 2px dashed #c8ff3d; border-radius: 8px; background: #000; min-height: 140px; justify-content: center; }
 .yg-guess-q { font-size: 22px; font-weight: 700; line-height: 1.4; }
 .yg-btn.on { background: #c8ff3d; color: #000; border-color: #c8ff3d; }
+.yg-map { display: flex; flex-direction: column; gap: 28px; }
+.yg-mapblock { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.yg-mapblock h2 { font-size: 16px; color: #c8ff3d; }
+.yg-subway-wrap { display: flex; flex-direction: column; gap: 12px; min-width: 0; max-width: 100%; }
+.yg-focus { gap: 6px; }
+.yg-focus-chip { background: none; cursor: pointer; padding: 5px 10px; font-size: 12px; }
+.yg-focus-chip.on { background: #c8ff3d; border-color: #c8ff3d; color: #000; font-weight: 600; }
+.yg-subway-scroll { overflow-x: auto; max-width: 100%; border: 1px solid #1f1f1f; border-radius: 8px; padding: 6px; -webkit-overflow-scrolling: touch; }
+.yg-subway { position: relative; }
+.yg-subway-edges { position: absolute; left: 0; top: 0; pointer-events: none; }
+.yg-edge { fill: none; stroke: #5b6b2a; stroke-linecap: round; opacity: .85; }
+.yg-edge.dim { opacity: .12; }
+.yg-station { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 8px 4px 10px; text-align: left; border: 1px solid #3a3a3a; border-left: 5px solid var(--blk); border-radius: 6px; background: #0b0b0b; overflow: hidden; }
+.yg-station:hover, .yg-station.sel { border-color: #c8ff3d; border-left-color: var(--blk); }
+.yg-station.dim { opacity: .25; }
+.yg-station.start { border-left-color: #c8ff3d; background: #12170a; }
+.yg-station.end { border-left-color: #facc15; background: #17140a; }
+.yg-station.stop { border-style: dashed; }
+.yg-st-kind { font-size: 10px; color: #bdbdbd; line-height: 1.2; }
+.yg-st-name { font-size: 12px; font-weight: 600; line-height: 1.25; color: #ececec; }
+.yg-st-int { font-size: 11px; font-weight: 700; color: #facc15; }
+.yg-eg-wrap { display: flex; flex-direction: column; gap: 14px; max-width: 900px; min-width: 0; }
+.yg-eg { display: flex; flex-direction: column; gap: 14px; padding: 14px; border: 1px solid #2a2a2a; border-radius: 8px; min-width: 0; }
+.yg-eg-head { display: flex; flex-direction: column; gap: 8px; }
+.yg-eg-head h3 { margin: 0; font-size: 16px; line-height: 1.4; }
+.yg-eg-sec { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.yg-eg-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 10px; }
+.yg-eg-card { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.yg-eg-card .yg-col { gap: 4px; align-items: flex-start; }
+.yg-eg-card .yg-lab { line-height: 1.5; }
+.yg-eg-art { width: 46px; flex: none; aspect-ratio: 59 / 86; }
+.yg-eg-blocks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.yg-eg-blk { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 8px 12px; border-left: 4px solid var(--blk); min-width: 0; }
+.yg-eg-help { display: flex; flex-direction: column; gap: 12px; padding: 10px 12px; border: 1px dashed #3a3a3a; border-radius: 6px; min-width: 0; }
+.yg-eg-opt { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.yg-eg-opt > p { line-height: 1.7; }
+.yg-eg-jump { padding: 8px 10px; }
+.yg-tree { display: flex; flex-direction: column; gap: 14px; max-width: 760px; min-width: 0; }
+.yg-tree-ask { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.yg-tree-q, .yg-tree-result { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid #c8ff3d; border-radius: 8px; min-width: 0; }
+.yg-tree-qrow { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.yg-tree-qrow .yg-eg-art { width: 56px; }
+.yg-tree-qtext { margin: 0; font-size: 18px; line-height: 1.5; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.yg-tree-yes, .yg-tree-no { min-width: 96px; padding: 10px 18px; font-size: 16px; }
+.yg-tree-ans.on { border-color: #c8ff3d; }
+.yg-tree-all { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.yg-tree-leaf { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid #2a2a2a; border-radius: 8px; min-width: 0; }
+.yg-picked { border: 1px solid #c8ff3d; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
 @media (max-width: 760px) {
   .yg { padding: 12px; }
+  .yg-row.yg-focus { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; } .yg-focus-chip { flex: none; }
   .yg-head h1 { font-size: 16px; }
   .yg-tabs { margin-left: 0; width: 100%; } .yg-tab { flex: 1; padding: 6px 4px; }
   .yg-deck { grid-template-columns: minmax(0, 1fr); }

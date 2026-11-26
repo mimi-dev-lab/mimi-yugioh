@@ -29,6 +29,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   let endEvents = null; // 我方回合结束那一刻 events 有几条；之后（对手回合）的消息不算
   const used = []; // 我方发动过、之后没离开那一格的效果 { code, description, zone, sequence }（description 是效果描述号，同提示里选项的 description）；终场带一份，打断数据此去掉自己回合锁住的效果
   let endUsed = null; // 我方回合结束那一刻的 used
+  const activations = []; // 我方每次发动效果的记录 { code, description, zone（从哪个区发动）}（不随卡离场作废：「每回合一次」按卡名算，卡去了墓地也还是用过），按发动顺序；资源账本按它算
 
   function build() {
     if (handle) core.destroyDuel(handle);
@@ -52,6 +53,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     endBoard = null;
     normalSummonUsed = false;
     activated.length = 0;
+    activations.length = 0;
     events.length = 0;
     endEvents = null;
     used.length = 0;
@@ -118,7 +120,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
         trackUsed(m);
         if (m.type === M.SUMMONING && m.controller === 0) normalSummonUsed = true;
         if (m.type === M.SET && m.controller === 0 && m.location === L.MZONE) normalSummonUsed = true;
-        if (m.type === M.CHAINING && m.triggering_controller === 0) activated.push(m.code);
+        if (m.type === M.CHAINING && m.triggering_controller === 0) { activated.push(m.code); activations.push({ code: m.code, description: String(m.description), zone: zoneNameOf(m.location) }); }
         if (m.type === M.HINT && m.player === 0 && m.hint_type === 3) lastHint = Number(m.hint); // HINT_SELECTMSG：下一个选卡提示是干什么的（constant.lua 的 HINTMSG_*）
       }
       if (!endBoard && messages.some((m) => m.type === M.NEW_TURN && m.player === 1)) endBoard = { ...snapshot(), used: endUsed };
@@ -247,6 +249,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     get events() { return events.slice(0, endEvents ?? events.length); },
     get normalSummonUsed() { return normalSummonUsed; },
     get activated() { return [...activated]; },
+    // 我方每次发动效果 { code, description, zone }，不随离场作废
+    get activations() { return activations.map((a) => ({ ...a })); },
     // 我方回合结束那一刻的场面（对手回合开始时记下），没结束是 null；回合结束后的抽牌不算在里面
     get endBoard() { return endBoard; },
     // 存档：记下现在走到第几个选择；回滚：同样的种子重放到那里，合法选项和存档时一致

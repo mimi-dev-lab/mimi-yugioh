@@ -37,12 +37,12 @@ const viewKey = (o) => (o.mobile ? 'mobile' : o.design ? 'design' : 'desktop');
 const VIEWS = { mobile: { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }, design: { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false }, desktop: { width: 1600, height: 900, deviceScaleFactor: 1, mobile: false } };
 // 一张截图从新开的页面走到它要的样子经过的点击（页签、选卡、速查跳转、路线），步数另算；下一张能不能接着这张走就看这个前缀
 const pathOf = (o) => {
-  const tab = o.jump ? '起手速查' : o.route && (!o.tab || o.tab === '卡组一览') ? '展开路线' : (o.tab || '卡组一览');
-  return [tab !== '卡组一览' && `tab:${tab}`, o.select && `select:${o.select}`, o.jump && `jump:${o.jump}`, o.route && `route:${o.route}`].filter(Boolean);
+  const tab = o.station ? '展开地图' : o.jump ? '起手速查' : o.route && (!o.tab || o.tab === '卡组一览') ? '展开路线' : (o.tab || '卡组一览');
+  return [tab !== '卡组一览' && `tab:${tab}`, o.select && `select:${o.select}`, o.jump && `jump:${o.jump}`, o.station && `station:${o.station}:${o.stop ?? ''}`, o.route && `route:${o.route}`].filter(Boolean);
 };
 const stepOf = (o) => (o.step === 'last' ? Infinity : o.step === undefined || o.step === null || o.step === '起手' ? 0 : Number(o.step));
 // 做过这些动作的页面不再给下一张接着用：它们改了页面状态（弹窗、动画跳步、连播、本地存储里的开关、滚动、并排图换了页面），不是「从头点到这」的样子
-const DIRTY = ['clickStep', 'playAll', 'guess', 'nextMid', 'stageAt', 'hover', 'tap', 'hoverAnim', 'tapAnim', 'hoverRole', 'tapRole', 'close', 'compare', 'clipStage'];
+const DIRTY = ['clickStep', 'playAll', 'guess', 'nextMid', 'stageAt', 'hover', 'tap', 'hoverAnim', 'tapAnim', 'hoverRole', 'tapRole', 'close', 'compare', 'clipStage', 'expand', 'tree'];
 // 手机宽选卡开的是弹窗（桌面宽是页面里的说明区）：弹窗开着的页面也不接着用
 const dirtying = (o) => DIRTY.some((k) => o[k] !== undefined && o[k] !== null && o[k] !== false) || (o.mobile && !!o.select);
 function canContinue(page, o) {
@@ -176,6 +176,33 @@ async function main() {
       if (!(await clickButton(opts.tab))) throw new Error(`页面上没有页签「${opts.tab}」`);
       await until((t) => [...document.querySelectorAll('.yg-tab.on')].some((b) => b.innerText === t), opts.tab, 10000, `「${opts.tab}」页签打开`);
     }
+    if (opts.tab === '展开地图') await until(() => document.querySelectorAll('.yg-subway .yg-station').length > 0, null, 30000, '地铁图出来').catch(fail);
+    if (opts.tab === '展开地图') await until(() => document.querySelectorAll('.yg-eg').length > 0, null, 8000, '终场倒推出来').catch(() => {}); // 终场倒推关了就没有这块，等不到不算错（要点它的 --expand 自己会报错）
+    // 终场倒推：点开「缺了怎么补」（--expand 终场id:积木id，逗号分隔几个）
+    for (const key of opts.expand ? String(opts.expand).split(',') : []) {
+      if (opts.tab !== '展开地图') throw new Error('--expand 要和 --tab 展开地图 一起用');
+      const hit = await evaluate((k) => { const b = [...document.querySelectorAll('button[data-missing]')].find((x) => x.dataset.missing === k); if (!b) return false; b.click(); return true; }, key);
+      if (!hit) await fail(new Error(`终场倒推里没有「${key}」的「缺了怎么补」按钮`));
+      await until((k) => { const li = [...document.querySelectorAll('.yg-eg-blk')].find((x) => x.querySelector(`button[data-missing="${k}"]`)); return !!li?.querySelector('.yg-eg-help .yg-eg-opt'); }, key, 10000, `「${key}」的补法出来`).catch(fail);
+    }
+    // 决策树：--tree 是,否,…（一问一答里依次点是 / 否）或 --tree 整棵树（切到整棵树的列表）
+    if (opts.tree !== undefined && opts.tree !== null) {
+      if (opts.tab !== '展开地图') throw new Error('--tree 要和 --tab 展开地图 一起用');
+      await until(() => document.querySelectorAll('.yg-tree').length > 0, null, 10000, '决策树出来').catch(fail);
+      if (String(opts.tree) === '整棵树') {
+        await evaluate(() => document.querySelector('button[data-tree-mode="all"]').click());
+        await until(() => document.querySelectorAll('.yg-tree-leaf').length > 0, null, 5000, '整棵树的叶子出来').catch(fail);
+      } else {
+        for (const a of String(opts.tree).split(',').map((x) => x.trim()).filter(Boolean)) {
+          const before = await evaluate(() => document.querySelectorAll('.yg-tree-ans').length);
+          const hit = await evaluate((yes) => { const b = document.querySelector(yes ? '.yg-tree-yes' : '.yg-tree-no'); if (!b) return false; b.click(); return true; }, a === '是');
+          if (!hit) await fail(new Error(`决策树已经到叶子，没有「${a}」可点`));
+          await until((n) => document.querySelectorAll('.yg-tree-ans').length === n + 1, before, 5000, `回答「${a}」后下一步出来`).catch(fail);
+        }
+      }
+    }
+    // 决策树：展开地图的其他块很长，把决策树顶到页面上方（别的块先藏起来，截图和量高度都只看这一块）
+    if (opts.tree !== undefined && opts.tree !== null) await evaluate(() => { for (const b of document.querySelectorAll('.yg-mapblock')) if (b.dataset.mapBlock !== 'tree') b.style.display = 'none'; });
     // 卡组一览里点一张卡（按卡名：aria-label），等说明区出这张卡
     if (opts.select && !did.has(`select:${opts.select}`)) {
       const clicked = await evaluate((n) => { const b = [...document.querySelectorAll('.yg-deck button.yg-tile')].find((x) => x.getAttribute('aria-label') === n); if (!b) return false; b.click(); return true; }, opts.select);
@@ -191,6 +218,21 @@ async function main() {
       if (!jumped) await fail(new Error(`速查里没有指向「${opts.jump}」的路线`));
       await until(() => !!document.querySelector('.yg-player') && [...document.querySelectorAll('.yg-tab.on')].some((b) => b.innerText === '展开路线'), null, 60000, '跳到展开路线的播放页').catch(fail);
     }
+    // 展开地图：点图上的一站（data-station）；这一站有好几条路线经过时，图下面列出可跳的路线，再点 --stop 指的那一条；应当跳到「展开路线」页签里那条路线的播放页，停在这一站的步（data-step 记在 json 的 mapJump）
+    let mapJump = null;
+    if (opts.station && !did.has(`station:${opts.station}:${opts.stop ?? ''}`)) {
+      if (opts.tab !== '展开地图') throw new Error('--station 要和 --tab 展开地图 一起用');
+      await until(() => document.querySelectorAll('.yg-subway .yg-station').length > 0, null, 30000, '地铁图出来').catch(fail);
+      const hit = await evaluate((id) => { const b = [...document.querySelectorAll('.yg-subway .yg-station')].find((x) => x.dataset.station === id); if (!b) return null; const stops = Number(b.dataset.stops); b.click(); return { stops }; }, opts.station);
+      if (!hit) await fail(new Error(`地铁图里没有站「${opts.station}」`));
+      if (hit.stops > 1) {
+        if (!opts.stop) await fail(new Error(`站「${opts.station}」有 ${hit.stops} 条路线经过，要用 --stop 指一条`));
+        await until(() => !!document.querySelector('.yg-picked'), null, 10000, '这一站的详情出来').catch(fail);
+        mapJump = await evaluate((r) => { const b = [...document.querySelectorAll('.yg-picked .yg-jump')].find((x) => x.dataset.routeId === r); if (!b) return null; b.click(); return { route: r, step: Number(b.dataset.step) }; }, opts.stop);
+        if (!mapJump) await fail(new Error(`站「${opts.station}」的详情里没有路线「${opts.stop}」`));
+      }
+      await until(() => !!document.querySelector('.yg-player') && [...document.querySelectorAll('.yg-tab.on')].some((b) => b.innerText === '展开路线'), null, 60000, '跳到展开路线的播放页').catch(fail);
+    }
     if (opts.route && !did.has(`route:${opts.route}`)) {
       if ((!opts.tab || opts.tab === '卡组一览') && !did.has('tab:展开路线')) {
         if (!(await clickButton('展开路线'))) throw new Error('页面上没有页签「展开路线」');
@@ -202,7 +244,7 @@ async function main() {
       await until(() => !!document.querySelector('.yg-player'), null, 60000, '播放页出来').catch(fail);
     }
     // 播放页的动画框架就绪（路线动画页装好、播放器 ready）才算打开
-    if (opts.route || opts.jump) await until(() => document.querySelector('.yg-player')?.dataset.ready === 'true', null, 120000, '路线动画就绪').catch(fail);
+    if (opts.route || opts.jump || opts.station) await until(() => document.querySelector('.yg-player')?.dataset.ready === 'true', null, 120000, '路线动画就绪').catch(fail);
     const idle = (ms = 60000) => until(() => document.querySelector('.yg-player').dataset.mode === 'idle', null, ms, '动画播完停住');
     if (opts.step) {
       if (!opts.route && !opts.jump) throw new Error('--step 要和 --route 或 --jump 一起用');
@@ -349,7 +391,7 @@ async function main() {
       setTimeout(() => resolve(null), 8000);
     }));
     let stage = null;
-    if (opts.route || opts.jump) {
+    if (opts.route || opts.jump || opts.station) {
       const r = await stageRects();
       if (r) {
         const scale = r.cards[0] ? r.cards[0].rect.w / 80 : 1; // 动画缩放：卡宽 80 px 在页面里有多宽
@@ -420,13 +462,40 @@ async function main() {
       const first = btns[0].getBoundingClientRect();
       return { clear: hidden.length === 0, hidden, firstTop: first.top, firstBottom: first.bottom };
     });
+    // 展开地图的地铁图：站数、图的宽和外框的宽（窄屏图比外框宽，在框里左右滑，页面本身不出横向滚动条）、每个站都在图的范围里
+    const map = await evaluate(() => {
+      const g = document.querySelector('.yg-subway'), box = document.querySelector('.yg-subway-scroll');
+      if (!g) return null;
+      const gr = g.getBoundingClientRect();
+      const outside = [...g.querySelectorAll('.yg-station')].filter((st) => { const r = st.getBoundingClientRect(); return r.left < gr.left - 1 || r.right > gr.right + 1 || r.top < gr.top - 1 || r.bottom > gr.bottom + 1; }).map((st) => st.dataset.station);
+      const stations = [...g.querySelectorAll('.yg-station')];
+      const ends = stations.filter((st) => st.dataset.kind === 'end').length;
+      return { stations: stations.length, ends, edges: g.querySelectorAll('.yg-edge').length, graphWidth: gr.width, boxWidth: box.clientWidth, outside, scrolls: box.scrollWidth > box.clientWidth + 1 };
+    });
+    // 终场倒推：几个目标、每个的积木数和关键卡数、点开的补法数（每个补法至少一个跳转）、有没有东西画出了卡片框
+    const endgame = await evaluate(() => {
+      const secs = [...document.querySelectorAll('.yg-eg')];
+      if (!secs.length) return null;
+      const outside = secs.flatMap((sec) => { const r = sec.getBoundingClientRect(); return [...sec.querySelectorAll('*')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.right > r.right + 1 || b.left < r.left - 1); }).slice(0, 3).map((e) => `${sec.dataset.endgame}:${e.className}`); });
+      return { sections: secs.length, interrupts: secs.map((x) => x.querySelector('.yg-chip.on').innerText), blocks: secs.map((x) => x.querySelectorAll('.yg-eg-blk').length), keyCards: secs.map((x) => x.querySelectorAll('.yg-eg-card').length),
+        expanded: [...document.querySelectorAll('.yg-eg-help')].map((x) => ({ of: x.dataset.missingOf, options: [...x.querySelectorAll('.yg-eg-opt')].map((o) => ({ kind: o.dataset.kind, jumps: o.querySelectorAll('.yg-eg-jump').length })) })), outside };
+    });
+    // 决策树：现在的模式、这一问的文字、已答的回答、走到的路线（叶子）、整棵树的叶子数、有没有东西画出了块的框
+    const tree = await evaluate(() => {
+      const root = document.querySelector('.yg-tree');
+      if (!root) return null;
+      const r = root.getBoundingClientRect();
+      const outside = [...root.querySelectorAll('*')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.right > r.right + 1 || b.left < r.left - 1); }).slice(0, 3).map((e) => String(e.className));
+      return { mode: root.querySelector('.yg-tree-mode.on')?.dataset.treeMode, question: root.querySelector('.yg-tree-qtext')?.innerText ?? null, answers: [...root.querySelectorAll('.yg-tree-trail .yg-tree-ans')].map((x) => x.innerText),
+        leaf: root.querySelector('.yg-tree-result .yg-jump')?.dataset.routeId ?? null, leaves: root.querySelectorAll('.yg-tree-leaf').length, outside };
+    });
     const overflowX = await evaluate(() => { const x = document.querySelector('.yg'); return x.scrollWidth > x.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1; });
     const height = await evaluate(() => document.querySelector('.yg').scrollHeight);
     await sleep(600);
     // --design 保持 1280×860 的视口（和设计稿同样大），--mobile 保持一屏手机；平时把视口拉到内容那么高
     if (aim || roleAim) { /* 弹窗开着：不改视口，不然鼠标和弹窗都变了 */ }
     else if (!opts.design && !opts.mobile) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 200, 4000) }); await sleep(500); }
-    else if (opts.mobile && (opts.route || opts.jump || (opts.tab === '起手速查' || opts.tab === '术语表'))) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 100, 5000) }); await sleep(500); }
+    else if (opts.mobile && (opts.route || opts.jump || opts.station || (opts.tab === '起手速查' || opts.tab === '术语表' || opts.tab === '展开地图'))) { await send('Emulation.setDeviceMetricsOverride', { ...view, height: Math.min(height + 100, 5000) }); await sleep(500); }
     await until(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity), null, 5000, '动画走完').catch(() => {});
     // --clip-stage：只截动画框（场面特写），按 2 倍像素
     const clip = opts.clipStage ? await evaluate(() => { const st = document.querySelector('.yg-stage'); st.scrollIntoView({ block: 'start' }); const b = st.querySelector('iframe').getBoundingClientRect(); return { x: b.left + scrollX, y: b.top + scrollY, width: b.width, height: b.height, scale: 2 }; }) : null;
@@ -458,7 +527,7 @@ async function main() {
     const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
     const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
     if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
-    await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, blocks, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
+    await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, map, endgame, tree, mapJump, blocks, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
     page.step = await evaluate(() => Number(document.querySelector('.yg-player')?.dataset.step ?? 0));
     // 并排对照：设计稿 PNG 在左（标签 --compare-label，默认「样子稿」），这张和 --compare-with 列的同一证据目录里先截的几张在右，上下排；在一个 data: 页面里拼好再截一张
     if (opts.compare) {

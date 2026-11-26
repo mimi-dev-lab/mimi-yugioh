@@ -4,6 +4,8 @@ import { OcgLocation as L, OcgPosition as P } from 'ocgcore-wasm';
 import { routeBlocks } from './blocks.js';
 import { cardOf } from './deck.js';
 import { countInterrupts } from './interrupts.js';
+import { ALL_ON } from './features.js';
+import { buildLedger } from './ledger.js';
 import { handRoles, resolveRoles } from './roles.js';
 import { diffEnd, playRoute } from './route.js';
 
@@ -69,8 +71,8 @@ export function endSummary(deck, endBoard) {
   return { ...viewZones(deck, endBoard, END_ZONES), interrupts: total, breakers: breakers.map((b) => ({ ...cardOf(deck, b.code), copies: b.copies, interrupts: b.interrupts, interruptHow: deck.cards[b.code].interruptHow })) };
 }
 
-// 重放一条路线，返回页面要的全部数据（每步的 roles：中场每张卡的作用标签，见 src/roles.js；blocks：这条路线由哪几段积木连成，见 src/blocks.js，每步的 block 是它归的积木 id）。重放走不通会抛错（带步号），由调用方决定怎么回
-export async function replayRoute(engine, deck, route) {
+// 重放一条路线，返回页面要的全部数据（每步的 roles：中场每张卡的作用标签，见 src/roles.js；blocks：这条路线由哪几段积木连成，见 src/blocks.js，每步的 block 是它归的积木 id；每步的 ledger 是资源账本，见 src/ledger.js；features 是试用功能的开关）。重放走不通会抛错（带步号），由调用方决定怎么回
+export async function replayRoute(engine, deck, route, { features = ALL_ON } = {}) {
   const played = await playRoute(engine, deck, route);
   if (played.scriptErrors.length) throw new Error(`引擎脚本报错：${played.scriptErrors[0]}`);
   let before = played.startBoard;
@@ -89,6 +91,11 @@ export async function replayRoute(engine, deck, route) {
   const end = endSummary(deck, played.endBoard);
   // 手牌里此刻有作用的卡（手坑、终场算进打断数的手牌），见 handRoles
   const handView = (hand, breakers) => handRoles(deck, hand.map((c) => c.code), breakers).map((r) => ({ ...cardOf(deck, r.code), ...r }));
+  // 资源账本（试用功能 ledger，关了就没有这个字段）：每步一份，全部来自引擎重放的状态，见 src/ledger.js
+  if (features.ledger) {
+    const ledgers = buildLedger(deck, { startBoard: played.startBoard, stepBoards: played.stepBoards, stepActivations: played.stepActivations, stepNormalSummon: played.stepNormalSummon });
+    steps.forEach((s, i) => { s.ledger = ledgers[i]; });
+  }
   const blocks = routeBlocks(deck, route.id);
   steps.forEach((s) => { s.block = blocks.find((b) => b.from <= s.n && s.n <= b.to)?.id ?? null; });
   steps.forEach((s, i) => { s.handRoles = handView(s.board.hand, i === steps.length - 1 ? end.breakers.map((b) => b.code) : []); });
