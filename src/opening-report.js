@@ -11,12 +11,21 @@ export const COMMON_ENDS = 3; // 每组列几种常见终场
 export const BRICK_CARDS = 5; // 卡手里比平时更常出现的卡，列几张
 export const BRICK_MIN_HANDS = 3; // 一张卡在卡手里至少出现这么多手才进上面那个榜
 
-// 第一版（commit e801814）的结果，报告「返工说明」一节拿它和这次对照。第一版的打断数不看卡的发动条件（把终场在场各卡的 interrupts 直接相加），
-// 那份 JSONL 已被重跑的结果替换，数字从它原样抄在这里（git show e801814:docs/opening-analysis.jsonl 能重算）。只有总种子、上限、手数都一样时才对照
-export const FIRST_VERSION = {
-  commit: 'e801814', masterSeed: 20261126, maxNodes: 100000, total: 500,
-  distribution: { 0: 12, 1: 68, 2: 187, '3+': 233 }, avgInterrupts: 2.392, avgHandLeft: 2.818, better: 30, uncovered: 440, mercurierOnField: 63,
-};
+// 之前几版的结果，报告「返工说明」一节按先后列出每一版的说明，分布和这次并排对照。那几份 JSONL 已被重跑的结果替换，数字从它们原样抄在这里
+// （git show <commit>:docs/opening-analysis.jsonl 能重算）。只有总种子、上限、手数都和这次一样的那一版才写。
+// 第二版少算的 7 手：用第三版（#44）的代码重放第二版 JSONL 里每手搜出的步骤，打断数比记录少的手数（7 手都是终场上冰剑龙在自己回合用过除外效果）。
+export const PRIOR_VERSIONS = [
+  {
+    label: '第一版', commit: 'e801814', masterSeed: 20261126, maxNodes: 100000, total: 500,
+    distribution: { 0: 12, 1: 68, 2: 187, '3+': 233 }, avgInterrupts: 2.392, avgHandLeft: 2.818, better: 30, uncovered: 440,
+    note: '第一版（commit e801814）的打断数不看卡的发动条件，把终场在场各卡的打断数直接相加，结果被高估：例如只通常召唤铁兽鸟 墨丘利耶、盖两张超融合的终场记了 3 个打断，可墨丘利耶要场上有以阿尔白斯之落胤为素材的融合怪兽才能发动，那个终场一只融合怪兽都没有。第一版 500 手里终场场上有墨丘利耶的有 63 手。第二版把每张有打断的卡的条件照卡片原文写进卡组数据，路线终场汇总、起手速查、搜索和本模拟共用 `src/interrupts.js` 算；搜索的评价跟着变了，所以全部手用同一个总种子和上限重跑（不是拿第一版的终场重新打分）。',
+  },
+  {
+    label: '第二版', commit: 'eccc8ed', masterSeed: 20261126, maxNodes: 100000, total: 500,
+    distribution: { 0: 23, 1: 80, 2: 210, '3+': 187 }, avgInterrupts: 2.156, avgHandLeft: 3.076, better: 28, uncovered: 429,
+    note: '第二版（commit eccc8ed）没算自己回合已经用掉的效果：冰剑龙 镜翠幻种的除外效果在自己回合发动过，到下一个对手回合结束前都不能再用（卡片脚本给它挂的标记跨到对手回合才重置），第二版仍把它算 1 个打断。用这一版的口径重放第二版每手搜出的步骤，有 7 手打断数少 1，全是这种情况。这一版让决斗会话记下我方回合里发动过、之后没离开那一格的效果，终场打断数不算被锁住的（卡组数据的 `ownTurnLock`，见 DESIGN「卡组数据」）；别的打断卡的「每回合一次」在自己回合结束时就重置，自己回合用过不影响对手回合，所以只有冰剑龙这样写。搜索的评价跟着变了，全部手用同一个总种子和上限重跑。',
+  },
+];
 
 // 读 JSONL：一行一手，空行跳过，按 index 排序；同一个 index 出现两次报错
 export function parseJsonl(text) {
@@ -106,7 +115,7 @@ export const MD_PATH = 'docs/opening-analysis.md';
 // 报告里附完整步骤的新路线候选：搜索比已知路线好的在前，其次是已知路线都走不通的，取前 CANDIDATE_DETAIL 手
 export const candidateDetails = ({ candidates }) => [...candidates.better, ...candidates.uncovered].slice(0, CANDIDATE_DETAIL);
 
-export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS, firstVersion = FIRST_VERSION } = {}) {
+export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS, priorVersions = PRIOR_VERSIONS } = {}) {
   const s = analyze(rows, deck, { minLiftHands });
   const md = (code) => cardOf(deck, code).md;
   const out = [];
@@ -129,21 +138,22 @@ export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS, firstVe
   line(`- 最好值来源：${Object.entries(s.sources).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([k, n]) => `${k === 'search' ? '搜索' : `路线 ${k}`} ${n} 手`).join('，')}（搜索和路线同值记搜索）。`);
   line();
 
-  const fv = firstVersion;
-  if (fv && fv.masterSeed === s.masterSeed && fv.maxNodes === s.maxNodes && fv.total === s.total) {
+  const prior = priorVersions.filter((v) => v.masterSeed === s.masterSeed && v.maxNodes === s.maxNodes && v.total === s.total);
+  if (prior.length) {
     line('## 返工说明');
     line();
-    line(`第一版（commit ${fv.commit}）的打断数不看卡的发动条件，把终场在场各卡的打断数直接相加，结果被高估：例如只通常召唤铁兽鸟 墨丘利耶、盖两张超融合的终场记了 3 个打断，可墨丘利耶要场上有以阿尔白斯之落胤为素材的融合怪兽才能发动，那个终场一只融合怪兽都没有。第一版 ${fv.total} 手里终场场上有墨丘利耶的有 ${fv.mercurierOnField} 手。`);
+    for (const v of prior) { line(v.note); line(); }
+    line(`之前${prior.map((v) => v.label).join('、')}的分布原样列在下面：`);
     line();
-    line('这一版把每张有打断的卡的条件照卡片原文写进卡组数据，路线终场汇总、起手速查、搜索和本模拟共用 `src/interrupts.js` 算；搜索的评价跟着变了，所以全部手用同一个总种子和上限重跑（不是拿第一版的终场重新打分）。第一版的分布原样列在下面：');
-    line();
-    table(['打断数', '第一版手数', '第一版占比', '这一版手数', '这一版占比'], ['0', '1', '2', '3+'].map((k) => [k, fv.distribution[k], pct(fv.distribution[k], fv.total), s.distribution[k], pct(s.distribution[k], s.total)]));
-    table(['', '第一版', '这一版'], [
-      ['卡手率（0 打断）', pct(fv.distribution[0], fv.total), pct(s.distribution[0], s.total)],
-      ['平均打断数', f2(fv.avgInterrupts), f2(s.avgInterrupts)],
-      ['平均剩余手牌', f2(fv.avgHandLeft), f2(s.avgHandLeft)],
-      ['新路线候选（搜索比走得通的已知路线好）', `${fv.better} 手`, `${s.candidates.better.length} 手`],
-      ['已知路线都走不通、搜索有打断', `${fv.uncovered} 手`, `${s.candidates.uncovered.length} 手`],
+    const cols = [...prior,
+      { label: '这一版', distribution: s.distribution, total: s.total, avgInterrupts: s.avgInterrupts, avgHandLeft: s.avgHandLeft, better: s.candidates.better.length, uncovered: s.candidates.uncovered.length }];
+    table(['打断数', ...cols.flatMap((c) => [`${c.label}手数`, `${c.label}占比`])], ['0', '1', '2', '3+'].map((k) => [k, ...cols.flatMap((c) => [c.distribution[k], pct(c.distribution[k], c.total)])]));
+    table(['', ...cols.map((c) => c.label)], [
+      ['卡手率（0 打断）', ...cols.map((c) => pct(c.distribution[0], c.total))],
+      ['平均打断数', ...cols.map((c) => f2(c.avgInterrupts))],
+      ['平均剩余手牌', ...cols.map((c) => f2(c.avgHandLeft))],
+      ['新路线候选（搜索比走得通的已知路线好）', ...cols.map((c) => `${c.better} 手`)],
+      ['已知路线都走不通、搜索有打断', ...cols.map((c) => `${c.uncovered} 手`)],
     ]);
   }
 
