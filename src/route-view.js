@@ -90,7 +90,7 @@ export async function replayRoute(engine, deck, route) {
   // 手牌里此刻有作用的卡（手坑、终场算进打断数的手牌），见 handRoles
   const handView = (hand, breakers) => handRoles(deck, hand.map((c) => c.code), breakers).map((r) => ({ ...cardOf(deck, r.code), ...r }));
   const blocks = routeBlocks(deck, route.id);
-  steps.forEach((s) => { s.block = blocks.find((b) => b.from <= s.n && s.n <= b.to).id; });
+  steps.forEach((s) => { s.block = blocks.find((b) => b.from <= s.n && s.n <= b.to)?.id ?? null; });
   steps.forEach((s, i) => { s.handRoles = handView(s.board.hand, i === steps.length - 1 ? end.breakers.map((b) => b.code) : []); });
   return {
     id: route.id, name: route.name, needs: cardOf(deck, route.needs), source: route.source, verified: route.verified,

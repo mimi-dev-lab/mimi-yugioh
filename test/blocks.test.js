@@ -38,10 +38,20 @@ describe('积木数据的检查（纯函数，不起服务）', () => {
     assert.match(checkBlocks(tooFar).join('\n'), /white-albaz 没有第 18 步/);
     const unknown = clone(); unknown.blocks.segments['white-albaz'][0].block = 'nope';
     assert.match(checkBlocks(unknown).join('\n'), /white-albaz 用了不存在的积木 nope/);
-    const unused = clone(); unused.blocks.blocks.push({ id: 'spare', name: '闲置', needs: '随便', gives: '随便' });
+    const unused = clone(); unused.blocks.blocks.push({ id: 'spare', name: '闲置', color: '#010203', needs: '随便', gives: '随便' });
     assert.match(checkBlocks(unused).join('\n'), /积木 闲置 没有路线用/);
     const extraRoute = clone(); extraRoute.blocks.segments.ghost = [{ block: 'albaz-jump', from: 1, to: 1 }];
     assert.match(checkBlocks(extraRoute).join('\n'), /积木数据里的路线 ghost 不存在/);
+  });
+
+  test('每块积木有自己的颜色（#rrggbb），步号条按它分段着色；颜色不许重复', () => {
+    const { blocks } = BRANDED.blocks;
+    for (const b of blocks) assert.match(b.color, /^#[0-9a-f]{6}$/i, b.name);
+    assert.equal(new Set(blocks.map((b) => b.color.toLowerCase())).size, blocks.length);
+    const bad = clone(); bad.blocks.blocks[0].color = 'red';
+    assert.match(checkBlocks(bad).join('\n'), /颜色 red 不是 #rrggbb/);
+    const dup = clone(); dup.blocks.blocks[1].color = dup.blocks.blocks[0].color;
+    assert.match(checkBlocks(dup).join('\n'), /颜色 .* 重复/);
   });
 
   test('积木要被复用：每块出现在 2 条以上的路线里', () => {

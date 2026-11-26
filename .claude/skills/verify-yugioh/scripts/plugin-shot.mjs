@@ -334,6 +334,26 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     roleTip = await evaluate(() => { const el = document.querySelector('.yg-roletip'); const b = el.getBoundingClientRect(); return { text: el.innerText, left: b.left, top: b.top, right: b.right, bottom: b.bottom, vw: innerWidth, vh: innerHeight }; });
     roleTip.chip = { tags: tag.tags, x: at.x, y: at.y };
   }
+  // 积木：步号条按积木分段着色（每段一个颜色、段名在步号上面），步骤面板里的积木卡片和亮着的步号在同一段里。
+  // 每张路线截图都查：步号从 1 连到最后、不漏不重，相邻两段颜色不同，卡片的积木 id 等于亮着的步号所在的段；--require-blocks 要求一定有分段
+  const blocks = await evaluate(() => {
+    const segs = [...document.querySelectorAll('.yg-seg')];
+    if (!segs.length) return null;
+    const card = document.querySelector('.yg-panel .yg-blk');
+    return {
+      segs: segs.map((sg) => ({ id: sg.dataset.block, name: sg.querySelector('.yg-segname').innerText.trim(), color: getComputedStyle(sg).borderTopColor, nos: [...sg.querySelectorAll('.yg-stepno')].map((b) => Number(b.innerText)), on: !!sg.querySelector('.yg-stepno.on'), nameVisible: sg.querySelector('.yg-segname').innerText.trim() !== '' })),
+      card: card ? { id: card.dataset.block, name: card.querySelector('.yg-blk-name').innerText.trim(), needs: card.querySelector('.yg-blk-need p').innerText.trim(), gives: card.querySelector('.yg-blk-give p').innerText.trim() } : null,
+      list: [...document.querySelectorAll('.yg-bl .yg-blk')].map((b) => b.dataset.block),
+    };
+  });
+  if (opts.requireBlocks && !blocks) await fail(new Error('步号条没有按积木分段'));
+  if (blocks) {
+    const nos = blocks.segs.flatMap((sg) => sg.nos);
+    if (nos.some((n, i) => n !== i + 1)) await fail(new Error(`步号条的分段没有从 1 连到最后：${nos}`));
+    for (let i = 1; i < blocks.segs.length; i++) if (blocks.segs[i].color === blocks.segs[i - 1].color) await fail(new Error(`相邻两段积木颜色一样：${blocks.segs[i].name} 和 ${blocks.segs[i - 1].name}`));
+    const on = blocks.segs.find((sg) => sg.on);
+    if (blocks.card && on && blocks.card.id !== on.id) await fail(new Error(`步骤面板里的积木 ${blocks.card.name} 和亮着的步号所在的段 ${on.name} 对不上`));
+  }
   // 播放页的步号条和按钮有没有被网页工作区的窗口头部（或别的东西）盖住：每个按钮的上沿、下沿各取一点，elementFromPoint 要落在按钮自己身上
   const bar = await evaluate(() => {
     const btns = [...document.querySelectorAll('.yg-controls button')];
@@ -384,7 +404,7 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
   const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
   const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
   if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
-  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
+  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, blocks, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
   // 并排对照：设计稿 PNG 在左（标签 --compare-label，默认「样子稿」），这张和 --compare-with 列的同一证据目录里先截的几张在右，上下排；在一个 data: 页面里拼好再截一张
   if (opts.compare) {
     const b64 = async (f) => (await readFile(f)).toString('base64');

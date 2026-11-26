@@ -16,6 +16,9 @@
    carries its chips; hovering (phone: tapping) a chip there shows the reason in a small tip (the frame sends yg-role-hover / yg-role-tap / yg-role-leave). 卡组一览 groups by each card's first default tag; the 术语表 tab explains every word.
    先猜再看 (a switch next to 连播, kept in localStorage, off by default): on, a step does not play until it is revealed: the panel shows only 「第 n 步：想想下一步做什么？」, a click on it, the space bar
    or 下一步 plays that step; 连播 stops at every step the same way. Off, the player is as before.
+   积木 (blocks, from GET /route's blocks and steps[].block): the route is a few named, reusable pieces; the step bar is split into one coloured segment per block with its name
+   above the step numbers, and the step panel (and the end panel) shows the current block: its name, which steps it spans and 要什么 → 给什么; the 起手 panel lists the route's blocks.
+   With 先猜再看 on, a block's name stays hidden until its first step has been played. The colours come from the service (each block has one), they are not copied here.
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -269,7 +272,7 @@ function EngineNote({ title, lines }) {
   return h("details", { className: "yg-engine" }, h("summary", null, title), lines.map((l, i) => h("p", { key: i }, l)));
 }
 
-function OpeningPanel({ rest, board, handRoles }) {
+function OpeningPanel({ rest, board, handRoles, blocks }) {
   const popup = useCardPopup();
   useEffect(() => { popup.setStepRoles({ n: 0, roles: handRoles.map((r) => ({ ...r, hand: true })) }); return () => popup.setStepRoles(null); }, [handRoles]);
   const hand = [...board.hand].sort((a, b) => a.sequence - b.sequence);
@@ -283,13 +286,46 @@ function OpeningPanel({ rest, board, handRoles }) {
     h(Piles, { board }));
 }
 
-function StepPanel({ rest, step, total }) {
+// ---- 积木: the route's named pieces (GET /route's blocks: { id, name, color, needs, gives, from, to }) ----
+const rangeText = (b) => (b.to > b.from ? `第 ${b.from}–${b.to} 步` : `第 ${b.from} 步`);
+
+// 要什么 → 给什么 (stacked on a phone, side by side from the panel's own width up)
+function BlockFlow({ block }) {
+  return h("div", { className: "yg-blk-flow", "aria-label": "要什么 → 给什么" },
+    h("div", { className: "yg-blk-need" }, h("div", { className: "yg-phd" }, "要什么"), h("p", null, block.needs)),
+    h("span", { className: "yg-arrow", "aria-hidden": "true" }, "→"),
+    h("div", { className: "yg-blk-give" }, h("div", { className: "yg-phd" }, "给什么"), h("p", null, block.gives)));
+}
+
+// the block the step on screen belongs to
+function BlockCard({ blocks, n }) {
+  const block = blocks.find((b) => b.from <= n && n <= b.to);
+  if (!block) return null;
+  return h("section", { className: "yg-blk", "data-block": block.id, style: { "--blk": block.color }, "aria-label": "这一步所在的积木" },
+    h("div", { className: "yg-blk-head" },
+      h("span", { className: "yg-phd" }, "积木"),
+      h("b", { className: "yg-blk-name" }, block.name),
+      h("span", { className: "yg-lab" }, `${rangeText(block)} · 这块的第 ${n - block.from + 1} / ${block.to - block.from + 1} 步`)),
+    h(BlockFlow, { block }));
+}
+
+// the 起手 panel: every block of the route in order
+function BlockList({ blocks }) {
+  return h("div", { className: "yg-bl", "aria-label": "这条路线的积木" },
+    h("div", { className: "yg-phd" }, `这条路线由 ${blocks.length} 块积木拼成`),
+    blocks.map((b) => h("section", { key: b.from, className: "yg-blk", "data-block": b.id, style: { "--blk": b.color } },
+      h("div", { className: "yg-blk-head" }, h("b", { className: "yg-blk-name" }, b.name), h("span", { className: "yg-lab" }, rangeText(b))),
+      h(BlockFlow, { block: b }))));
+}
+
+function StepPanel({ rest, step, total, blocks }) {
   const [tag, color] = stepTag(step);
   const { cost, gain } = tradeRows(step.moves);
   return h("section", { className: "yg-panel", "aria-label": "这一步" },
     h("div", { className: "yg-pg", "aria-hidden": "true" }, Array.from({ length: total }, (_, i) => h("i", { key: i, className: i + 1 < step.n ? "d" : i + 1 === step.n ? "c" : "" }))),
     h(PanelHead, { big: String(step.n).padStart(2, "0"), numeric: true, tag, color }),
     h("p", { className: "yg-ptext" }, step.text),
+    h(BlockCard, { blocks, n: step.n }),
     h("div", { className: "yg-trade", "aria-label": "花了什么 → 换来什么" },
       h("div", { className: "yg-phd" }, "花了什么"), h("span", null), h("div", { className: "yg-phd" }, "换来什么"),
       h(TradeCol, { rest, rows: cost, side: "cost" }), h("span", { className: "yg-arrow", "aria-hidden": "true" }, "→"), h(TradeCol, { rest, rows: gain, side: "gain" })),
@@ -300,10 +336,11 @@ function StepPanel({ rest, step, total }) {
     h(EngineNote, { title: "引擎里的操作", lines: step.actions }));
 }
 
-function EndPanel({ rest, end, step }) {
+function EndPanel({ rest, end, step, blocks }) {
   return h("section", { className: "yg-panel yg-end", "aria-label": "终场" },
     h(PanelHead, { big: "终场", tag: "先攻结束", color: COLOR.amber }),
     h("p", { className: "yg-endnum" }, h("b", null, end.interrupts), h("span", null, "个打断")),
+    h(BlockCard, { blocks, n: step.n }),
     h("div", { className: "yg-phd" }, "靠这些卡"),
     end.breakers.length ? h("div", { className: "yg-bks" }, end.breakers.map((b) => h("div", { key: b.code, className: "yg-brow" },
       h(Thumb, { rest, card: b, w: 52, h: 75 }),
@@ -512,8 +549,11 @@ function Player({ rest, id, onBack }) {
     // the step bar and the buttons stay at the top of the scroll area on a desktop, so scrolling down to the board never hides them
     h("div", { ref: barRef, className: "yg-controls" },
       h("div", { className: "yg-stepbar", role: "group", "aria-label": "跳到某一步" },
-        h("button", { className: `yg-stepno${opening ? " on" : ""}`, onClick: () => jump(0), "aria-label": "起手", "aria-current": opening ? "step" : undefined }, "起手"),
-        route.steps.map((s, i) => h("button", { key: s.n, className: `yg-stepno${i + 1 === index ? " on" : ""}`, onClick: () => jump(i + 1), "aria-label": `第 ${s.n} 步`, "aria-current": i + 1 === index ? "step" : undefined }, String(s.n)))),
+        h("button", { className: `yg-stepno yg-stepno-start${opening ? " on" : ""}`, onClick: () => jump(0), "aria-label": "起手", "aria-current": opening ? "step" : undefined }, "起手"),
+        // one coloured segment per block; with 先猜再看 on a block's name stays hidden until its first step has been played
+        route.blocks.map((b) => h("div", { key: b.from, className: "yg-seg", "data-block": b.id, style: { "--blk": b.color } },
+          h("span", { className: "yg-segname", "aria-hidden": guess && b.from > index ? "true" : undefined }, guess && b.from > index ? "\u00a0" : b.name),
+          h("div", { className: "yg-segnos" }, route.steps.slice(b.from - 1, b.to).map((s) => h("button", { key: s.n, className: `yg-stepno${s.n === index ? " on" : ""}`, onClick: () => jump(s.n), "aria-label": `第 ${s.n} 步`, "aria-current": s.n === index ? "step" : undefined }, String(s.n))))))),
       h("div", { className: "yg-nav" },
         h("button", { className: "yg-btn", disabled: !view.ready || (opening && !playing), onClick: prev }, "上一步"),
         h("button", { className: "yg-btn", disabled: !view.ready || (last && !playing), onClick: next }, "下一步"),
@@ -523,9 +563,9 @@ function Player({ rest, id, onBack }) {
     h("div", { className: "yg-play" },
       h(Stage, { anim, frameRef, error: animError }),
       pending ? h(GuessPanel, { n: index + 1, onReveal: reveal })
-      : opening ? h(OpeningPanel, { rest, board: route.start, handRoles: route.startHandRoles })
-        : last && !playing ? h(EndPanel, { rest, end: route.end, step })
-          : h(StepPanel, { rest, step, total })),
+      : opening ? h(OpeningPanel, { rest, board: route.start, handRoles: route.startHandRoles, blocks: guess ? null : route.blocks })
+        : last && !playing ? h(EndPanel, { rest, end: route.end, step, blocks: route.blocks })
+          : h(StepPanel, { rest, step, total, blocks: route.blocks })),
     roleTip ? h(RoleTip, { ...roleTip, onClose: () => setRoleTip(null) }) : null);
 }
 
@@ -723,7 +763,20 @@ const CSS = `
 .yg-player { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .yg-route-title { font-size: 18px; }
 .yg-mismatch { border: 2px solid #ff9a6b; border-radius: 8px; padding: 10px 14px; color: #ffb48f; background: #1c0f08; display: flex; flex-direction: column; gap: 4px; line-height: 1.6; }
-.yg-stepbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.yg-stepbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; }
+.yg-stepno-start { align-self: flex-end; }
+.yg-seg { display: flex; flex-direction: column; gap: 3px; border-top: 3px solid var(--blk); padding-top: 2px; min-width: 0; }
+.yg-segname { font-size: 11px; font-weight: 700; line-height: 1.3; color: var(--blk); white-space: nowrap; }
+.yg-segnos { display: flex; flex-wrap: wrap; gap: 6px; }
+.yg-seg .yg-stepno { border-color: var(--blk); }
+.yg-seg .yg-stepno.on { background: var(--blk); border-color: var(--blk); }
+.yg-blk { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 8px 12px; border-left: 4px solid var(--blk); min-width: 0; }
+.yg-blk-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.yg-blk-name { font-size: 17px; font-weight: 800; color: var(--blk); }
+.yg-blk-flow { display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); column-gap: 8px; align-items: start; }
+.yg-blk-flow p { font-size: 13px; line-height: 1.55; color: #e2e2e6; margin-top: 4px; }
+.yg-blk-flow .yg-arrow { margin-top: 18px; }
+.yg-bl { display: flex; flex-direction: column; gap: 10px; }
 .yg-stepno { min-width: 34px; height: 34px; border-radius: 5px; border: 1px solid #3a3a3a; background: none; padding: 0 6px; }
 .yg-stepno.on { background: #c8ff3d; border-color: #c8ff3d; color: #000; font-weight: 600; }
 .yg-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; } .yg-nav .yg-btn { white-space: nowrap; }
@@ -792,6 +845,7 @@ const CSS = `
   .yg-route-art { width: 52px; }
   .yg-pnum { font-size: 72px; letter-spacing: -2px; } .yg-pnum.word { font-size: 52px; }
   .yg-ptext { font-size: 17px; }
+  .yg-blk-flow { grid-template-columns: minmax(0, 1fr); row-gap: 4px; } .yg-blk-flow .yg-arrow { margin: 0; text-align: left; transform: rotate(90deg); width: 24px; }
   .yg-endnum b { font-size: 84px; }
 }
 `;

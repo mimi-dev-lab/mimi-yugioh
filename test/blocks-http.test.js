@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { BRANDED } from '../src/decks/branded.js';
 import { ENGINE_DIR, start } from './helpers.js';
 
+const glossary = readFileSync(new URL('../GLOSSARY.md', import.meta.url), 'utf8');
 const get = async (url, path) => { const res = await fetch(`${url}${path}`); return { status: res.status, body: await res.json() }; };
 
 describe('积木：GET /route 返回的分段', () => {
@@ -49,7 +51,15 @@ describe('积木：GET /route 返回的分段', () => {
         assert.ok(b.needs.trim().length >= 8 && b.gives.trim().length >= 8, `${b.name} 缺要什么 / 给什么`);
         assert.ok(routesOf.get(b.id).size >= 2, `${b.name} 只在 ${routesOf.get(b.id).size} 条路线里`);
       }
+      for (const b of blocks) assert.match(b.color, /^#[0-9a-f]{6}$/i, b.name);
+      assert.equal(new Set(blocks.map((b) => b.color)).size, blocks.length, '积木颜色有重复');
       assert.ok(['落胤起跳', '圣女接力', '结束阶段大回收'].every((n) => blocks.some((b) => b.name === n)));
     } finally { server.stop(); }
+  });
+
+  test('GLOSSARY.md 解释了「积木」；覆盖率报告列出每块积木', () => {
+    assert.ok(glossary.includes('**积木**'));
+    const report = readFileSync(new URL('../docs/opening-analysis.md', import.meta.url), 'utf8');
+    for (const b of BRANDED.blocks.blocks) assert.ok(report.includes(`| ${b.name} |`), `报告里没有积木 ${b.name}`);
   });
 });

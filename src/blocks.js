@@ -8,12 +8,16 @@ export function checkBlocks(deck) {
   const problems = [];
   const ids = new Set();
   const names = new Set();
+  const colors = new Set();
   for (const b of blocks) {
     if (ids.has(b.id)) problems.push(`积木 id ${b.id} 重复`);
     ids.add(b.id);
     if (!b.name?.trim()) problems.push(`积木 ${b.id} 缺名字`);
     else if (names.has(b.name)) problems.push(`积木名字 ${b.name} 重复`);
     names.add(b.name);
+    if (!/^#[0-9a-f]{6}$/i.test(b.color ?? '')) problems.push(`积木 ${b.name || b.id} 的颜色 ${b.color} 不是 #rrggbb`);
+    else if (colors.has(b.color.toLowerCase())) problems.push(`积木 ${b.name} 的颜色 ${b.color} 重复`);
+    colors.add(String(b.color).toLowerCase());
     if (!b.needs?.trim()) problems.push(`积木 ${b.name || b.id} 缺「要什么」`);
     if (!b.gives?.trim()) problems.push(`积木 ${b.name || b.id} 缺「给什么」`);
   }
@@ -39,11 +43,11 @@ export function checkBlocks(deck) {
   return problems;
 }
 
-// 一条路线的积木分段，按步号从小到大：[{ id, name, needs, gives, from, to }]
+// 一条路线的积木分段，按步号从小到大：[{ id, name, color, needs, gives, from, to }]
 export function routeBlocks(deck, routeId) {
   const byId = new Map(deck.blocks.blocks.map((b) => [b.id, b]));
   return [...(deck.blocks.segments[routeId] ?? [])].sort((a, b) => a.from - b.from)
-    .map(({ block, from, to }) => { const { id, name, needs, gives } = byId.get(block); return { id, name, needs, gives, from, to }; });
+    .map(({ block, from, to }) => { const { id, name, color, needs, gives } = byId.get(block); return { id, name, color, needs, gives, from, to }; });
 }
 
 // 引擎操作序列里不参与匹配的：'finish' 是「之后的连锁窗口全放行直到回合结束」，随机起手搜索走到回合结束就停，不写它

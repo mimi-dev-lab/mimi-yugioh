@@ -64,26 +64,27 @@ lacks phone $OLD
 shot routes --tab 展开路线
 has routes "基本展开｜白之落胤初动" "基本展开｜烙印融合初动" "需要的起手卡" "终场打断 2" "终场打断 1" "来源 Game8（2026-11-20 版）" "引擎验证于 2026-11-24"
 lacks routes "还没做"
-shot route-start --route white-albaz
-has route-start "起手" "起手 · 共 17 步" "上一步" "下一步" "连播" "墓地 0 张" "来源 Game8"
+shot route-start --route white-albaz --require-blocks
+has route-start "起手" "起手 · 共 17 步" "落胤起跳" "圣女接力" "结束阶段大回收" "开幕搭桥" "冰剑龙封场" "这条路线由 5 块积木拼成" "要什么" "给什么" "上一步" "下一步" "连播" "墓地 0 张" "来源 Game8"
 lacks route-start "花了什么" "中场的卡" "发动了" "个打断"
 has route-start "先攻" "起手手牌" "除外 0 张"
-shot route-first --route white-albaz --step 1
+shot route-first --route white-albaz --step 1 --require-blocks
 has route-first "第 1 / 17 步" "上一步" "下一步" "连播" "发动了 白之落胤" "花了什么" "换来什么" "手牌→场上" "中场的卡和它们此刻的作用" "初动" "堆墓" "进墓是为了第 8 步检索烙印开幕" "墓地 1 张" "除外 0 张" "来源 Game8" "页面版本 2026-11-20" "引擎验证于 2026-11-24"
+has route-first "积木" "落胤起跳" "第 1–2 步 · 这块的第 1 / 2 步" "要什么" "给什么" "白之落胤在手"
 lacks route-first "个打断"
-shot route-mid --route white-albaz --step 9
-has route-mid "第 9 / 17 步"
+shot route-mid --route white-albaz --step 9 --require-blocks
+has route-mid "第 9 / 17 步" "开幕搭桥" "第 8–13 步 · 这块的第 2 / 6 步"
 lacks route-mid "个打断"
 shot route-end --route white-albaz --step last --keys --require-roles  # 场上的卡带作用标签，每块贴在自己的卡上（plugin-shot 量 yg-rects）
-has route-end "第 17 / 17 步 · 终场" "终场里每张卡的作用" "留场" "先攻结束" "2个打断" "靠这些卡" "打断 1：" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "剩余手牌" "墓地 " "除外 "
+has route-end "冰剑龙封场" "第 14–17 步 · 这块的第 4 / 4 步" "第 17 / 17 步 · 终场" "终场里每张卡的作用" "留场" "先攻结束" "2个打断" "靠这些卡" "打断 1：" "冰剑龙 镜翠幻种" "赫之圣女 卡尔塔西亚" "剩余手牌" "墓地 " "除外 "
 lacks route-end "%" "还差" "估值" "评分" "总分"
-shot route-fusion-end --route branded-fusion --step last
-has route-fusion-end "第 10 / 10 步 · 终场" "1个打断" "烙印断罪"
+shot route-fusion-end --route branded-fusion --step last --require-blocks
+has route-fusion-end "第 10 / 10 步 · 终场" "1个打断" "烙印断罪" "融合连发" "结束阶段大回收" "收网"
 shot route-phone-start --mobile --route white-albaz --step 起手
 has route-phone-start "起手 · 共 17 步"
 lacks route-phone-start "花了什么"
-shot route-phone --mobile --route white-albaz --step 2
-has route-phone "第 2 / 17 步" "花了什么"
+shot route-phone --mobile --route white-albaz --step 2 --require-blocks
+has route-phone "第 2 / 17 步" "花了什么" "落胤起跳" "圣女接力" "要什么" "给什么"
 shot route-phone-end --mobile --route white-albaz --step last
 has route-phone-end "2个打断" "靠这些卡"
 # 术语表页签：每个作用词、解释；手机宽也能看
@@ -159,15 +160,15 @@ guess() {
   node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const log = j.guess && j.guess.log; if (!log || !(new Function("log", "return (" + process.argv[2] + ")"))(log)) { console.error(JSON.stringify(log, null, 1)); process.exit(1); }' "$ev/$1.json" "$2" || { echo "$1 的先猜再看不对：$2，见 $ev/$1.json"; exit 1; }
 }
 shot guess-ask --design --route white-albaz --step 2 --guess on,ask
-has guess-ask "先猜再看" "第 3 步：想想下一步做什么？" "第 2 / 17 步"
-lacks guess-ask "花了什么" "发动了" "中场的卡" "%" "还差" "评分" "总分"
+has guess-ask "先猜再看" "第 3 步：想想下一步做什么？" "第 2 / 17 步" "落胤起跳"
+lacks guess-ask "花了什么" "发动了" "中场的卡" "%" "还差" "评分" "总分" "圣女接力" "开幕搭桥" "冰剑龙封场" "要什么"
 guess guess-ask 'log[1].pending === "true" && log[1].step === 2 && log[1].mode === "idle" && log[1].prompt.includes("第 3 步：想想下一步做什么？") && !/花了什么|发动了/.test(log[1].panel) && log[1].panel.includes("第 3 步") && log[0].stored === "true"'
 shot guess-flow --route white-albaz --guess on,ask,space,ask,click,ask,next
 has guess-flow "第 3 / 17 步" "花了什么"
 guess guess-flow 'log[1].step === 0 && log[2].step === 1 && log[2].pending === "false" && log[2].mode === "idle" && log[3].step === 1 && log[4].step === 2 && log[5].step === 2 && log[6].step === 3 && log[6].pending === "false" && log.filter((l) => l.act === "ask").every((l) => l.pending === "true")'
 shot guess-phone --mobile --route white-albaz --step 2 --guess on,ask
-has guess-phone "先猜再看" "第 3 步：想想下一步做什么？"
-lacks guess-phone "花了什么"
+has guess-phone "先猜再看" "第 3 步：想想下一步做什么？" "落胤起跳"
+lacks guess-phone "花了什么" "圣女接力" "要什么"
 shot guess-phone-after --mobile --route white-albaz --step 2 --guess on,ask,click
 has guess-phone-after "第 3 / 17 步" "花了什么"
 shot guess-auto --route branded-fusion --guess on,auto,space,space,off
