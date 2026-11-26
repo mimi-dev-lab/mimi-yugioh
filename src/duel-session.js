@@ -20,13 +20,15 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   let handle = null;
   let message = null; // 引擎停在哪个提示上
   let finished = false;
-  let endBoard = null; // 我方回合结束（对手回合开始）时的场面，没到那一刻是 null
+  let endBoard = null; // 我方回合结束（对手回合开始）时的场面（snapshot 的各区，另带那一刻的 used），没到那一刻是 null
   let normalSummonUsed = false; // 我方这回合的召唤权（通常召唤或盖放怪兽）用掉了没有
   let lastHint = null; // 最近一条给我方的选择提示（HINT_SELECTMSG 的字符串编号）
   let promptHint = null; // 当前提示对应的那一条
   const activated = []; // 我方发动过效果的卡的密码，按发动顺序
   const events = []; // 引擎发出的卡片移动和召唤消息（MSG_MOVE、MSG_SPSUMMONING…）按发生顺序的记录，路线重放按步切片
   let endEvents = null; // 我方回合结束那一刻 events 有几条；之后（对手回合）的消息不算
+  const used = []; // 我方发动过、之后没离开那一格的效果 { code, desc, zone, sequence }（desc 是效果描述号，同提示里选项的 description）；终场带一份，打断数据此去掉自己回合锁住的效果
+  let endUsed = null; // 我方回合结束那一刻的 used
 
   function build() {
     if (handle) core.destroyDuel(handle);
@@ -52,6 +54,8 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     activated.length = 0;
     events.length = 0;
     endEvents = null;
+    used.length = 0;
+    endUsed = null;
     lastHint = null;
     promptHint = null;
   }
@@ -74,6 +78,15 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   const MATERIAL = 0x8;
   let chainNow = null;
   let materialKind = null;
+  const ZONES = { [L.HAND]: 'hand', [L.MZONE]: 'monsters', [L.SZONE]: 'spellTraps', [L.GRAVE]: 'grave', [L.REMOVED]: 'banished', [L.DECK]: 'deck', [L.EXTRA]: 'extra' };
+  // used：我方的发动记下那张卡在哪一格；那一格的卡移走了（离场、去墓地…），它身上的记录跟着作废（引擎在卡离开时重置它身上的标记）
+  function trackUsed(m) {
+    if (m.type === M.CHAINING && m.triggering_controller === 0 && m.controller === 0) used.push({ code: m.code, desc: String(m.description), zone: ZONES[m.location] ?? String(m.location), sequence: m.sequence });
+    if (m.type === M.MOVE && m.from.controller === 0) {
+      const from = ZONES[m.from.location] ?? String(m.from.location);
+      for (let i = used.length - 1; i >= 0; i--) if (used[i].zone === from && used[i].sequence === m.from.sequence) used.splice(i, 1);
+    }
+  }
   function record(m) {
     const spot = (p) => ({ controller: p.controller, location: p.location, sequence: p.sequence, position: p.position, ...(p.overlay_sequence === undefined ? {} : { overlay: p.overlay_sequence }) });
     const annotate = (code, summon) => { const move = events.findLast((e) => e.type === 'move' && e.code === code); if (move) move.summon = summon; };
@@ -97,14 +110,15 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
       const status = core.duelProcess(handle);
       const messages = core.duelGetMessage(handle);
       for (const m of messages) {
-        if (m.type === M.NEW_TURN && m.player === 1 && endEvents === null) endEvents = events.length;
+        if (m.type === M.NEW_TURN && m.player === 1 && endEvents === null) { endEvents = events.length; endUsed = used.map((u) => ({ ...u })); }
         record(m);
+        trackUsed(m);
         if (m.type === M.SUMMONING && m.controller === 0) normalSummonUsed = true;
         if (m.type === M.SET && m.controller === 0 && m.location === L.MZONE) normalSummonUsed = true;
         if (m.type === M.CHAINING && m.triggering_controller === 0) activated.push(m.code);
         if (m.type === M.HINT && m.player === 0 && m.hint_type === 3) lastHint = Number(m.hint); // HINT_SELECTMSG：下一个选卡提示是干什么的（constant.lua 的 HINTMSG_*）
       }
-      if (!endBoard && messages.some((m) => m.type === M.NEW_TURN && m.player === 1)) endBoard = snapshot();
+      if (!endBoard && messages.some((m) => m.type === M.NEW_TURN && m.player === 1)) endBoard = { ...snapshot(), used: endUsed };
       if (status === OcgProcessResult.END) { finished = true; message = null; return; }
       if (status !== OcgProcessResult.WAITING) continue;
       const m = messages[messages.length - 1];

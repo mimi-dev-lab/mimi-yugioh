@@ -7,6 +7,9 @@
 //   perTurn     同名卡每回合最多用几张（卡片原文「这个卡名的卡在 1 回合只能发动 1 张」或「效果 1 回合只能使用 1 次」）；不写 = 不限
 //   needs       发动的前提（只看有没有，不消耗）：条件对象，见 meets
 //   pay         发动要付出的、会用掉终场资源的代价：{ discard: n }（弃 n 张手牌）或 { extra: 规格 }（从额外卡组送 1 只符合规格的去墓地）
+//   ownTurnLock 效果号 n（卡片脚本里 aux.Stringid(密码, n) 的 n）：这个效果在自己回合发动过，到下一个对手回合结束前都不能再用（冰剑龙的除外效果）。
+//               终场的 used（我方回合里发动过、发动后没离开那一格的效果，duel-session 记）里有这张卡这一格的这个效果，它就不算。
+//               只给限制跨到对手回合的效果写：普通的「每回合一次」在自己回合结束时就重置了，自己回合用过不影响对手回合
 //   tags        这张卡的性质，条件里的规格按它匹配（如 albazFusion = 以阿尔白斯之落胤为融合素材的融合怪兽）
 //
 // 规格：标签（字符串）、密码（数字）或它们的数组（符合其一即可）；要几张时写 { of, n }，不写 n 是 1。
@@ -37,17 +40,22 @@ export function meets(deck, need, zones, self) {
   return true;
 }
 
+// 这张卡这一格的 ownTurnLock 效果（引擎报的效果描述号 = aux.Stringid(密码, n) = 密码 << 20 | n，见 utility.lua；密码超过 2^11 位移会溢出 32 位，所以用乘法），在我方回合里发动过、之后没离开这一格
+const lockedByOwnTurn = (card, c, zone, used) => card.ownTurnLock !== undefined
+  && used.some((u) => u.code === c.code && u.zone === zone && u.sequence === c.sequence && u.desc === String(c.code * 2 ** 20 + card.ownTurnLock));
+
 // 终场的打断：total 是总数，breakers 是每张提供打断的卡 { code, copies（算进去的张数）, interrupts }，按场上的先后（怪兽区、魔陷区，再手牌）。卡组外的卡（token）不提供打断
 export function countInterrupts(deck, board) {
   const zones = { hand: board.hand ?? [], monsters: board.monsters ?? [], spellTraps: board.spellTraps ?? [], grave: board.grave ?? [], extra: board.extra ?? [] };
-  const field = [...zones.monsters, ...zones.spellTraps];
-  // 1. 能发动的来源：在发动区域里、前提满足
+  const usedEffects = board.used ?? [];
+  // 1. 能发动的来源：在发动区域里、前提满足、没被自己回合的发动锁住
   const sources = [];
-  for (const [zone, cards] of [['field', field], ['hand', zones.hand]]) {
-    for (const c of cards) {
+  for (const [from, zone] of [['field', 'monsters'], ['field', 'spellTraps'], ['hand', 'hand']]) {
+    for (const c of zones[zone]) {
       const card = deck.cards[c.code];
-      if (!card?.interrupts || !(card.from ?? ['field']).includes(zone)) continue;
-      if (meets(deck, card.needs, zones, c)) sources.push({ c, card, zone });
+      if (!card?.interrupts || !(card.from ?? ['field']).includes(from)) continue;
+      if (lockedByOwnTurn(card, c, zone, usedEffects)) continue;
+      if (meets(deck, card.needs, zones, c)) sources.push({ c, card, zone: from });
     }
   }
   // 2. 同名卡每回合的张数上限（场上的先算）
@@ -100,10 +108,11 @@ export function checkInterruptFields(deck) {
   for (const [code, card] of Object.entries(deck.cards)) {
     const name = `${card.jp}（${code}）`;
     if (card.tags !== undefined && !(Array.isArray(card.tags) && card.tags.every((t) => typeof t === 'string'))) problems.push(`${name}：tags 要是字符串数组`);
-    const hasRule = ['from', 'perTurn', 'needs', 'pay'].some((k) => card[k] !== undefined);
+    const hasRule = ['from', 'perTurn', 'needs', 'pay', 'ownTurnLock'].some((k) => card[k] !== undefined);
     if (hasRule && !card.interrupts) problems.push(`${name}：打断数是 0，不该写打断条件`);
     if (card.from !== undefined && !(Array.isArray(card.from) && card.from.length && card.from.every((z) => z === 'hand' || z === 'field'))) problems.push(`${name}：from 只能是 hand、field`);
     if (card.perTurn !== undefined && !(Number.isInteger(card.perTurn) && card.perTurn >= 1)) problems.push(`${name}：perTurn 要是正整数`);
+    if (card.ownTurnLock !== undefined && !(Number.isInteger(card.ownTurnLock) && card.ownTurnLock >= 0 && card.ownTurnLock < 16)) problems.push(`${name}：ownTurnLock 要是 0 到 15 的整数（脚本里的效果号）`);
     if (card.needs !== undefined) checkNeed(name, card.needs);
     if (card.pay !== undefined) {
       const keys = Object.keys(card.pay);
