@@ -51,9 +51,9 @@ body{font-family:"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Noto Sans 
 .rl i{font-style:normal;font-size:13px;line-height:17px;font-weight:800;color:#000;padding:0 5px;border-radius:9px;white-space:nowrap;box-shadow:0 0 0 1.5px #000}
 `;
 
-// 合成页里的交互：悬停 / 点一下把「哪张卡、在合成页里的位置」交给外层（外层 = 页面），作用标签同样（带作用词和原因）；左右键转给外层；
+// 合成页里的交互：悬停 / 点一下把「哪张卡、在合成页里的位置」交给外层（外层 = 页面），作用标签同样（带作用词和原因）；左右键转给外层（空格要 host 发过 keys 才转）；
 // host 问「现在每张卡在哪」时回答每张看得见的卡和看得见的作用标签的位置（验证脚本用）
-const INTERACT = `
+export const INTERACT = `
 (function () {
   function rectOf(el) { var r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }
   var cards = document.querySelectorAll('.card .a');
@@ -69,12 +69,15 @@ const INTERACT = `
     el.addEventListener('mouseleave', function () { parent.postMessage({ type: 'yg-role-leave', code: Number(el.dataset.code) }, '*'); });
     el.addEventListener('click', function () { parent.postMessage(roleMsg('yg-role-tap', el), '*'); });
   });
+  var space = false;   // 空格只在 host 说开关开着（cmd keys）时才转给外层并拦下，否则和以前一样
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); parent.postMessage({ type: 'yg-key', key: e.key }, '*'); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || (e.key === ' ' && space)) { e.preventDefault(); parent.postMessage({ type: 'yg-key', key: e.key }, '*'); }
   });
   addEventListener('message', function (e) {
     var d = e.data;
-    if (!d || d.src !== 'yg-host' || d.cmd !== 'rects') return;
+    if (!d || d.src !== 'yg-host') return;
+    if (d.cmd === 'keys') { space = d.space === true; return; }
+    if (d.cmd !== 'rects') return;
     var out = [];
     Array.prototype.forEach.call(cards, function (el) { if (getComputedStyle(el.parentNode).visibility === 'visible') out.push({ code: Number(el.dataset.code), md: el.dataset.md, card: el.parentNode.id, rect: rectOf(el) }); });
     var tags = [];

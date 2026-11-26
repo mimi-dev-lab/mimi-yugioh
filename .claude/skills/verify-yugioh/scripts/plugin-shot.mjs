@@ -180,6 +180,44 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
     await until(() => { const p = document.querySelector('.yg-player'); return p.dataset.mode === 'idle' && p.dataset.step === p.dataset.total; }, null, 240000, '连播到终场').catch(fail);
     playedMs = Date.now() - t;
   }
+  // --guess 动作,动作…：「先猜再看」的一串真操作（在 --step 走完之后做）。on / off 点开关；ask 点「下一步」等停住的提示；auto 点「连播」等停住的提示；
+  // play 点「连播」等它真播起来（不等提示）；wait 停 1.5 秒；autospace 焦点放在「连播」按钮上按空格；space / click / next 揭晓（按空格 / 点提示 / 点「下一步」），等这一步播完（连播时等下一个提示）；reopen 回路线列表再点进同一条路线，看开关还开着。.json 的 guess 记每一步之后的状态
+  let guess = null;
+  if (opts.guess) {
+    guess = { log: [] };
+    const data = () => evaluate(() => { const p = document.querySelector('.yg-player'); const g = document.querySelector('.yg-guess'); return { step: Number(p.dataset.step), mode: p.dataset.mode, guess: p.dataset.guess, pending: p.dataset.pending, prompt: g ? g.innerText : null, panel: document.querySelector('.yg-play')?.innerText ?? null, checked: document.querySelector('.yg-toggle')?.getAttribute('aria-checked'), autoLabel: document.querySelector('.yg-nav')?.children[2]?.innerText, stored: localStorage.getItem('yugioh.guess-first') }; });
+    for (const act of opts.guess.split(',')) {
+      const before = await data();
+      if (act === 'on' || act === 'off') {
+        if (!(await clickButton('先猜再看'))) await fail(new Error('页面上没有「先猜再看」开关'));
+        await until((v) => document.querySelector('.yg-player').dataset.guess === v, String(act === 'on'), 5000, `开关${act}`).catch(fail);
+      } else if (act === 'play') {
+        if (!(await clickButton('连播'))) await fail(new Error('点不了「连播」'));
+        await until(() => document.querySelector('.yg-player').dataset.mode === 'auto', null, 10000, '开始连播').catch(fail);
+      } else if (act === 'wait') {
+        await new Promise((r) => setTimeout(r, 1500));
+      } else if (act === 'autospace') {
+        // 焦点在「连播」按钮上按空格：空格归这个按钮（原生点击），不该同时揭晓
+        if (!(await evaluate(() => { const b = document.querySelector('.yg-nav')?.children[2]; if (!b) return false; b.focus(); return true; }))) await fail(new Error('没有「连播」按钮'));
+        for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32, ...(type === 'keyDown' ? { text: ' ' } : {}) });
+        await new Promise((r) => setTimeout(r, 1500));
+      } else if (act === 'ask' || act === 'auto') {
+        if (!(await clickButton(act === 'ask' ? '下一步' : '连播'))) await fail(new Error(`点不了${act}`));
+        await until(() => document.querySelector('.yg-player').dataset.pending === 'true', null, 10000, '停住，出现「想想下一步做什么」').catch(fail);
+      } else if (act === 'space' || act === 'click' || act === 'next') {
+        if (act === 'click') { if (!(await evaluate(() => { const b = document.querySelector('.yg-guess'); if (!b) return false; b.click(); return true; }))) await fail(new Error('没有可点的提示')); }
+        else if (act === 'next') { if (!(await clickButton('下一步'))) await fail(new Error('点不了「下一步」')); }
+        else for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32, ...(type === 'keyDown' ? { text: ' ' } : {}) });
+        await until((n) => { const p = document.querySelector('.yg-player'); return Number(p.dataset.step) > n && (p.dataset.mode === 'idle' || p.dataset.pending === 'true'); }, before.step, 90000, '揭晓后这一步播完').catch(fail);
+      } else if (act === 'reopen') {
+        if (!(await clickButton('← 路线列表'))) await fail(new Error('点不了「← 路线列表」'));
+        await until(() => document.querySelectorAll('button.yg-route').length > 0, null, 30000, '回到路线列表').catch(fail);
+        await evaluate((r) => { [...document.querySelectorAll('button.yg-route')].find((x) => x.dataset.routeId === r || (x.getAttribute('aria-label') || '').includes(r)).click(); }, opts.route);
+        await until(() => document.querySelector('.yg-player')?.dataset.ready === 'true', null, 120000, '路线动画就绪').catch(fail);
+      } else await fail(new Error(`--guess 里没有动作「${act}」`));
+      guess.log.push({ act, ...(await data()) });
+    }
+  }
   // --next-mid MS：（和 --step K 一起）到了第 K 步后点「下一步」，等 MS 毫秒（动画还在播）就往下走去截图：页面上的步号条和动画框都是真的中间状态
   if (opts.nextMid) {
     const now = await evaluate(() => Number(document.querySelector('.yg-player').dataset.step));
@@ -346,7 +384,7 @@ const view = opts.mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobi
   const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
   const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
   if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
-  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs }, null, 1));
+  await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
   // 并排对照：设计稿 PNG 在左（标签 --compare-label，默认「样子稿」），这张和 --compare-with 列的同一证据目录里先截的几张在右，上下排；在一个 data: 页面里拼好再截一张
   if (opts.compare) {
     const b64 = async (f) => (await readFile(f)).toString('base64');
