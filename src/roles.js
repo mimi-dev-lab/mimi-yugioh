@@ -17,7 +17,7 @@ export function checkRoleTags(deck) {
     for (const tag of e.tags ?? []) if (!names.has(tag)) problems.push(`${where} 的作用 ${tag} 不在术语表里`);
     if (typeof e.why !== 'string' || e.why.trim().length < 10) problems.push(`${where} 缺原因（至少 10 个字）`);
   };
-  const whys = new Set(); // 默认作用和每一步的覆盖放在一起查：原因都不许一字不差
+  const whys = new Set(); // 默认作用之间不许一字不差；路线里的覆盖在同一条路线内查（不同路线走同一步棋，原因可以一样）
   for (const code of Object.keys(deck.cards)) {
     if (!defaults[code]) { problems.push(`${deck.cards[code].jp}（${code}）缺默认作用`); continue; }
     entry(`${deck.cards[code].jp}（${code}）的默认作用`, defaults[code]);
@@ -28,13 +28,14 @@ export function checkRoleTags(deck) {
   for (const [id, steps] of Object.entries(routes)) {
     const route = deck.routes.find((r) => r.id === id);
     if (!route) { problems.push(`作用数据里的路线 ${id} 不存在`); continue; }
+    const routeWhys = new Set(whys);
     for (const [n, cards] of Object.entries(steps)) {
       if (!(Number.isInteger(Number(n)) && n >= 1 && n <= route.steps.length)) problems.push(`${id} 没有第 ${n} 步`);
       for (const [code, e] of Object.entries(cards)) {
         if (!deck.cards[code]) { problems.push(`${id} 第 ${n} 步的 ${code} 不在卡表里`); continue; }
         entry(`${id} 第 ${n} 步 ${deck.cards[code].jp}`, e);
-        if (whys.has(e.why)) problems.push(`${id} 第 ${n} 步 ${deck.cards[code].jp} 的原因和别处一字不差，要写这一步自己的`);
-        whys.add(e.why);
+        if (routeWhys.has(e.why)) problems.push(`${id} 第 ${n} 步 ${deck.cards[code].jp} 的原因和默认作用或这条路线别的步一字不差，要写这一步自己的`);
+        routeWhys.add(e.why);
       }
     }
   }

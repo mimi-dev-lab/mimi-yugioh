@@ -17,7 +17,7 @@ describe('作用数据的检查（纯函数，不起服务）', () => {
     bad.roleTags.defaults[73819701].tags = ['瞎写'];
     delete bad.roleTags.defaults[62962630];
     bad.roleTags.routes['white-albaz'][1][73819701].why = '太短';
-    bad.roleTags.routes['white-albaz'][2][55273560].why = bad.roleTags.routes.aluber[10][55273560].why;
+    bad.roleTags.routes['white-albaz'][2][55273560].why = bad.roleTags.routes['white-albaz'][1][Object.keys(bad.roleTags.routes['white-albaz'][1])[0]].why;
     bad.roleTags.routes['white-albaz'][99] = { 55273560: { tags: ['素材'], why: '这一步不存在的步号' } };
     const problems = checkRoleTags(bad).join('\n');
     assert.match(problems, /瞎写 不在术语表里/);
@@ -34,6 +34,12 @@ describe('作用数据的检查（纯函数，不起服务）', () => {
     const sameAsStep = structuredClone(BRANDED);
     sameAsStep.roleTags.routes['white-albaz'][1][73819701].why = sameAsStep.roleTags.defaults[62962630].why;
     assert.match(checkRoleTags(sameAsStep).join('\n'), /一字不差/);
+  });
+
+  test('不同路线走同一步棋，原因可以一字不差', () => {
+    const shared = structuredClone(BRANDED);
+    shared.roleTags.routes['white-albaz'][2][55273560].why = shared.roleTags.routes.aluber[10][55273560].why;
+    assert.deepEqual(checkRoleTags(shared), []);
   });
 
   test('每条路线都有作用数据', () => {
