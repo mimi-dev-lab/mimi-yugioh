@@ -175,6 +175,13 @@ describe('积木覆盖率：只用积木能拼出多少手的最好展开', () =
     assert.equal(blocks.neverCovered[0].share, 2 / 5);
   });
 
+  test('「常见」的门槛是占有展开的手的 10%：手数一多，只出现 1 手的卡不再列', () => {
+    const filler = Array.from({ length: 10 }, (_, i) => row(100 + i, [ASH, G, FARA, LOCK, LOCK], [], 1, 4, { steps: [{ text: '发动 灰流丽', do: [{ idle: 'activate', code: ASH }] }] }));
+    const diluted = analyze([...BLOCK_ROWS, ...filler], BRANDED, { minLiftHands: 1 }).blocks;
+    assert.equal(diluted.withExpansion, 15);
+    assert.deepEqual(diluted.neverCovered.map((c) => [c.code, c.hands]), [[A, 2]]); // C 只有 1 手（6.7%），A 有 2 手（13.3%）
+  });
+
   test('没拼出的手的最好展开平均多长、从头平均拼到第几个操作', () => {
     const ops = (r) => r.steps.flatMap((x) => x.do).filter((op) => op !== 'finish').length;
     const rows = [4, 5, 6].map((i) => BLOCK_ROWS[i]);
@@ -185,7 +192,7 @@ describe('积木覆盖率：只用积木能拼出多少手的最好展开', () =
   test('报告里写出结论：两个分母的数字、原因（选卡不是主因、圣女接力 0 手、常见起手卡拼得出的手里 0）', () => {
     const text = buildReport(BLOCK_ROWS, BRANDED, { minLiftHands: 1 });
     assert.match(text, /按全部 7 手算：严格口径 2 手（28\.6%），放宽口径 3 手（42\.9%）/);
-    assert.match(text, /放宽口径只多拼出 1 手（占严格口径没拼出的 3 手的 33\.3%）[^\n]*放宽后仍有 2 手拼不出/);
+    assert.match(text, /表示形式不同不是主因：放宽口径只多拼出 1 手（占严格口径没拼出的 3 手的 33\.3%）[^\n]*放宽后仍有 2 手拼不出/);
     assert.match(text, /拼得出的手里一手都没用到的积木：[^\n]*圣女接力（用在 3 条路线）/);
     assert.match(text, /起手里常见[^\n]*拼得出的手里一手都没有的卡：[^\n]*白之落胤[^\n]*2 手，40\.0%/);
   });

@@ -181,6 +181,16 @@ describe('opInBlocks：某个操作有没有出现在某块积木的某个写法
     assert.equal(has({ pick: [1, 2, 3] }), false);
   });
 
+  test('放宽口径：选了几张卡一样就算有、放哪一格和 pass 不看；严格口径下选的卡不同就没有', () => {
+    const loose = opInBlocks(variants, LOOSE);
+    const pick = variants.flatMap((v) => v.ops).find((op) => op.pick?.length === 1);
+    const other = { pick: [pick.pick[0] + 1] };
+    assert.equal(has(other), false);
+    assert.equal(loose(other), true);
+    assert.equal(loose({ pick: [1, 2, 3, 4, 5, 6, 7] }), false);
+    assert.equal(loose({ place: 99 }), true);
+  });
+
   test('和 coverHand 匹配用的是同一个口径：每个写法里的每个操作都认得', () => {
     for (const v of variants) for (const op of v.ops) assert.equal(has(op), true, JSON.stringify(op));
   });
