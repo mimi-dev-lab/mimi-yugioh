@@ -87,7 +87,7 @@ has route-phone "第 2 / 17 步" "花了什么"
 shot route-phone-end --mobile --route white-albaz --step last
 has route-phone-end "2个打断" "靠这些卡"
 shot quick --tab 起手速查
-has quick "手里有哪张关键卡" "白之落胤" "烙印融合" "惨绝戏之导化 阿卢绯尔" "天底的使徒" "白之圣女 艾克利西亚" "烙印之气炎" "手里有它：走" "基本展开｜白之落胤初动" "终场打断 2" "搭 多多迷宝・软绵雀精" "搭 黑衣龙 阿尔比昂" "缺 烙印融合" "手里有 惨绝戏之导化 阿卢绯尔 →" "检索烙印融合"
+has quick "手里有哪张关键卡" "白之落胤" "烙印融合" "惨绝戏之导化 阿卢绯尔" "天底的使徒" "白之圣女 艾克利西亚" "烙印之气炎" "阿尔白斯之落胤" "手里有它：走" "基本展开｜白之落胤初动" "终场打断 2" "搭 多多迷宝・软绵雀精" "搭 黑衣龙 阿尔比昂" "搭 阿尔白斯之落胤" "缺 烙印融合" "手里有 惨绝戏之导化 阿卢绯尔 →" "检索烙印融合"
 lacks quick "还没做" "读取速查" "%" "还差" "估值" "评分" "总分"
 # shellcheck disable=SC2086
 lacks quick $OLD
@@ -98,7 +98,7 @@ shot quick-jump --tab 起手速查 --jump aluber
 has quick-jump "展开路线" "基本展开｜阿卢绯尔初动" "← 路线列表" "起手 · 共 12 步" "手牌"
 lacks quick-jump "花了什么" "手里有哪张关键卡"
 shot quick-jump-end --tab 起手速查 --jump white-saint --step last
-has quick-jump-end "基本展开｜白之圣女初动" "0个打断" "终场没有打断"
+has quick-jump-end "基本展开｜白之圣女初动" "2个打断" "三英的相剑师" "赫之圣女 卡尔塔西亚"
 shot quick-jump-phone --mobile --tab 起手速查 --jump nadir-servant --step 2
 has quick-jump-phone "基本展开｜天底的使徒初动" "第 2 / 13 步" "花了什么"
 # 卡片弹窗：悬停（桌面）/ 点一下（手机）弹出放大卡图 + 两个名字 + 作用 + 三件事 + 对手回合怎么打断；整块在窗口里；关得掉
