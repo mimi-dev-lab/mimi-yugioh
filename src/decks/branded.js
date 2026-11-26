@@ -7,6 +7,7 @@
 // 和 Game8 页面不一致的另一处：2026-11-24 公告的禁限表（12-04 起适用）把白之落胤限为 1 张，Game8 2026-11-25 的页面还写 ×2、没跟着改；这里白之落胤 ×1、阿尔白斯之落胤 ×2（两者规则上同名，合起来仍 3 张），其余照页面。
 // 和 Game8 页面不一致的一处：路线 A 要用阿卢绯尔检索「赫之烙印」，但页面的卡表里没有它，只有烙印之气炎 ×3；这里按路线走得通改成 烙印之气炎 ×2 + 赫之烙印 ×1，其余照页面。
 import { LEVELS } from './branded-levels.js';
+import { BLOCKS, SEGMENTS as BLOCK_SEGMENTS } from './branded-blocks.js';
 import { LOOKUP } from './branded-lookup.js';
 import { DEFAULTS as ROLE_DEFAULTS, ROUTES as ROLE_ROUTES, TERMS as ROLE_TERMS } from './branded-roles.js';
 import { ROUTES } from './branded-routes.js';
@@ -109,4 +110,4 @@ export const EXTRA = [
   { code: 54757758, count: 1 }, // 沼地のドロゴン
 ];
 
-export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, levels: LEVELS, routes: ROUTES, lookup: LOOKUP, roleTags: { terms: ROLE_TERMS, defaults: ROLE_DEFAULTS, routes: ROLE_ROUTES } };
+export const BRANDED = { name: '烙印', source: SOURCE, roles: ROLES, cards: CARDS, main: MAIN, extra: EXTRA, levels: LEVELS, routes: ROUTES, lookup: LOOKUP, roleTags: { terms: ROLE_TERMS, defaults: ROLE_DEFAULTS, routes: ROLE_ROUTES }, blocks: { blocks: BLOCKS, segments: BLOCK_SEGMENTS } };
