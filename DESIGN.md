@@ -12,10 +12,12 @@ src/duel-session.js  决斗会话：包住规则引擎 ocgcore-wasm，一手牌�
 src/route.js         展开路线重放：把一条路线的步骤喂给决斗会话，走到我方回合结束，返回终场和每一步之后的场面，并和路线上写的终场对照
 src/route-view.js    路线的展示数据：把 playRoute 重放出的每一步场面配上卡名、算和上一步的差异、标刚进来的卡、汇总终场和打断数；纯函数，引擎由调用方注入
 src/interrupts.js    终场打断数：按卡组数据里每张卡的打断条件（from / perTurn / needs / pay / tags）算一个终场能打断几次、靠哪几张卡；路线终场汇总、起手速查、搜索、随机起手模拟都只调它；纯函数
+src/roles.js         作用标签：检查卡组数据里的 roleTags（词在术语表里、每张卡有默认作用、原因不重复），并算路线每一步中场每张卡此刻的作用（这一步写的 / 沿用 / 默认）；纯函数
 src/lookup.js        起手速查：检查卡组数据里的 lookup（目标路线存在、起手里的卡对得上路线数据）、把它展开成 GET /routes 的 lookup（卡名、目标路线的名字和打断数）；纯函数
 src/decks/branded.js         烙印卡组数据：卡表、卡名、作用、三件事、打断数和怎么打断
 src/decks/branded-routes.js  烙印的展开路线（引擎可重放的步骤序列）：Game8 两条，另有从 B站专栏路线图、T³ 文库 Mas 的展开一览补的几条，和本仓随机起手模拟（docs/opening-analysis.md）里搜出的几条，每条带出处
 src/decks/branded-levels.js  烙印每只怪兽的等级 / 阶级 / 连接数（单独一处，测试对照引擎卡库）
+src/decks/branded-roles.js   烙印的作用标签：术语表（词、解释、颜色）、每张卡的默认作用和原因、每条路线每一步中场卡的覆盖；不改卡表行
 src/decks/branded-lookup.js  烙印的起手速查数据：关键卡 → 路线，缺卡改走哪条（只指向 branded-routes.js 里的路线 id）
 src/search.js        最好场面搜索（离线分析用，#37）：在决斗会话里做有限偏离的深度优先搜索（存档回滚、置换表），按场面值评估终场；上限按节点数；纯逻辑，见「随机起手模拟」
 src/opening-sim.js   随机起手模拟：发牌（mulberry32）、总种子派生每手种子、一手的模拟（搜索 + 已知路线取更好的）、记录重放和对照；纯逻辑，引擎、「现在」由调用方注入
@@ -104,7 +106,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 ## 卡组数据
 
-`src/decks/<卡组>.js` 导出一个卡组对象 `{ name, source, roles, cards, main, extra, levels?, routes, lookup }`：
+`src/decks/<卡组>.js` 导出一个卡组对象 `{ name, source, roles, cards, main, extra, levels?, routes, lookup, roleTags? }`：
 
 - `source`：卡表的出处 `{ name, url, date }`（页面版本日期），卡组一览上显示并链过去。
 - `roles`：作用的先后和含义，`[{ name, note }]`（`name` 是 `启动 / 检索 / 融合素材 / 终场 / 手坑`，`note` 是页面上组名下的一句含义，词义见 GLOSSARY.md「作用」；含义的原文只写在这里）；卡组一览按它分组。
@@ -112,6 +114,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 - `main` / `extra`：`{ code, count }` 列表。`checkDeck` 查张数（主 40、额外 15、不超禁限表上限）和每张卡的字段是否齐，`interrupts` 和 `interruptHow` 是否对得上（有打断就要写怎么打断，没有就留空）。
 - `routes`：展开路线，`{ id, name, source, verified, mismatch?, needs, hand, steps, end }`。`source` 是这条路线的出处 `{ name, url, date }`（页面版本日期；取自本仓随机起手模拟的路线写「本仓 500 手模拟（seed 那一手的发牌种子）」，链到 `docs/opening-analysis.md`，`date` 是报告那一版的日期，按模拟那一手改过的地方（去掉依赖洗牌的抽牌、多余的卡）写在路线数据的注释里），`verified` 是引擎重放验证的日期（写在数据里，改了路线或引擎要重新验证再改它），`mismatch` 是教程和引擎结果不一致处的说明（一致就不写）。`hand` 是起手 5 张（必要卡 + 填充牌），`steps` 每步 `{ text, do }`，`do` 是给引擎的回应（写法见 `src/route.js` 开头），`end` 是出处页面写的我方回合结束时的终场 `{ monsters, spellTraps, hand }`（`hand` 是剩几张手牌；出处没写时，按起手张数减去这条路线用掉的算，写法同 `src/decks/branded-routes.js` 文件头）。`playRoute` 重放（返回终场、路线数据里每一步走完后的场面 `stepBoards`、每步的引擎动作文字和发动了效果的卡，另有按引擎的提示切的 `boards`），`diffEnd` 和 `end` 对照。
 - `levels`（可选）：密码 → `{ level }` / `{ rank }`（Xyz 阶级）/ `{ link }`（连接数），每只怪兽一项，魔法陷阱没有。烙印的在 `src/decks/branded-levels.js`（不混进卡表行，`test/route-moves.test.js` 对照引擎卡库 cards.cdb 查）；`cardOf` 把它并进每张卡，所以快照里的卡和 `/deck` 的卡都带 `level` / `rank` / `link`。
+- `roleTags`（可选）：作用标签 `{ terms, defaults, routes }`，写法和规矩见 `src/decks/branded-roles.js` 文件头：`terms` 术语表 `[{ name, note, color }]`；`defaults` 密码 → `{ tags, why }`（卡表里每张卡都有，1–2 个词和一句原因）；`routes` 路线 id → 步号 → 密码 → `{ tags, why }`（这一步中场卡此刻的作用，覆盖默认；刚上场的那一步必须写，之后沿用）。`checkDeck` 调 `checkRoleTags`（`src/roles.js`）查：词都在术语表里、每张卡有默认作用、原因至少 10 字且全库不重复、路线和步号存在。作用标签和上面的 `role`（粗分组）是两回事。
 - `lookup`：起手速查，`[{ card, routes, fallbacks }]`，一项一张关键卡（`card` 是密码），三个字段都必填（没有缺卡改走的写 `[]`）。`routes` 是手里有它走哪条：`[{ route, with? }]`，`route` 是路线 id，`with` 是这条路线起手里还要搭的那张卡（两卡以上的展开才有，如烙印之气炎搭软绵雀精或黑衣龙 阿尔比昂；只写一张，三卡展开的第三张写在路线名里）。`fallbacks` 是缺卡改走哪条：`[{ lack, have, route, how }]`，缺 `lack`、手里有 `have`（一张或几张）时改走 `route`，`how` 是为什么走得通，只写那条路线的步骤里真有的事。`checkLookup`（`src/lookup.js`）查：每个 `route` 都是 `routes` 里的 id，关键卡、`with`、`have` 都在那条路线的起手（`hand`）里，`lack` 不在，每张卡都在卡表里，`how` 非空，关键卡不重复；只在测试里查（`test/branded-data.test.js`，同 `checkDeck`），服务启动不查；运行时 `lookupView` 遇到指向的路线不在重放结果里就抛错，`/routes` 回 503。速查不手写打断数和步数：展示时取重放出来的路线（`lookupView`）。
 
 第一套（烙印）的卡表照 Game8 2026-11-20 版取用，有一处不照：页面的卡表没有赫之烙印，路线 A 却要用阿卢绯尔检索它，所以数据里是 烙印之气炎 ×2 + 赫之烙印 ×1（页面是 烙印之气炎 ×3）。
@@ -125,7 +128,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 | 路径 | 作用 |
 |---|---|
 | `GET /health` | `{ ok: true }` |
-| `GET /deck` | 卡组一览：`name`、`source`（`{ name, url, date }`）、`roles`（作用的先后，每项 `{ name, note }`）、`cards`（按 `roles` 的先后分组，同一作用里主卡组在前、额外卡组在后，各自照卡组数据的顺序；每张 `code`、`md`、`jp`、`level` / `rank` / `link`（怪兽才有）、`role`、`zone`（`main` / `extra`）、`count`、`does / cost / limit`、`interrupts`、`interruptHow`）。不含卡图 |
+| `GET /deck` | 卡组一览：`name`、`source`（`{ name, url, date }`）、`roles`（作用的先后，每项 `{ name, note }`）、`roleTerms`（作用标签的术语表，每项 `{ name, note, color }`）、`cards`（按 `roles` 的先后分组，同一作用里主卡组在前、额外卡组在后，各自照卡组数据的顺序；每张 `code`、`md`、`jp`、`level` / `rank` / `link`（怪兽才有）、`role`、`zone`（`main` / `extra`）、`count`、`does / cost / limit`、`interrupts`、`interruptHow`、`roleTags`（默认作用，1–2 个词）、`roleWhy`（一句原因））。不含卡图 |
 | `GET /routes` | `{ routes, lookup }`。`routes[]` 是展开路线列表，每条 `id`、`name`、`needs`（起手卡 `{ code, md, jp }`）、`interrupts`（终场打断数）、`steps`（步数）、`source`、`verified`、`mismatch`、`engineDiff`。`lookup[]` 是起手速查，一项一张关键卡：`card`（`{ code, md, jp }`）、`routes[]`（手里有它走哪条：`id`、`name`、`interrupts`、`steps`，两卡展开另有 `with`，搭的那张卡 `{ code, md, jp }`，单卡起手是 `null`）、`fallbacks[]`（缺卡改走哪条：`lack`、`have[]`（都是 `{ code, md, jp }`）、`route`（同 `routes[]` 的一项）、`how`）。目标路线的名字、打断数、步数取自重放出的路线，和 `routes[]` 里同 id 的一致，页面不用再请求。引擎数据缺失或重放不通 503 `{ error }`（没有 `lookup`） |
 | `GET /route?id=X` | 一条路线：`id`、`name`、`needs`、`source`、`verified`、`mismatch`、`engineDiff`、`start`（起手场面）、`steps`（每步的说明、场面快照、差异）、`end`（终场汇总），格式见「路线快照」。没有这个 id 404；缺 id 也是 404；引擎问题 503 |
 | `GET /route-anim?id=X` | 一条路线的动画页：`id`、`src`（`data:text/html;base64,…`，页面放进 SDK 的 SandboxedFrame；带卡图、HyperFrames 播放器和运行时，几 MB）、`starts` / `ends`（每个位置一项：0 = 起手，1..N = 第几步；开始帧、结束帧的秒数，结束帧 = 这一步走完、卡都停稳的那一刻）、`duration`、`stage`（`{ w, h }` = 800×859）。第一次请求时拼，按路线缓存。没有这个 id 404；引擎问题 503 |
@@ -136,6 +139,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 `replayRoute(engine, deck, route)` 重放一条路线，返回 `GET /route` 的内容。场面**不手写**，全部来自引擎重放：
 
 - `steps`：路线数据里每一项 `steps` 一条（条数 = `route.steps.length`），`{ n, text, actions, activated, board, diff, moves }`。`board` 是这一步走完后我方的完整场面：`hand`、`monsters`（含额外怪兽区，`sequence` 5、6）、`spellTraps`（含场地）、`grave`、`banished`、`deck`（主卡组每一张，顺序是引擎洗牌后的）、`extra`（额外卡组每一张），每张卡 `{ code, md, jp, level?/rank?/link?, sequence }`（`sequence` 是区内位置；怪兽才有等级 / 阶级 / 连接数），怪兽区和魔陷区的卡多一个 `position`：`attack`（表侧攻击）、`defense`（表侧守备，页面横放）、`facedown`（里侧），刚进来的卡多一个 `fresh: true`。`diff` 是和上一步（第 1 步对比起手 `start`）相比 7 个区各自的 `{ in, out }`：进来了哪些、离开了哪些，即「花了什么 → 换来什么」（按密码数张数，区内换位置不算）。`activated` 是这一步里引擎记到的我方发动效果的卡，`actions` 是这一步引擎动作的文字（去掉「发动」「选完」「放在第几格」这类机械确认）。最后一步的 `board` 是终场。
+- `roles`（每步一项，数组）：这一步走完后中场（`monsters` 加 `spellTraps`）每个密码一条，`{ code, md, jp, …, tags（1–2 个作用词）, why（此刻为什么是这个作用）, from, since? }`；`from` 是 `step`（这一步写了）、`carried`（沿用之前写的，`since` 是写在第几步）、`default`（默认，`why` 是卡的默认原因）。由 `resolveRoles`（`src/roles.js`）按卡组数据的 `roleTags` 算，不依赖引擎之外的东西；刚上场（`fresh`）的卡必须是 `step`（测试查）。
 - `moves`：这一步里引擎自己发出的卡片移动（会话的 MSG_MOVE，按发生顺序，只列我方的卡；**不是从 diff 推断的**）：`{ code, md, jp, level?/rank?/link?, from, to, fromSequence, sequence, position?, summon?, chain? }`。`fromSequence` 是出发处的区内位置（同密码的几张卡在场上时靠它认是哪一张离开），`sequence` 是引擎说的去处的区内位置（MSG_MOVE 的 `to.sequence`：怪兽区 0–4 主怪兽区、5–6 额外怪兽区，魔陷区同理，手牌、墓地等是进去之后的第几张），动画里所有落点的格子都取自它，不自己挑；`from` / `to` 是区名 `hand / monsters / spellTraps / grave / banished / deck / extra`（Xyz 素材是 `overlay`，快照里没有这个区，现有卡组没有 Xyz）；`position` 是去处在怪兽区 / 魔陷区时的表示形式；`summon` 是这只怪兽被召唤的方式（`normal`、`special`、`fusion`、`synchro`、`xyz`、`link`、`ritual`，取自引擎消息）；`chain` 是移动发生时正在连锁的第几环（发动魔法上场、支付之前不在连锁里）。每个区、每个密码的净进出等于 `diff` 的 `in` / `out`（`test/route-moves.test.js` 对每条路线每一步查）。注意引擎的移动语义：融合 / 同调的素材移动的 `reason` 带 MATERIAL，去处由效果决定（同调素材进墓地；白之落胤线第 14 步冰剑龙的融合素材，卢绯里昂回额外卡组、除外的白之落胤回主卡组）；除外的怪兽回场是一条 `banished → monsters` 的移动。
 - `end`（终场汇总）：`monsters`、`spellTraps`、`hand`、`grave`、`banished`，`interrupts` = 终场的打断数（`countInterrupts`：发动条件满足的各卡 `interrupts` 之和，墨丘利耶在手牌也算），`breakers` 列出每个打断靠哪张卡、算进去几张、怎么打断（`interruptHow`）；条件不满足的卡不列。不在路线里手写。
 - `engineDiff`：引擎重放的终场和路线上写的 `end` 的差异（`diffEnd`，空 = 一致）；`mismatch`：路线数据里写的说明。教程和引擎不一致时两者都在，页面醒目显示；路线测试要求 `engineDiff` 非空时 `mismatch` 必须有（`test/route-view-http.test.js`）。
