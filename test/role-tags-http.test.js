@@ -107,6 +107,7 @@ describe('卡的作用标签：接口返回的数据', () => {
       for (const def of BRANDED.routes) routes[def.id] = (await get(server.url, `/route?id=${def.id}`)).body;
       const tagsAt = (id, n, md) => routes[id].steps[n - 1].roles.find((r) => r.md === md).tags.join('+');
       for (const id of ['white-saint', 'high-spirits-albaz']) assert.equal(tagsAt(id, routes[id].steps.length, '三英的相剑师'), '打断', id);
+      for (const [id, n] of [['white-saint', 6], ['high-spirits-albaz', 6]]) assert.equal(tagsAt(id, n, '三英的相剑师'), '打断', `${id} 第 ${n} 步：检索已经做完`);
       assert.equal(tagsAt('white-albaz', 6, '引导之圣女 库妸㽗'), '留场');
       assert.equal(tagsAt('white-albaz', 14, '引导之圣女 库妸㽗'), '留场');
       assert.equal(tagsAt('nadir-servant', 13, '白之落胤'), '留场');
