@@ -16,6 +16,7 @@ src/roles.js         作用标签：检查卡组数据里的 roleTags（词在�
 src/blocks.js        积木：检查卡组数据里的 blocks（名字、颜色唯一，每条路线每一步恰好归一块）、给路线配上积木分段（`routeBlocks`）、取每块积木的操作序列写法（`blockVariants`，来自路线数据里它对应的那几步）、算一手的展开能不能只用积木拼出来（`coverHand`，严格和放宽两个口径）、哪些路线用到某块积木（`routesUsing`）、某个操作有没有出现在积木写法里（`opInBlocks`）、一手里哪些积木的写法整段出现了（`blocksSeenIn`）；操作「一样」的标准只有 `blocks.js` 里一个键函数；纯函数
 src/ledger.js        资源账本：检查卡组数据里的 ledger（`ONCE_PER_TURN`），并算路线每一步走完后的账本（通常召唤用了没、到这步为止用掉的「每回合一次」效果、额外卡组剩几张和关键卡在哪）；全部来自引擎重放的状态；纯函数
 src/endgame.js       终场倒推（试用，#51）：查终场目标数据（路线、积木、关键卡都存在、积木和路线分段一致）、`rankEndgames`（「怎么挑」的规则）、`buildEndgames`（页面数据：每个目标的起手卡、终场打断的卡、积木，缺一块时的补法由别的路线推出）；纯函数
+src/tree.js          决策树（试用，#52）：`buildTree`（从路线数据和 500 手的 JSONL 贪心生成：每个节点选「手里有 X 吗」里让叶子路线命中手数增加最多的卡）、`bestRoutes` / `scoreTree`（最好路线和导向正确率的口径，写在文件头）、`checkTree`（叶子指向存在的路线、每条路线至少一个叶子、不在一条路上重复问）、`treeView`（页面数据，问题措辞用覆盖表或默认）；纯函数
 src/features.js      试用功能的开关（ledger、subway、endgame、tree）：名字、默认全开、`featuresFrom(关掉的名字)`；读环境变量只在 server.js
 src/subway.js       汇流地铁图（试用，#50）：由积木分段和重放过的路线推出起手站（路线要的起手卡）、枢纽站（积木，≥2 条路线用才叫枢纽）、终场站（每条路线一个）、边（路线里相邻两站，合并成一条记路线 id），每站带 stops（点它跳到的路线步骤）和布局（列 = 离起手站最长距离，行按重心排）；积木先后在路线间不一致（有环）就抛错；纯函数
 src/lookup.js        起手速查：检查卡组数据里的 lookup（目标路线存在、起手里的卡对得上路线数据）、把它展开成 GET /routes 的 lookup（卡名、目标路线的名字和打断数）；纯函数
@@ -25,6 +26,8 @@ src/decks/branded-levels.js  烙印每只怪兽的等级 / 阶级 / 连接数（
 src/decks/branded-roles.js   烙印的作用标签：术语表（词、解释、颜色）、每张卡的默认作用和原因、每条路线每一步中场卡的覆盖；不改卡表行
 src/decks/branded-blocks.js  烙印的积木：10 块（名字、颜色、要什么、给什么）和 9 条路线每一步归哪块（`SEGMENTS`：路线 id → `{ block, from, to }`）；不改卡表行和路线步骤
 src/decks/branded-ledger.js  烙印的账本数据：哪张卡的哪个效果（引擎报的效果描述号的低位 n，必要时加发动时的区）是卡片上的第几个「每回合一次」效果；不改卡表行
+src/decks/branded-tree.js  烙印的决策树数据：由 `scripts/decision-tree.js` 生成，不手改，测试核对等于重算
+src/decks/branded-tree-text.js  决策树分岔问题的措辞覆盖表（卡的密码 → 问题）
 src/decks/branded-endgames.js  烙印的目标终场：3 个（路线、积木、关键卡、500 手里的手数 `seen`），挑法写在文件头；不改卡表行
 src/decks/branded-lookup.js  烙印的起手速查数据：关键卡 → 路线，缺卡改走哪条（只指向 branded-routes.js 里的路线 id）
 src/search.js        最好场面搜索（离线分析用，#37）：在决斗会话里做有限偏离的深度优先搜索（存档回滚、置换表），按场面值评估终场；上限按节点数；纯逻辑，见「随机起手模拟」
@@ -44,6 +47,7 @@ scripts/fetch-card-names.js  按日文卡名向 ygocdb 查密码和简中名（m
 scripts/sync-card-images.js  把卡组用到的卡图从 NAS 经 ssh（stat + tar）复制到数据目录 images/；手动跑，`--dry-run` 只打出要复制的文件数
 launchd/             在 mac mini 上常驻用的 launchd 配置 jp.lifan.mimi-yugioh（见「在 mini 上常驻」）
 scripts/opening-sim.js  随机起手模拟（离线，#37）：固定种子发 5 张先攻起手，每手搜最好场面并试已知路线，每手一行追加到 JSONL，可续跑、可 `--shard` 并行；手动跑，不进 ./ci
+scripts/decision-tree.js  路线数据 + 500 手 JSONL → src/decks/branded-tree.js（改了路线、速查或重跑 500 手后跑，再跑 opening-report.js）
 scripts/opening-report.js  JSONL → docs/opening-analysis.md（纯计算）；`--merge` 把几个分片合成一份 JSONL
 scripts/opening-common.js  opening-sim.js 和 opening-replay.js 共用：引擎数据目录的默认值、报错退出
 scripts/opening-replay.js  从 JSONL 取一手（`--seed` 或 `--index`）搜出的步骤，在引擎里重放，打出终场和打断数并和记录对照
@@ -143,6 +147,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 | `GET /deck` | 卡组一览：`name`、`source`（`{ name, url, date }`）、`roles`（作用的先后，每项 `{ name, note }`）、`roleTerms`（作用标签的术语表，每项 `{ name, note, color }`）、`cards`（主卡组在前、额外卡组在后，各自照卡组数据的顺序；页面按每张卡 `roleTags` 的第一个词分组；每张 `code`、`md`、`jp`、`level` / `rank` / `link`（怪兽才有）、`role`、`zone`（`main` / `extra`）、`count`、`does / cost / limit`、`interrupts`、`interruptHow`、`roleTags`（默认作用，1–2 个词）、`roleWhy`（一句原因））。不含卡图 |
 | `GET /routes` | `{ routes, lookup }`。`routes[]` 是展开路线列表，每条 `id`、`name`、`needs`（起手卡 `{ code, md, jp }`）、`interrupts`（终场打断数）、`steps`（步数）、`source`、`verified`、`mismatch`、`engineDiff`。`lookup[]` 是起手速查，一项一张关键卡：`card`（`{ code, md, jp }`）、`routes[]`（手里有它走哪条：`id`、`name`、`interrupts`、`steps`，两卡展开另有 `with`，搭的那张卡 `{ code, md, jp }`，单卡起手是 `null`）、`fallbacks[]`（缺卡改走哪条：`lack`、`have[]`（都是 `{ code, md, jp }`）、`route`（同 `routes[]` 的一项）、`how`）。目标路线的名字、打断数、步数取自重放出的路线，和 `routes[]` 里同 id 的一致，页面不用再请求。引擎数据缺失或重放不通 503 `{ error }`（没有 `lookup`） |
 | `GET /endgames` | 终场倒推（试用功能 endgame；`YUGIOH_FEATURES_OFF` 里有 endgame 时 404）：`hands`（模拟手数）、`endgames[]`（`id`、`name`、`interrupts`、`seen`、`route`、`start`（起手卡）、`keyCards[]`（终场打断的卡，带 `interruptHow`）、`blocks[]`（积木，带 `usedBy` 和 `missing`：`swaps[]` 换一块、`skips[]` 跳过、`without[]` 改走不用它的路线，每项指向路线和步）、`alsoRoutes[]`）。引擎问题 503 |
+| `GET /tree` | 决策树（试用功能 tree；`YUGIOH_FEATURES_OFF` 里有 tree 时 404）：`root`（嵌套：问题节点 `{ id, card, question, yes, no }`，叶子 `{ id, route }`，`route` 带 `id`、`name`、`needs`、`interrupts`、`steps`）、`leaves[]`（平铺的叶子，`path[]` 是走到它的回答 `{ card, question, has }`）。引擎问题 503 |
 | `GET /subway` | 汇流地铁图（试用功能 subway；`YUGIOH_FEATURES_OFF` 里有 subway 时 404）：`stations[]`（`id`、`kind`：`start` / `hub` / `stop` / `end`，`label`，`layer`、`row` 布局，`stops[]` = 点它跳到的 `{ route, routeName, step }`；起手站另有 `card`；枢纽和普通站有 `block`、`color`、`needs`、`gives`；终场站有 `interrupts`、`monsters`）、`edges[]`（`from`、`to`、`routes[]`）、`layers`、`rows`、`routes[]`。起手站的步是那张卡第一次用上的一步，枢纽的步是积木在那条路线里的第一步，终场站是最后一步。引擎问题 503 |
 | `GET /route?id=X` | 一条路线：`id`、`name`、`needs`、`source`、`verified`、`mismatch`、`engineDiff`、`start`（起手场面）、`steps`（每步的说明、场面快照、差异）、`end`（终场汇总），格式见「路线快照」。没有这个 id 404；缺 id 也是 404；引擎问题 503 |
 | `GET /route-anim?id=X` | 一条路线的动画页：`id`、`src`（`data:text/html;base64,…`，页面放进 SDK 的 SandboxedFrame；带卡图、HyperFrames 播放器和运行时，几 MB）、`starts` / `ends`（每个位置一项：0 = 起手，1..N = 第几步；开始帧、结束帧的秒数，结束帧 = 这一步走完、卡都停稳的那一刻）、`duration`、`stage`（`{ w, h }` = 800×859）。第一次请求时拼，按路线缓存。没有这个 id 404；引擎问题 503 |
@@ -190,7 +195,7 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 
 ## 插件
 
-`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /deck`、`GET /routes`（含 `lookup`、`features`）、`GET /subway`、`GET /endgames`、`GET /route?id=` 和 `GET /route-anim?id=`（id 只许小写字母、数字、连字符、最长 64 个字符，否则 400）、`GET /card-image?code=`（只收数字）。没有写的接口。服务没应答是 502。后端的路径改了要重启 Hermes 网关才生效。
+`plugin/dashboard/plugin_api.py`（Hermes 挂在 `/api/plugins/yugioh/`）只转发，一条路径对一条服务接口，没有别的：`GET /deck`、`GET /routes`（含 `lookup`、`features`）、`GET /subway`、`GET /endgames`、`GET /tree`、`GET /route?id=` 和 `GET /route-anim?id=`（id 只许小写字母、数字、连字符、最长 64 个字符，否则 400）、`GET /card-image?code=`（只收数字）。没有写的接口。服务没应答是 502。后端的路径改了要重启 Hermes 网关才生效。
 
 页面 `plugin/webapp/plugin.js`：标题「游戏王 · 烙印教程」，页签：卡组一览、展开路线、起手速查、展开地图、术语表（展开地图里的块都关掉时页签隐藏）：
 
@@ -223,6 +228,8 @@ ci                   合并前的统一检查（land 跑它），检查项在 ch
 - **消息**（插件页 ↔ 外壳页，协议写在 `anim-page.js` 头部）：插件页发 `seek` / `playRange` / `pause`，插件页还发 `keys { space }`（在 `yg-ready` 时和切开关时发，告诉框空格要不要转；外壳页再转给合成页），框发 `yg-ready` / `yg-time` / `yg-ended`、卡的悬停 / 点击（带框里的矩形）、左右键，以及空格（只有收到过 `keys { space: true }` 才转并拦下默认动作，关着时框里的空格和以前一样）。插件页只收 `event.source === frame.contentWindow` 的消息。
 - **第三方文件**：`vendor/hyperframes/`，版本、md5、许可证见 NOTICE.md；换版本是原样换文件。
 - 已知的限制：手机宽（390 px）动画整体缩到约一半，卡下的名字很小，靠点一下弹窗看字；Xyz 素材（overlay）和场地区（魔陷区第 5 格）动画还不支持，遇到会抛错（现有卡组没有）。
+
+**决策树**（#52，试用，开关 `tree`，数据 `GET /tree`）：「展开地图」的第三块（`MAP_BLOCKS` 里加了一项）。两个看法，页内切换：「一问一答」（默认）一次一个问题——卡图加「手里有「X」吗？」，点是 / 否往下走，已答的显示成「有 X」「没有 X」的标签，「返回上一题」退一步、「重新开始」回根；走到叶子显示路线（名字、终场打断、步数、起手卡），点它进播放器从起手开始。「整棵树」是每个叶子一张卡：上面是走到它的回答标签，下面是路线按钮；用平铺的列表而不是画树，因为问题最深 7 层，画成树手机宽放不下，列表每个叶子自带完整条件。手机宽单列不横滚。树由脚本生成（`scripts/decision-tree.js`，规则和「最好路线」口径见 `src/tree.js` 文件头），问题只问起手速查里出现的卡；措辞覆盖在 `src/decks/branded-tree-text.js`。500 手里的导向正确率写在 `docs/opening-analysis.md`「决策树导向」一节（报告生成，样本内的数），页面不显示。验证脚本：`--tab 展开地图 --tree 是,否`（依次点是 / 否）或 `--tree 整棵树`，截图只截决策树这一块（别的块藏起来）。
 
 **终场倒推**（#51，试用，开关 `endgame`，数据 `GET /endgames`）：「展开地图」的第二块。2–3 个目标终场（`src/decks/branded-endgames.js`），每个一张卡片：名字、终场打断数、「500 手模拟里 N 手的终场有这几张」；关键卡（起手卡 + 终场里提供打断的卡，带怎么打断）；要拼的积木按先后列出，每块有「缺了怎么补」按钮，点开出换一块 / 跳过它 / 改走别的路线，每一项带能跳到路线那一步的按钮。手机宽单列、卡片自然折行，不横滚。
 - **怎么挑**：把每条路线的终场按提供打断的卡合并成候选；先比打断数（多的在前），同打断数再比 500 手模拟（`docs/opening-analysis.jsonl`）里最好终场的场上或手里含这几张卡的手数（多的在前）；一手都没有的去掉；取前 3。`rankEndgames` 实现这条规则，测试用它核对数据里的三个就是前 3、手数是重算的。

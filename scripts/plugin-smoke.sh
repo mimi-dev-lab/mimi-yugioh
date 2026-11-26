@@ -107,6 +107,12 @@ map-phone --mobile --tab 展开地图
 map-jump-phone --mobile --tab 展开地图 --station end:white-saint
 map-endgame --tab 展开地图 --expand sword-mirrorjade:sword-lock,trap-trio:set-and-close
 map-endgame-phone --mobile --tab 展开地图 --expand sword-mirrorjade:sword-lock,trap-trio:set-and-close
+map-tree-mid --tab 展开地图 --tree 否
+map-tree-leaf --tab 展开地图 --tree 是,否
+map-tree-all --tab 展开地图 --tree 整棵树
+map-tree-mid-phone --mobile --tab 展开地图 --tree 否
+map-tree-leaf-phone --mobile --tab 展开地图 --tree 是,否
+map-tree-all-phone --mobile --tab 展开地图 --tree 整棵树
 SHOTS
 "$V" batch "$YV_EVIDENCE/shots.txt" --jobs "${YUGIOH_SMOKE_JOBS:-6}" || { echo "有截图没截成（没画出来、断言没过或有不同源的请求），见上面的输出"; exit 1; }
 seen deck
@@ -294,6 +300,15 @@ seen map-endgame-phone
 has map-endgame-phone "终场倒推" "缺了怎么补" "换一块"
 for name in map-endgame map-endgame-phone; do
   node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const e = j.endgame; if (!e || e.sections !== 3 || e.blocks.some((n) => n < 3) || e.keyCards.some((n) => n < 3) || e.outside.length || e.expanded.length !== 2 || e.expanded.some((x) => !x.options.length || x.options.some((o) => !o.jumps))) { console.error(JSON.stringify(e)); process.exit(1); }' "$ev/$name.json" || { echo "$name 的终场倒推不对（目标数、积木数、关键卡数、补法和它们的跳转，或有东西画出卡片框），见 $ev/$name.json"; exit 1; }
+  grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
+  grep -q '"jsErrors": \[\]' "$ev/$name.json" || { echo "$name 里有没接住的 JS 异常，见 $ev/$name.json"; exit 1; }
+done
+# 展开地图的决策树：一问一答走到一半（问题、已答的、是 / 否 / 返回）、走到叶子（路线能点）、整棵树（每个叶子带走到它的回答）；手机宽不出横向滚动条、没有东西画出块的框；不显示百分比、估值、还差
+for name in map-tree-mid map-tree-mid-phone; do seen $name; has $name "决策树" "没有 天底的使徒" "吗？" "是" "否" "返回上一题" "重新开始"; lacks $name "%" "还差" "估值"; done
+for name in map-tree-leaf map-tree-leaf-phone; do seen $name; has $name "决策树" "有 天底的使徒" "没有 白之落胤" "照这条路线展开" "起手"; lacks $name "%" "还差" "估值"; done
+for name in map-tree-all map-tree-all-phone; do seen $name; has $name "决策树" "一问一答" "整棵树" "有 天底的使徒" "没有 天底的使徒" "终场打断"; lacks $name "%" "还差" "估值"; done
+for name in map-tree-mid map-tree-mid-phone map-tree-leaf map-tree-leaf-phone map-tree-all map-tree-all-phone; do
+  node -e 'const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const t = j.tree; const n = process.argv[2]; const ok = t && !t.outside.length && (n.includes("-mid") ? t.mode === "ask" && t.question && t.answers.length === 1 && !t.leaf : n.includes("-leaf") ? t.mode === "ask" && t.leaf === "nadir-servant" && t.answers.length === 2 : t.mode === "all" && t.leaves >= 9); if (!ok) { console.error(JSON.stringify(t)); process.exit(1); }' "$ev/$name.json" "$name" || { echo "$name 的决策树不对（模式、问题、已答的回答、叶子，或有东西画出块的框），见 $ev/$name.json"; exit 1; }
   grep -q '"overflowX": false' "$ev/$name.json" || { echo "$name 有横向滚动条，见 $ev/$name.json"; exit 1; }
   grep -q '"jsErrors": \[\]' "$ev/$name.json" || { echo "$name 里有没接住的 JS 异常，见 $ev/$name.json"; exit 1; }
 done

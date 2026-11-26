@@ -27,6 +27,7 @@
    A click on a station opens the route player at that station's step (several routes through it: pick one below the map first). On a phone the map is wider than the screen and scrolls sideways inside its frame.
    终场倒推 (a 试用 block, GET /endgames): 2-3 target end boards (the service picked them by interrupts and by how often the 500 simulated hands end with those cards); each lists the start card, the end cards that give the interrupts and the blocks to put together,
    and under each block 缺了怎么补 (opens a list the service derived from the other routes: a block that can take its place, routes that do without it, or routes that avoid it; each one jumps to a route step).
+   决策树 (a 试用 block, GET /tree): answer 是 / 否 to "do you hold X?" one question at a time (the service gives the tree and the wording); the answers so far show as chips, 返回 undoes the last one, a leaf shows the route and opens its player; 整棵树 lists every leaf with the answers that lead to it (a list, not a drawing, so it fits a phone).
    Nothing to play and no scores: the page only reads.
    A disk plugin: plain ESM, no build step, importing only @hermes/plugin-sdk, react and react/jsx-runtime. No outside
    fonts, images or requests.
@@ -671,6 +672,7 @@ function LookupView({ rest, loaded, onOpen }) {
 const MAP_BLOCKS = [
   { id: "subway", title: "汇流地铁图", feature: "subway", View: SubwayBlock },
   { id: "endgame", title: "终场倒推", feature: "endgame", View: EndgameBlock },
+  { id: "tree", title: "决策树", feature: "tree", View: TreeBlock },
 ];
 const mapBlocks = (features) => MAP_BLOCKS.filter((b) => features?.[b.feature] !== false);
 
@@ -810,6 +812,53 @@ function EndgameBlock({ rest, onOpen }) {
         }))),
       e.alsoRoutes.length ? h("p", { className: "yg-lab" }, `走到同一组打断的还有：${e.alsoRoutes.map((r) => r.name).join("、")}`) : null,
       h("div", { className: "yg-row" }, h("button", { className: "yg-btn small", onClick: () => onOpen(e.route.id, 0) }, `打开路线：${e.route.name}`)))));
+}
+
+// ---- 决策树 (a 试用 block, GET /tree): { root, leaves }; a question node { id, card, question, yes, no }, a leaf { id, route }; leaves is the flat list with the answers that lead to each ----
+function TreeBlock({ rest, onOpen }) {
+  const [tree, setTree] = useState(null);
+  const [error, setError] = useState("");
+  const [mode, setMode] = useState("ask"); // ask = one question at a time, all = every leaf with its answers
+  const [answers, setAnswers] = useState([]); // true / false for each question answered so far
+  const { bind } = useCardPopup();
+  useEffect(() => {
+    let live = true;
+    rest("/tree").then((t) => { if (live) setTree(t); }).catch((e) => { if (live) setError(message(e)); });
+    return () => { live = false; };
+  }, [rest]);
+  if (error) return h("div", { className: "yg-error", role: "alert" }, error);
+  if (!tree) return h("p", { className: "yg-lab" }, "读取决策树…");
+  const trail = []; // the questions on the way to the current node
+  let node = tree.root;
+  for (const a of answers) { trail.push({ q: node, has: a }); node = a ? node.yes : node.no; }
+  const leaf = node.route ? node : null;
+  const answer = (has) => setAnswers([...answers, has]);
+  return h("div", { className: "yg-tree" },
+    h("p", { className: "yg-lab yg-sum" }, "不用记 9 条路线的区别：按手里的牌回答是 / 否，只问真正分岔的地方。只看起手 5 张里有没有这几张卡；到了路线再看它要凑齐哪些起手卡。"),
+    h("div", { className: "yg-row wrap", role: "group", "aria-label": "看法" },
+      h("button", { className: `yg-chip yg-tree-mode${mode === "ask" ? " on" : ""}`, "aria-pressed": String(mode === "ask"), "data-tree-mode": "ask", onClick: () => setMode("ask") }, "一问一答"),
+      h("button", { className: `yg-chip yg-tree-mode${mode === "all" ? " on" : ""}`, "aria-pressed": String(mode === "all"), "data-tree-mode": "all", onClick: () => setMode("all") }, "整棵树")),
+    mode === "all"
+      ? h("ol", { className: "yg-tree-all", "aria-label": "整棵树：每个叶子和走到它的回答" }, tree.leaves.map((l) => h("li", { key: l.id, className: "yg-tree-leaf", "data-leaf": l.id, "data-route-id": l.route.id },
+        h("div", { className: "yg-row wrap" }, l.path.map((p, i) => h("span", { key: i, className: `yg-chip yg-tree-ans${p.has ? " on" : ""}` }, `${p.has ? "有" : "没有"} ${p.card.md}`))),
+        h(JumpButton, { route: l.route, onOpen }))))
+      : h("div", { className: "yg-tree-ask" },
+        trail.length ? h("div", { className: "yg-row wrap yg-tree-trail", "aria-label": "已经回答的" }, trail.map((t, i) => h("span", { key: i, className: `yg-chip yg-tree-ans${t.has ? " on" : ""}` }, `${t.has ? "有" : "没有"} ${t.q.card.md}`))) : null,
+        leaf
+          ? h("section", { className: "yg-tree-result", "data-leaf": leaf.id, "aria-label": "走到的路线" },
+            h("div", { className: "yg-phd" }, "照这条路线展开"),
+            h(JumpButton, { route: leaf.route, onOpen, extra: h("span", { className: "yg-chip" }, `起手 ${leaf.route.needs.md}`) }),
+            h("p", { className: "yg-lab" }, "点路线进播放器，从起手开始一步步看。"))
+          : h("section", { className: "yg-tree-q", "data-node": node.id || "root", "aria-label": "现在这一问" },
+            h("div", { className: "yg-tree-qrow" },
+              h("span", { className: "yg-eg-art", ...bind(node.card.code, node.card.md) }, h(CardArt, { rest, code: node.card.code, md: node.card.md })),
+              h("p", { className: "yg-tree-qtext" }, node.question)),
+            h("div", { className: "yg-row" },
+              h("button", { className: "yg-btn yg-tree-yes", onClick: () => answer(true) }, "是"),
+              h("button", { className: "yg-btn yg-tree-no", onClick: () => answer(false) }, "否"))),
+        h("div", { className: "yg-row" },
+          h("button", { className: "yg-btn small yg-tree-back", disabled: !answers.length, onClick: () => setAnswers(answers.slice(0, -1)) }, "返回上一题"),
+          h("button", { className: "yg-btn small yg-tree-reset", disabled: !answers.length, onClick: () => setAnswers([]) }, "重新开始"))));
 }
 
 function YugiohApp({ rest, setDeckInfo }) {
@@ -1058,6 +1107,16 @@ const CSS = `
 .yg-eg-opt { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .yg-eg-opt > p { line-height: 1.7; }
 .yg-eg-jump { padding: 8px 10px; }
+.yg-tree { display: flex; flex-direction: column; gap: 14px; max-width: 760px; min-width: 0; }
+.yg-tree-ask { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.yg-tree-q, .yg-tree-result { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid #c8ff3d; border-radius: 8px; min-width: 0; }
+.yg-tree-qrow { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.yg-tree-qrow .yg-eg-art { width: 56px; }
+.yg-tree-qtext { margin: 0; font-size: 18px; line-height: 1.5; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.yg-tree-yes, .yg-tree-no { min-width: 96px; padding: 10px 18px; font-size: 16px; }
+.yg-tree-ans.on { border-color: #c8ff3d; }
+.yg-tree-all { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.yg-tree-leaf { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid #2a2a2a; border-radius: 8px; min-width: 0; }
 .yg-picked { border: 1px solid #c8ff3d; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
 @media (max-width: 760px) {
   .yg { padding: 12px; }

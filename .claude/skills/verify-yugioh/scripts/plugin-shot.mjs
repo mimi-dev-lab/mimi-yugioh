@@ -42,7 +42,7 @@ const pathOf = (o) => {
 };
 const stepOf = (o) => (o.step === 'last' ? Infinity : o.step === undefined || o.step === null || o.step === '起手' ? 0 : Number(o.step));
 // 做过这些动作的页面不再给下一张接着用：它们改了页面状态（弹窗、动画跳步、连播、本地存储里的开关、滚动、并排图换了页面），不是「从头点到这」的样子
-const DIRTY = ['clickStep', 'playAll', 'guess', 'nextMid', 'stageAt', 'hover', 'tap', 'hoverAnim', 'tapAnim', 'hoverRole', 'tapRole', 'close', 'compare', 'clipStage', 'expand'];
+const DIRTY = ['clickStep', 'playAll', 'guess', 'nextMid', 'stageAt', 'hover', 'tap', 'hoverAnim', 'tapAnim', 'hoverRole', 'tapRole', 'close', 'compare', 'clipStage', 'expand', 'tree'];
 // 手机宽选卡开的是弹窗（桌面宽是页面里的说明区）：弹窗开着的页面也不接着用
 const dirtying = (o) => DIRTY.some((k) => o[k] !== undefined && o[k] !== null && o[k] !== false) || (o.mobile && !!o.select);
 function canContinue(page, o) {
@@ -185,6 +185,24 @@ async function main() {
       if (!hit) await fail(new Error(`终场倒推里没有「${key}」的「缺了怎么补」按钮`));
       await until((k) => { const li = [...document.querySelectorAll('.yg-eg-blk')].find((x) => x.querySelector(`button[data-missing="${k}"]`)); return !!li?.querySelector('.yg-eg-help .yg-eg-opt'); }, key, 10000, `「${key}」的补法出来`).catch(fail);
     }
+    // 决策树：--tree 是,否,…（一问一答里依次点是 / 否）或 --tree 整棵树（切到整棵树的列表）
+    if (opts.tree !== undefined && opts.tree !== null) {
+      if (opts.tab !== '展开地图') throw new Error('--tree 要和 --tab 展开地图 一起用');
+      await until(() => document.querySelectorAll('.yg-tree').length > 0, null, 10000, '决策树出来').catch(fail);
+      if (String(opts.tree) === '整棵树') {
+        await evaluate(() => document.querySelector('button[data-tree-mode="all"]').click());
+        await until(() => document.querySelectorAll('.yg-tree-leaf').length > 0, null, 5000, '整棵树的叶子出来').catch(fail);
+      } else {
+        for (const a of String(opts.tree).split(',').map((x) => x.trim()).filter(Boolean)) {
+          const before = await evaluate(() => document.querySelectorAll('.yg-tree-ans').length);
+          const hit = await evaluate((yes) => { const b = document.querySelector(yes ? '.yg-tree-yes' : '.yg-tree-no'); if (!b) return false; b.click(); return true; }, a === '是');
+          if (!hit) await fail(new Error(`决策树已经到叶子，没有「${a}」可点`));
+          await until((n) => document.querySelectorAll('.yg-tree-ans').length === n + 1, before, 5000, `回答「${a}」后下一步出来`).catch(fail);
+        }
+      }
+    }
+    // 决策树：展开地图的其他块很长，把决策树顶到页面上方（别的块先藏起来，截图和量高度都只看这一块）
+    if (opts.tree !== undefined && opts.tree !== null) await evaluate(() => { for (const b of document.querySelectorAll('.yg-mapblock')) if (b.dataset.mapBlock !== 'tree') b.style.display = 'none'; });
     // 卡组一览里点一张卡（按卡名：aria-label），等说明区出这张卡
     if (opts.select && !did.has(`select:${opts.select}`)) {
       const clicked = await evaluate((n) => { const b = [...document.querySelectorAll('.yg-deck button.yg-tile')].find((x) => x.getAttribute('aria-label') === n); if (!b) return false; b.click(); return true; }, opts.select);
@@ -462,6 +480,15 @@ async function main() {
       return { sections: secs.length, interrupts: secs.map((x) => x.querySelector('.yg-chip.on').innerText), blocks: secs.map((x) => x.querySelectorAll('.yg-eg-blk').length), keyCards: secs.map((x) => x.querySelectorAll('.yg-eg-card').length),
         expanded: [...document.querySelectorAll('.yg-eg-help')].map((x) => ({ of: x.dataset.missingOf, options: [...x.querySelectorAll('.yg-eg-opt')].map((o) => ({ kind: o.dataset.kind, jumps: o.querySelectorAll('.yg-eg-jump').length })) })), outside };
     });
+    // 决策树：现在的模式、这一问的文字、已答的回答、走到的路线（叶子）、整棵树的叶子数、有没有东西画出了块的框
+    const tree = await evaluate(() => {
+      const root = document.querySelector('.yg-tree');
+      if (!root) return null;
+      const r = root.getBoundingClientRect();
+      const outside = [...root.querySelectorAll('*')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.right > r.right + 1 || b.left < r.left - 1); }).slice(0, 3).map((e) => String(e.className));
+      return { mode: root.querySelector('.yg-tree-mode.on')?.dataset.treeMode, question: root.querySelector('.yg-tree-qtext')?.innerText ?? null, answers: [...root.querySelectorAll('.yg-tree-trail .yg-tree-ans')].map((x) => x.innerText),
+        leaf: root.querySelector('.yg-tree-result .yg-jump')?.dataset.routeId ?? null, leaves: root.querySelectorAll('.yg-tree-leaf').length, outside };
+    });
     const overflowX = await evaluate(() => { const x = document.querySelector('.yg'); return x.scrollWidth > x.clientWidth + 1 || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1; });
     const height = await evaluate(() => document.querySelector('.yg').scrollHeight);
     await sleep(600);
@@ -500,7 +527,7 @@ async function main() {
     const local = (u) => u.startsWith(`${opts.base}/`) || u.startsWith('data:') || u.startsWith('about:');
     const cdp = { total: cdpRequests.length, foreign: cdpRequests.filter(([u]) => !local(u)).map(([u]) => u), dataUrls: cdpRequests.filter(([u]) => u.startsWith('data:')).length };
     if (opts.netFile) await writeFile(opts.netFile, `${cdpRequests.map(([u, from]) => `${from}\t${u.startsWith('data:') ? `${u.slice(0, 60)}… (${u.length} 字符)` : u}${local(u) ? '' : '\t<-- 非本地'}`).join('\n')}\n`);
-    await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, map, endgame, mapJump, blocks, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
+    await writeFile(`${opts.evidence}/${opts.name}.json`, JSON.stringify({ overflowX, bar, map, endgame, tree, mapJump, blocks, pop, closed, stage, roleTip, requests: urls.length, foreign, hostLoad, urls, cdp, jsErrors, playedMs, guess }, null, 1));
     page.step = await evaluate(() => Number(document.querySelector('.yg-player')?.dataset.step ?? 0));
     // 并排对照：设计稿 PNG 在左（标签 --compare-label，默认「样子稿」），这张和 --compare-with 列的同一证据目录里先截的几张在右，上下排；在一个 data: 页面里拼好再截一张
     if (opts.compare) {
