@@ -88,7 +88,7 @@ shot route-phone-end --mobile --route white-albaz --step last
 has route-phone-end "2个打断" "靠这些卡"
 # 术语表页签：每个作用词、解释；手机宽也能看
 shot glossary --tab 术语表
-has glossary "术语表" "初动" "展开点" "检索" "堆墓" "素材" "资源回收" "防手坑" "诱饵" "解场" "打断" "留场" "手坑" "对手的灰流丽之类打不到"
+has glossary "术语表" "初动" "展开点" "检索" "堆墓" "素材" "资源回收" "防手坑" "诱饵" "解场" "打断" "留场" "手坑" "防着对手的手坑"
 lacks glossary "%" "还差" "评分" "总分"
 shot glossary-phone --mobile --tab 术语表
 has glossary-phone "防手坑" "诱饵"
