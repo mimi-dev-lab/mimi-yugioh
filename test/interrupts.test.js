@@ -65,17 +65,17 @@ describe('终场打断数按卡片条件算', () => {
   test('冰剑龙 镜翠幻种：自己回合用过除外效果，对手回合不能再用，不计打断；没用过的计 1', () => {
     const extra = [ID.albion];
     assert.equal(total(board({ monsters: [ID.mirrorjade], extra })), 1);
-    assert.equal(total(board({ monsters: [ID.mirrorjade], extra, used: [{ code: ID.mirrorjade, desc: MIRRORJADE_BANISH, zone: 'monsters', sequence: 0 }] })), 0);
+    assert.equal(total(board({ monsters: [ID.mirrorjade], extra, used: [{ code: ID.mirrorjade, description: MIRRORJADE_BANISH, zone: 'monsters', sequence: 0 }] })), 0);
     // 用过的是别的效果（描述号不同），照算
-    assert.equal(total(board({ monsters: [ID.mirrorjade], extra, used: [{ code: ID.mirrorjade, desc: descOf(ID.mirrorjade, 1), zone: 'monsters', sequence: 0 }] })), 1);
+    assert.equal(total(board({ monsters: [ID.mirrorjade], extra, used: [{ code: ID.mirrorjade, description: descOf(ID.mirrorjade, 1), zone: 'monsters', sequence: 0 }] })), 1);
     // 用过除外效果的那只在别的格子（之后离场了，现在这只是另一只），照算
-    assert.equal(total(board({ monsters: [ID.albion, ID.mirrorjade], extra, used: [{ code: ID.mirrorjade, desc: MIRRORJADE_BANISH, zone: 'monsters', sequence: 0 }] })), 1);
+    assert.equal(total(board({ monsters: [ID.albion, ID.mirrorjade], extra, used: [{ code: ID.mirrorjade, description: MIRRORJADE_BANISH, zone: 'monsters', sequence: 0 }] })), 1);
   });
 
   test('只有冰剑龙的限制跨到对手回合：别的打断卡自己回合用过（每回合一次在回合结束时重置），对手回合照算', () => {
     const cartesiaFusion = descOf(ID.cartesia, 1);
-    assert.equal(total(board({ monsters: [ID.cartesia], hand: [ID.mercurier], extra: [ID.granguignol], used: [{ code: ID.cartesia, desc: cartesiaFusion, zone: 'monsters', sequence: 0 }] })), 1);
-    assert.equal(total(board({ monsters: [ID.rindbrumm], used: [{ code: ID.rindbrumm, desc: descOf(ID.rindbrumm, 0), zone: 'monsters', sequence: 0 }] })), 1);
+    assert.equal(total(board({ monsters: [ID.cartesia], hand: [ID.mercurier], extra: [ID.granguignol], used: [{ code: ID.cartesia, description: cartesiaFusion, zone: 'monsters', sequence: 0 }] })), 1);
+    assert.equal(total(board({ monsters: [ID.rindbrumm], used: [{ code: ID.rindbrumm, description: descOf(ID.rindbrumm, 0), zone: 'monsters', sequence: 0 }] })), 1);
   });
 
   test('落胤与圣女：额外卡组要有记述阿尔白斯之落胤的怪兽可送；同名卡每回合只能发动 1 张', () => {

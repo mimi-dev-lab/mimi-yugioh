@@ -27,7 +27,7 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   const activated = []; // 我方发动过效果的卡的密码，按发动顺序
   const events = []; // 引擎发出的卡片移动和召唤消息（MSG_MOVE、MSG_SPSUMMONING…）按发生顺序的记录，路线重放按步切片
   let endEvents = null; // 我方回合结束那一刻 events 有几条；之后（对手回合）的消息不算
-  const used = []; // 我方发动过、之后没离开那一格的效果 { code, desc, zone, sequence }（desc 是效果描述号，同提示里选项的 description）；终场带一份，打断数据此去掉自己回合锁住的效果
+  const used = []; // 我方发动过、之后没离开那一格的效果 { code, description, zone, sequence }（description 是效果描述号，同提示里选项的 description）；终场带一份，打断数据此去掉自己回合锁住的效果
   let endUsed = null; // 我方回合结束那一刻的 used
 
   function build() {
@@ -60,11 +60,15 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
     promptHint = null;
   }
 
+  // 场面的区名 → 引擎的位置（board() 的键，也是 used 里的 zone）
+  const ZONE_LOCATIONS = { hand: L.HAND, monsters: L.MZONE, spellTraps: L.SZONE, grave: L.GRAVE, banished: L.REMOVED, deck: L.DECK, extra: L.EXTRA };
+  const zoneNameOf = (location) => Object.keys(ZONE_LOCATIONS).find((z) => ZONE_LOCATIONS[z] === location) ?? String(location);
+
   // 我方的场面：每个区域里的卡（编号、名字、格子、表示形式），主卡组和额外卡组也列出每一张
   function snapshot() {
     const at = (location) => core.duelQueryLocation(handle, { flags: Q.CODE | Q.POSITION, controller: 0, location })
       .map((c, sequence) => (c ? { code: c.code, name: files.name(c.code), sequence, position: c.position } : null)).filter(Boolean);
-    return { hand: at(L.HAND), monsters: at(L.MZONE), spellTraps: at(L.SZONE), grave: at(L.GRAVE), banished: at(L.REMOVED), deck: at(L.DECK), extra: at(L.EXTRA) };
+    return Object.fromEntries(Object.entries(ZONE_LOCATIONS).map(([zone, location]) => [zone, at(location)]));
   }
 
   // 引擎消息里和卡片去向有关的，按发生顺序记进 events：
@@ -78,12 +82,11 @@ export async function startSession(engine, { hand, deck, extra = [], seed = [1n,
   const MATERIAL = 0x8;
   let chainNow = null;
   let materialKind = null;
-  const ZONES = { [L.HAND]: 'hand', [L.MZONE]: 'monsters', [L.SZONE]: 'spellTraps', [L.GRAVE]: 'grave', [L.REMOVED]: 'banished', [L.DECK]: 'deck', [L.EXTRA]: 'extra' };
   // used：我方的发动记下那张卡在哪一格；那一格的卡移走了（离场、去墓地…），它身上的记录跟着作废（引擎在卡离开时重置它身上的标记）
   function trackUsed(m) {
-    if (m.type === M.CHAINING && m.triggering_controller === 0 && m.controller === 0) used.push({ code: m.code, desc: String(m.description), zone: ZONES[m.location] ?? String(m.location), sequence: m.sequence });
+    if (m.type === M.CHAINING && m.triggering_controller === 0 && m.controller === 0) used.push({ code: m.code, description: String(m.description), zone: zoneNameOf(m.location), sequence: m.sequence });
     if (m.type === M.MOVE && m.from.controller === 0) {
-      const from = ZONES[m.from.location] ?? String(m.from.location);
+      const from = zoneNameOf(m.from.location);
       for (let i = used.length - 1; i >= 0; i--) if (used[i].zone === from && used[i].sequence === m.from.sequence) used.splice(i, 1);
     }
   }

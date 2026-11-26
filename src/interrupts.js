@@ -41,8 +41,8 @@ export function meets(deck, need, zones, self) {
 }
 
 // 这张卡这一格的 ownTurnLock 效果（引擎报的效果描述号 = aux.Stringid(密码, n) = 密码 << 20 | n，见 utility.lua；密码超过 2^11 位移会溢出 32 位，所以用乘法），在我方回合里发动过、之后没离开这一格
-const lockedByOwnTurn = (card, c, zone, used) => card.ownTurnLock !== undefined
-  && used.some((u) => u.code === c.code && u.zone === zone && u.sequence === c.sequence && u.desc === String(c.code * 2 ** 20 + card.ownTurnLock));
+const lockedByOwnTurn = (card, c, boardZone, used) => card.ownTurnLock !== undefined
+  && used.some((u) => u.code === c.code && u.zone === boardZone && u.sequence === c.sequence && u.description === String(c.code * 2 ** 20 + card.ownTurnLock));
 
 // 终场的打断：total 是总数，breakers 是每张提供打断的卡 { code, copies（算进去的张数）, interrupts }，按场上的先后（怪兽区、魔陷区，再手牌）。卡组外的卡（token）不提供打断
 export function countInterrupts(deck, board) {
@@ -50,11 +50,11 @@ export function countInterrupts(deck, board) {
   const usedEffects = board.used ?? [];
   // 1. 能发动的来源：在发动区域里、前提满足、没被自己回合的发动锁住
   const sources = [];
-  for (const [from, zone] of [['field', 'monsters'], ['field', 'spellTraps'], ['hand', 'hand']]) {
-    for (const c of zones[zone]) {
+  for (const [from, boardZone] of [['field', 'monsters'], ['field', 'spellTraps'], ['hand', 'hand']]) {
+    for (const c of zones[boardZone]) {
       const card = deck.cards[c.code];
       if (!card?.interrupts || !(card.from ?? ['field']).includes(from)) continue;
-      if (lockedByOwnTurn(card, c, zone, usedEffects)) continue;
+      if (lockedByOwnTurn(card, c, boardZone, usedEffects)) continue;
       if (meets(deck, card.needs, zones, c)) sources.push({ c, card, zone: from });
     }
   }
