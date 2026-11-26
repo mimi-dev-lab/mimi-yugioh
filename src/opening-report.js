@@ -1,5 +1,6 @@
 // 随机起手模拟的报告（#37）：把 scripts/opening-sim.js 写的 JSONL（每手一行，格式见 src/opening-sim.js 开头）算成统计，再排成 docs/opening-analysis.md。
 // 纯函数：只看传进来的行和卡组数据，不读时间、不读文件；同样的行得到同样的文字（毫秒只在「总耗时」里出现，它来自行里记的 ms）。
+import { blockVariants, blocksSeenIn, coverHand, LOOSE, opInBlocks, opsOf, routesUsing } from './blocks.js';
 import { expand } from './deck.js';
 import { keyCardsIn } from './opening-sim.js';
 import { cardOf } from './deck.js';
@@ -10,6 +11,9 @@ export const CANDIDATE_DETAIL = 5; // 新路线候选里前几个附完整步骤
 export const COMMON_ENDS = 3; // 每组列几种常见终场
 export const BRICK_CARDS = 5; // 卡手里比平时更常出现的卡，列几张
 export const BRICK_MIN_HANDS = 3; // 一张卡在卡手里至少出现这么多手才进上面那个榜
+export const STUCK_ROWS = 8; // 积木拼不出的手，列几个最常停下的步骤
+export const BLOCK_CARDS = 5; // 积木拼不出的手，起手里比拼得出的更常有的卡，列几张
+export const COMMON_CARD_SHARE = 0.1; // 起手里「常见」的卡：占有展开的手的比例至少这么多（结论里列拼得出的手里一手都没有的）
 
 // 之前几版的结果，报告「返工说明」一节按先后列出每一版的说明，分布和这次并排对照。那几份 JSONL 已被重跑的结果替换，数字从它们原样抄在这里
 // （git show <commit>:docs/opening-analysis.jsonl 能重算）。只有总种子、上限、手数都和这次一样的那一版才写。
@@ -43,6 +47,59 @@ function uniqueValue(rows, field) {
   const values = [...new Set(rows.map((r) => r[field]))];
   if (values.length > 1) throw new Error(`行里的 ${field} 不止一个值（${values.sort((a, b) => a - b).join('、')}）：不同参数跑出的行不能混进同一份报告`);
   return values[0];
+}
+
+// 积木覆盖率（票 #48）：每手的最好展开（steps 的操作序列）能不能只用积木拼出来，口径见 src/blocks.js 的 coverHand 和报告「积木覆盖率」一节。
+// 没有展开的手（最好展开里没有发动、召唤、特殊召唤和连锁发动，只有盖放和结束回合）没东西可拼，不算在分母里。
+const EXPANDS = ['activate', 'summon', 'special-summon'];
+const hasExpansion = (steps) => steps.some((s) => s.do.some((op) => typeof op === 'object' && (EXPANDS.includes(op.idle) || op.chain !== undefined)));
+
+function analyzeBlocks(rows, deck, { minLiftHands }) {
+  const variants = blockVariants(deck);
+  const inBlocks = opInBlocks(variants);
+  const withSteps = rows.filter((r) => hasExpansion(r.steps));
+  const strict = withSteps.map((r) => ({ row: r, ...coverHand(r.steps, variants) }));
+  const looseResults = withSteps.map((r) => ({ row: r, ...coverHand(r.steps, variants, LOOSE) }));
+  const looseUncovered = looseResults.filter((x) => !x.covered);
+  const inBlocksLoose = opInBlocks(variants, LOOSE);
+  const seen = withSteps.map((r) => blocksSeenIn(r.steps, variants));
+  const covered = strict.filter((x) => x.covered);
+  const uncovered = strict.filter((x) => !x.covered);
+  const mean = (list) => (list.length ? list.reduce((s, x) => s + x.row.interrupts, 0) / list.length : 0);
+  const usage = deck.blocks.list.map((b) => ({ id: b.id, name: b.name, needs: b.needs, gives: b.gives, routes: routesUsing(deck, b.id).length, hands: covered.filter((x) => x.blocks.some((u) => u.block === b.id)).length, anywhere: seen.filter((set) => set.has(b.id)).length }))
+    .sort((a, b) => b.hands - a.hands); // 稳定排序：一样多的按积木在数据里的先后
+  const stuckBy = new Map();
+  for (const x of uncovered) {
+    const text = x.row.steps[x.stuck.step].text;
+    const entry = stuckBy.get(text) ?? { text, n: 0, known: 0 };
+    entry.n++;
+    if (inBlocks(x.stuck.op)) entry.known++;
+    stuckBy.set(text, entry);
+  }
+  const stuck = [...stuckBy.values()].sort((a, b) => b.n - a.n || (a.text < b.text ? -1 : 1));
+  const share = (list, code) => (list.length ? list.filter((x) => x.row.hand.includes(code)).length / list.length : 0);
+  const cards = [...new Set(expand(deck.main))].flatMap((code) => {
+    const nUncovered = uncovered.filter((x) => x.row.hand.includes(code)).length;
+    const [u, c] = [share(uncovered, code), share(covered, code)];
+    return nUncovered >= Math.max(1, minLiftHands) && u > c ? [{ code, md: cardOf(deck, code).md, nUncovered, nCovered: covered.filter((x) => x.row.hand.includes(code)).length, uncoveredShare: u, coveredShare: c }] : [];
+  }).sort((a, b) => (b.uncoveredShare - b.coveredShare) - (a.uncoveredShare - a.coveredShare) || a.code - b.code).slice(0, BLOCK_CARDS);
+  const handsWith = (list, code) => list.filter((x) => x.row.hand.includes(code)).length;
+  const neverCovered = covered.length ? [...new Set(expand(deck.main))].flatMap((code) => {
+    const hands = handsWith(strict, code);
+    return handsWith(covered, code) === 0 && hands >= COMMON_CARD_SHARE * withSteps.length && hands > 0 ? [{ code, md: cardOf(deck, code).md, hands, share: hands / withSteps.length }] : [];
+  }).sort((a, b) => b.hands - a.hands || a.code - b.code) : [];
+  const mean2 = (list, f) => (list.length ? list.reduce((s, x) => s + f(x), 0) / list.length : 0);
+  return {
+    total: rows.length, noExpansion: rows.length - withSteps.length, withExpansion: withSteps.length,
+    strict: { covered: covered.length }, loose: { covered: looseResults.length - looseUncovered.length }, neverCovered,
+    blockCount: deck.blocks.list.length, variantCount: variants.length, routeCount: deck.routes.length, usage,
+    covered: { n: covered.length, avgInterrupts: mean(covered) },
+    uncovered: {
+      n: uncovered.length, avgInterrupts: mean(uncovered), avgOps: mean2(uncovered, (x) => opsOf(x.row.steps).length), avgDepth: mean2(uncovered, (x) => x.depth),
+      looseN: looseUncovered.length, looseUnknownOp: looseUncovered.filter((x) => !inBlocksLoose(x.stuck.op)).length, stuck: stuck.slice(0, STUCK_ROWS), stuckKinds: stuck.length,
+      unknownOp: uncovered.filter((x) => !inBlocks(x.stuck.op)).length, atFirstStep: uncovered.filter((x) => x.stuck.step === 0).length, cards,
+    },
+  };
 }
 
 export function analyze(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) {
@@ -93,9 +150,11 @@ export function analyze(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) {
     return [{ code, md: md(code), inBricks, inAll, shareBricks, shareAll: inAll / total, ratio: shareBricks / (inAll / total) }];
   }).sort((a, b) => b.ratio - a.ratio || a.code - b.code).slice(0, BRICK_CARDS);
 
+  const blockStats = analyzeBlocks(rows, deck, { minLiftHands });
+
   return {
     total, distribution, brickRate: total ? bricks.length / total : 0, avgInterrupts: mean(rows.map((r) => r.interrupts)), avgHandLeft: mean(rows.map((r) => r.handLeft)),
-    groups, candidates: { better, uncovered }, lift,
+    groups, candidates: { better, uncovered }, lift, blocks: blockStats,
     bricks: { n: bricks.length, withoutKey: bricks.filter((r) => keyOf(r).length === 0).length, noStarter: bricks.filter(noStarter).length, avgHandTraps: mean(bricks.map(handTraps)), overRepresented },
     avgHandTraps: mean(rows.map(handTraps)), noStarterAll: rows.filter(noStarter).length,
     masterSeed: uniqueValue(rows, 'masterSeed'), maxNodes: uniqueValue(rows, 'maxNodes'), cappedCount: rows.filter((r) => r.capped).length, replayBad: rows.filter((r) => r.searchReplayOk === false).length,
@@ -105,6 +164,7 @@ export function analyze(rows, deck, { minLiftHands = MIN_LIFT_HANDS } = {}) {
 
 const pct = (n, d) => `${d ? ((100 * n) / d).toFixed(1) : '0.0'}%`;
 const f2 = (x) => x.toFixed(2);
+const f1 = (x) => x.toFixed(1);
 const signed = (x) => `${x >= 0 ? '+' : ''}${x.toFixed(2)}`;
 const hours = (ms) => (ms / 3600000).toFixed(2);
 
@@ -135,6 +195,7 @@ export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS, priorVe
   // 报告只重新生成、不重跑模拟时，卡组数据里的路线可能已经和 JSONL 记录的不同：列出 id 不在 JSONL 里的路线；同 id 换了步骤的查不出来，只写去哪查
   const added = deck.routes.filter((r) => !simRoutes.includes(r.id));
   if (added.length) line(`- 「已知路线」指跑模拟时卡组数据里的那 ${simRoutes.length} 条（${simRoutes.join('、')}）当时的步骤，数字没有跟着之后的路线改动重算。之后新加的路线（id 不在 JSONL 里）：${added.map((r) => `${r.name}（${r.id}）`).join('、')}；同一个 id 之后换了步骤的，这里看不出来，查 \`src/decks/branded-routes.js\` 的 git 历史。`);
+  line('- 积木覆盖率（票 #48）：拿每手最好展开的引擎操作序列（`steps[].do`），看它能不能切成若干段，每段和某块积木的某个写法一字不差（积木的写法取自路线数据里那块积木对应的几步）；两个口径和结果见「积木覆盖率」一节。');
   line(`- 最好值来源：${Object.entries(s.sources).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([k, n]) => `${k === 'search' ? '搜索' : `路线 ${k}`} ${n} 手`).join('，')}（搜索和路线同值记搜索）。`);
   line();
 
@@ -210,6 +271,56 @@ export function buildReport(rows, deck, { minLiftHands = MIN_LIFT_HANDS, priorVe
       line(`- 卡手里比平时更常出现的卡（在卡手里出现的比例 ÷ 在全部手里出现的比例，至少 ${BRICK_MIN_HANDS} 手卡手里有）：`);
       line();
       table(['卡', '卡手里有它', '占卡手', '占全部手', '倍数'], s.bricks.overRepresented.map((c) => [c.md, c.inBricks, pct(c.inBricks, s.bricks.n), pct(c.inAll, s.total), f2(c.ratio)]));
+    }
+  }
+
+  line('## 积木覆盖率');
+  line();
+  const b = s.blocks;
+  line(`规格 #45、票 #48。${b.blockCount} 块积木（\`src/decks/branded-blocks.js\`）把卡组数据里的 ${b.routeCount} 条已知路线拆成段；每块积木在每条路线里对应的那几步，把它们的引擎操作（每步的 \`do\`）接起来是它的一个写法，同一块积木各条路线写得不同的算不同写法，共 ${b.variantCount} 个写法。这一节回答：只用这几块积木，能拼出多少手的最好展开。`);
+  line();
+  line('口径：');
+  line();
+  line('- 一手的最好展开 = 上面每手 `steps` 里的引擎操作序列（每步的 `do` 接起来；`finish` 不算：搜索走到回合结束就停，不写它）。积木的写法取现在的路线数据，不是跑模拟时的那几条。');
+  line('- 严格口径（下面的主数字）：整个操作序列能切成若干段、首尾相接，每段和某块积木的某个写法一字不差，包括选了哪张卡、放哪一格、什么表示形式；卡号相同、选的卡不同的写法算不同，拼不出。开头的 pass（回合一开始，手牌里的软绵雀精、增殖的Z 这类手坑的连锁窗口选不发动）和结尾的 pass（放行连锁窗口，等于 `finish`）不算。');
+  line('- 放宽口径（另算一个数）：不看放哪一格、表示形式和 pass，选了哪些卡只看选了几张、选第几项也不看；发动、召唤、连锁发动哪张卡、是 / 否仍要对上。');
+  line('- 只有盖放和结束回合的手（最好展开里没有发动、召唤、特殊召唤和连锁发动）没东西可展开，不算在分母里。');
+  line();
+  line(`- ${b.noExpansion} 手最好展开只有盖放和结束回合（没有展开可拼）。`);
+  line(`- 其余 ${b.withExpansion} 手有展开：严格口径下积木拼得出 ${b.strict.covered} 手（${pct(b.strict.covered, b.withExpansion)}）；放宽口径下 ${b.loose.covered} 手（${pct(b.loose.covered, b.withExpansion)}）。`);
+  line(`- 按全部 ${b.total} 手算：严格口径 ${b.strict.covered} 手（${pct(b.strict.covered, b.total)}），放宽口径 ${b.loose.covered} 手（${pct(b.loose.covered, b.total)}）（分母多算了上面没有展开的 ${b.noExpansion} 手，它们本来也不需要积木）。`);
+  line();
+  const u = b.uncovered;
+  const onlyLoose = b.loose.covered - b.strict.covered;
+  line('结论（下面每个数字都能由 JSONL 的步骤重算）：');
+  line();
+  line(`- 只靠这 ${b.blockCount} 块积木现有的写法，能拼出的手的比例${b.loose.covered * 2 < b.withExpansion ? '低' : '不低'}：有展开的 ${b.withExpansion} 手里严格口径 ${pct(b.strict.covered, b.withExpansion)}，放宽口径 ${pct(b.loose.covered, b.withExpansion)}。`);
+  if (u.n) {
+    line(`- 选的卡、放的格子、表示形式不同${onlyLoose * 2 < u.n ? '不是主因' : '是主因'}：放宽口径只多拼出 ${onlyLoose} 手（占严格口径没拼出的 ${u.n} 手的 ${pct(onlyLoose, u.n)}），放宽后仍有 ${u.looseN} 手拼不出，其中 ${u.looseUnknownOp} 手停在积木里没有任何写法含的动作上。`);
+    line(`- 展开只拼上了开头一小段：没拼出的手，最好展开平均 ${f1(u.avgOps)} 个操作，从头平均只拼到第 ${f1(u.avgDepth)} 个；积木一块都没接上（停在第 1 步）的有 ${u.atFirstStep} 手（${pct(u.atFirstStep, u.n)}）。`);
+  }
+  const unused = b.usage.filter((x) => x.hands === 0);
+  const rarest = [...b.usage].sort((x, y) => x.anywhere - y.anywhere).slice(0, 2);
+  line(`- 拼得出的手里一手都没用到的积木：${unused.length ? unused.map((x) => `${x.name}（用在 ${x.routes} 条路线）`).join('、') : '无'}。整段写法出现在最好展开里的手最少的两块：${rarest.map((x) => `${x.name} ${x.anywhere} 手（${pct(x.anywhere, b.withExpansion)}）`).join('、')}。`);
+  if (b.neverCovered.length) line(`- 起手里常见（占有展开的手 ${pct(COMMON_CARD_SHARE * 100, 100)} 以上）、拼得出的手里一手都没有的卡：${b.neverCovered.map((c) => `${c.md}（${c.hands} 手，${pct(c.hands, b.withExpansion)}）`).join('、')}。`);
+  line();
+  line('每块积木在拼得出的手里用到几手（严格口径；同一块在一手里用两次只算一手）、它的某个写法整段出现在几手的最好展开里（连着的一段操作，不要求从头接上）、用在几条路线、要什么 → 给什么：');
+  line();
+  table(['积木', '拼得出的手里用到', '整段出现的手', '用在几条路线', '要什么 → 给什么'], b.usage.map((x) => [x.name, x.hands, x.anywhere, x.routes, `${x.needs} → ${x.gives}`]));
+  line(`没拼出的 ${u.n} 手（有展开、严格口径拼不出）的共同点，全部由 JSONL 的步骤算出：`);
+  line();
+  if (u.n) {
+    line(`- 平均打断数 ${f2(u.avgInterrupts)}，拼得出的手是 ${f2(b.covered.avgInterrupts)}。`);
+    line(`- 从头拼到最远处之后，下一个接不上的操作在第 1 步的有 ${u.atFirstStep} 手（${pct(u.atFirstStep, u.n)}）：一块积木都没接上。`);
+    line(`- 接不上的那个操作，没有任何积木的任何写法含它的有 ${u.unknownOp} 手（${pct(u.unknownOp, u.n)}）：积木没见过这个动作；其余 ${u.n - u.unknownOp} 手停在积木里有、但这里接不上的操作上（选的卡、顺序或前后文不同）。`);
+    line();
+    line(`最常停下的步骤（步骤说明是搜索写的，共 ${u.stuckKinds} 种，列前 ${u.stuck.length} 种）；「积木里有这个操作」指接不上的那个操作在某块积木的某个写法里出现过：`);
+    line();
+    table(['停在的步骤', '手数', '积木里有这个操作'], u.stuck.map((x) => [x.text, x.n, `${x.known} 手`]));
+    if (u.cards.length) {
+      line(`起手里比拼得出的手更常有的卡（至少 ${Math.max(1, minLiftHands)} 手没拼出的手里有它，列前 ${BLOCK_CARDS} 张）：`);
+      line();
+      table(['卡', '没拼出的手里有它', '拼得出的手里有它'], u.cards.map((c) => [c.md, `${pct(c.nUncovered, u.n)}（${c.nUncovered} 手）`, `${pct(c.nCovered, b.covered.n)}（${c.nCovered} 手）`]));
     }
   }
 

@@ -1,5 +1,6 @@
 // 卡组：把 { code, count } 的列表展开成密码数组，并检查卡组数据是否完整、张数是否合规。纯函数，不读文件。
 import { maxCopies } from './banlist.js';
+import { checkBlocks } from './blocks.js';
 import { checkInterruptFields } from './interrupts.js';
 import { checkRoleTags, defaultRoleOf } from './roles.js';
 
@@ -31,6 +32,7 @@ export function checkDeck(deck, { limit = maxCopies, mainSize = 40, extraSize = 
   }
   problems.push(...checkInterruptFields(deck));
   problems.push(...checkRoleTags(deck));
+  problems.push(...checkBlocks(deck));
   for (const code of Object.keys(deck.cards)) if (!counts.has(Number(code))) problems.push(`${deck.cards[code].jp}（${code}）在卡表里但不在卡组里`);
   return problems;
 }
