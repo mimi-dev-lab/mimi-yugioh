@@ -51,7 +51,7 @@ export const opsOf = (steps) => steps.flatMap((s) => s.do).filter((op) => op !==
 const keyOf = (op) => JSON.stringify(op);
 
 // 每块积木的写法：一块积木在每条路线里对应的那几步，把它们的 do 接起来就是一个操作序列；序列一样的写法合并（routes 记它们来自哪几条路线）。
-// 返回 [{ block（积木 id）, ops, keys, routes: [{ id, from, to }] }]
+// 返回 [{ block（积木 id）, ops, routes: [{ id, from, to }] }]
 export function blockVariants(deck) {
   const variants = new Map();
   for (const route of deck.routes) {
@@ -59,7 +59,7 @@ export function blockVariants(deck) {
       const ops = opsOf(route.steps.slice(s.from - 1, s.to));
       const keys = ops.map(keyOf);
       const id = `${s.block}\u0000${keys.join('\u0001')}`;
-      if (!variants.has(id)) variants.set(id, { block: s.block, ops, keys, routes: [] });
+      if (!variants.has(id)) variants.set(id, { block: s.block, ops, routes: [] });
       variants.get(id).routes.push({ id: route.id, from: s.from, to: s.to });
     }
   }
@@ -70,12 +70,15 @@ export function blockVariants(deck) {
 // 从头起，一块接一块，每块的操作序列要和接下来的操作一字不差；开头的 'pass' 不算（回合开始时手坑的连锁窗口，选不发动），
 // 拼完后剩下的只许是 'pass'（放行连锁窗口，等于 finish）。
 // normalize(op) 换掉每个操作用来比较的样子，返回 null 就是这个操作不看（两边都一样处理；默认原样，放宽口径见 LOOSE）。
-// 返回 { covered, depth, blocks }：depth 是从头能拼到的最远处（前几个操作拼上了，拼满时是操作总数），
-// blocks 是拼满时用到的积木写法（按先后，每项 { block, routes }，有几种拼法取先找到的），没拼满是 []。
+// 返回 { covered, depth, blocks, stuck }：depth 是从头能拼到的最远处（前几个操作拼上了，拼满时是操作总数），
+// blocks 是拼满时用到的积木写法（按先后，每项 { block, routes }，有几种拼法取先找到的），没拼满是 []；
+// stuck 是没拼满时停在哪：{ step（第几步，从 0 起）, op（接不上的那个操作，原样）}，拼满是 null。
 // steps 是 JSONL 里一手的 steps；variants 是 blockVariants 的结果
 export function coverHand(steps, variants, { normalize = (op) => op } = {}) {
   const keysOf = (ops) => ops.map(normalize).filter((op) => op !== null).map(keyOf);
-  const keys = keysOf(opsOf(steps));
+  const items = steps.flatMap((s, step) => s.do.filter((op) => op !== 'finish').map((op) => ({ op, step })))
+    .filter(({ op }) => normalize(op) !== null);
+  const keys = items.map(({ op }) => keyOf(normalize(op)));
   const candidates = variants.map((v) => ({ v, keys: keysOf(v.ops) })).filter((c) => c.keys.length);
   const reach = new Array(keys.length + 1).fill(null); // reach[i] = 前 i 个操作拼上了：{ from, v }
   const PASS = keyOf('pass');
@@ -92,10 +95,10 @@ export function coverHand(steps, variants, { normalize = (op) => op } = {}) {
   }
   let end = -1;
   for (let i = keys.length; i >= 0 && end < 0; i--) if (reach[i] && keys.slice(i).every((k) => k === PASS)) end = i;
-  if (end < 0) return { covered: false, depth, blocks: [] };
+  if (end < 0) return { covered: false, depth, blocks: [], stuck: { step: items[depth].step, op: items[depth].op } };
   const blocks = [];
   for (let i = end; reach[i].from >= 0; i = reach[i].from) blocks.unshift({ block: reach[i].v.block, routes: reach[i].v.routes });
-  return { covered: true, depth: keys.length, blocks };
+  return { covered: true, depth: keys.length, blocks, stuck: null };
 }
 
 // 放宽口径：不看放在哪一格、什么表示形式、放行连锁窗口（pass），选了哪些卡只看选了几张、选了第几项也不看，只比发动、召唤、连锁发动、是 / 否这些动作和它们对着哪张卡

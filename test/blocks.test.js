@@ -98,6 +98,7 @@ describe('积木的操作序列：取自路线数据里它对应的那几步', (
     assert.equal(result.covered, false);
     assert.deepEqual(result.blocks, []);
     assert.equal(result.depth, opsOf(hands).length);
+    assert.deepEqual(result.stuck, { step: 2, op: { idle: 'special-summon', code: 78397661 } }); // 第 3 个步骤的第一个操作：停在圣女接力开头，没停在被改的那一步
   });
 
   test('开头的 pass（回合开始时手坑的连锁窗口选不发动）和结尾的 pass（放行连锁窗口）不算；中间多一个 pass 就对不上', () => {

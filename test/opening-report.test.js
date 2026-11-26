@@ -105,6 +105,71 @@ describe('报告的统计：全部由 JSONL 的行算出', () => {
   });
 });
 
+// 积木覆盖率：每手的 steps 是引擎操作序列，用现成路线的步骤编出能手算的几手
+const routeSteps = (id, from, to) => structuredClone(BRANDED.routes.find((r) => r.id === id).steps.slice(from - 1, to).map(({ text, do: ops }) => ({ text, do: ops })));
+const BLOCK_ROWS = (() => {
+  const wrong = routeSteps('white-albaz', 1, 5);
+  wrong[2].do[0] = { idle: 'special-summon', code: 74405783 }; // 同调的不是黑衣龙之艾克利西亚而是三英的相剑师，接不上圣女接力
+  const otherPick = routeSteps('high-spirits-fuwalos', 1, 1);
+  otherPick[0].do = otherPick[0].do.map((op) => (op.pick?.[0] === 51409648 ? { pick: [25451383] } : op));
+  return [
+    row(0, [E, ASH, G, FARA, LOCK], [E], 2, 3, { steps: routeSteps('white-saint', 1, 8) }), // 落胤起跳 + 三英压场 + 收网
+    row(1, [B, SUP, SUP, LOCK, FARA], [B], 2, 3, { steps: routeSteps('branded-fusion', 1, 10) }), // 融合连发 + 结束阶段大回收 + 收网
+    row(2, [ASH, ASH, G, FARA, LOCK], [], 0, 5, { steps: [{ text: '结束回合', do: ['end-turn'] }] }), // 直接结束回合：没有展开
+    row(3, [ASH, SUP, FARA, G, LOCK], [], 1, 4, { steps: [{ text: '盖放 超融合', do: [{ idle: 'spell-set', code: SUP }, { place: 0 }, 'pass'] }, { text: '结束回合', do: ['end-turn'] }] }), // 只盖放：没有展开
+    row(4, [A, ASH, G, SUP, LOCK], [A], 3, 2, { steps: wrong }), // 停在第 3 步（同调黑衣龙之艾克利西亚）：动作对不上，放宽口径也拼不出
+    row(5, [C, ASH, G, FARA, LOCK], [C], 1, 4, { steps: otherPick }), // 严格对不上，放宽拼得出
+    row(6, [A, ASH, G, FARA, LOCK], [A], 3, 2, { steps: [{ text: '发动 灰流丽', do: [{ idle: 'activate', code: ASH }] }, ...routeSteps('white-albaz', 1, 2)] }), // 开头就是没见过的操作
+  ];
+})();
+
+describe('积木覆盖率：只用积木能拼出多少手的最好展开', () => {
+  const { blocks } = analyze(BLOCK_ROWS, BRANDED, { minLiftHands: 1 });
+
+  test('分母去掉没有展开的手（只有盖放和结束回合）；严格口径拼得出 2 手，放宽口径 3 手', () => {
+    assert.equal(blocks.total, 7);
+    assert.equal(blocks.noExpansion, 2);
+    assert.equal(blocks.withExpansion, 5);
+    assert.equal(blocks.strict.covered, 2);
+    assert.equal(blocks.loose.covered, 3);
+    assert.equal(blocks.blockCount, 10);
+    assert.ok(blocks.variantCount >= 10);
+  });
+
+  test('每块积木在多少手的最好展开里用到（拼得出的手，同一块用两次只算一手），先多后少', () => {
+    const used = Object.fromEntries(blocks.usage.map((u) => [u.name, u.hands]));
+    assert.deepEqual(used, { 落胤起跳: 1, 三英压场: 1, 收网: 2, 融合连发: 1, 结束阶段大回收: 1, 气炎换落胤: 0, 圣女接力: 0, 开幕搭桥: 0, 冰剑龙封场: 0, 阿卢绯尔点火: 0 });
+    assert.deepEqual(blocks.usage.map((u) => u.hands), [...blocks.usage.map((u) => u.hands)].sort((a, b) => b - a));
+  });
+
+  test('没拼出的手停在哪一步：按步骤说明合并，写出停下的操作有没有积木含它', () => {
+    assert.equal(blocks.uncovered.n, 3);
+    const by = Object.fromEntries(blocks.uncovered.stuck.map((x) => [x.text, x]));
+    assert.deepEqual(by[BRANDED.routes.find((r) => r.id === 'white-albaz').steps[2].text], { text: BRANDED.routes.find((r) => r.id === 'white-albaz').steps[2].text, n: 1, known: 1 }); // 同调黑衣龙：积木里有这个操作，只是这里接不上
+    assert.deepEqual(by['发动 灰流丽'], { text: '发动 灰流丽', n: 1, known: 0 }); // 没有积木含这个操作
+  });
+
+  test('没拼出的手的共同点：平均打断数、起手里的卡（比拼得出的手更常有的）', () => {
+    assert.equal(blocks.uncovered.avgInterrupts, (3 + 1 + 3) / 3);
+    assert.equal(blocks.covered.avgInterrupts, 2);
+    const ash = blocks.uncovered.cards.find((c) => c.code === ASH);
+    assert.deepEqual([ash.uncoveredShare, ash.coveredShare], [1, 0.5]);
+    assert.deepEqual(blocks.uncovered.cards.map((c) => c.uncoveredShare - c.coveredShare), [...blocks.uncovered.cards.map((c) => c.uncoveredShare - c.coveredShare)].sort((a, b) => b - a));
+  });
+
+  test('报告里有这一节：覆盖率数字、口径、每块积木的用处、没拼出的手的共同点；用的是现在的路线数据', () => {
+    const text = buildReport(BLOCK_ROWS, BRANDED, { minLiftHands: 1 });
+    assert.match(text, /## 积木覆盖率/);
+    assert.match(text, /- 积木覆盖率（票 #48）：拿每手最好展开的引擎操作序列/); // 「怎么跑的」里有口径
+    assert.match(text, /5 手有展开[^\n]*2 手（40\.0%）/);
+    assert.match(text, /放宽口径[^\n]*3 手（60\.0%）/);
+    assert.match(text, /2 手最好展开只有盖放和结束回合/);
+    assert.match(text, /\| 收网 \| 2 \|/);
+    assert.match(text, /没拼出的 3 手/);
+    assert.match(text, /发动 灰流丽/);
+  });
+});
+
 describe('报告文字：同一份 JSONL 同一份报告', () => {
   const text = buildReport(ROWS, BRANDED, { minLiftHands: 1 });
 
